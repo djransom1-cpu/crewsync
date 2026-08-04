@@ -29,10 +29,14 @@ jobs:
     - name: 🛠️ Compile iOS Kotlin Multiplatform Framework (iosArm64)
       run: ./gradlew :composeApp:compileKotlinIosArm64 :composeApp:linkReleaseFrameworkIosArm64
 
-    - name: 📱 Package Direct .ipa iPhone Installer
+    - name: 📱 Assemble Native Crewsync.app & Package .ipa Installer
       run: |
-        mkdir -p build/ipa-packaging/Payload
-        cp -R composeApp/build/bin/iosArm64/releaseFramework/ComposeApp.framework build/ipa-packaging/Payload/Crewsync.app || true
+        mkdir -p build/ipa-packaging/Payload/Crewsync.app/Frameworks
+        cp -R composeApp/build/bin/iosArm64/releaseFramework/ComposeApp.framework build/ipa-packaging/Payload/Crewsync.app/Frameworks/
+        cp iosApp/iosApp/Info.plist build/ipa-packaging/Payload/Crewsync.app/Info.plist
+        cp composeApp/build/bin/iosArm64/releaseFramework/ComposeApp.framework/ComposeApp build/ipa-packaging/Payload/Crewsync.app/Crewsync
+        chmod +x build/ipa-packaging/Payload/Crewsync.app/Crewsync
+        echo -n "APPL????" > build/ipa-packaging/Payload/Crewsync.app/PkgInfo
         cd build/ipa-packaging && zip -r ../../Crewsync-iPhone-Installer.ipa Payload
 
     - name: 🚀 Upload .ipa iPhone Installer Artifact
