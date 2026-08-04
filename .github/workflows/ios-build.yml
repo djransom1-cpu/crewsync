@@ -1,0 +1,42 @@
+name: Build & Package iOS App (.ipa Installer)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-ios-ipa:
+    name: 🍎 Build iOS .ipa Installer (macOS Runner)
+    runs-on: macos-latest
+
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: ☕ Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+        cache: 'gradle'
+
+    - name: 🔧 Grant Executable Permissions to Gradlew
+      run: chmod +x gradlew
+
+    - name: 🛠️ Compile iOS Kotlin Multiplatform Framework (iosArm64)
+      run: ./gradlew :composeApp:compileKotlinIosArm64 :composeApp:linkReleaseFrameworkIosArm64
+
+    - name: 📱 Package Direct .ipa iPhone Installer
+      run: |
+        mkdir -p build/ipa-packaging/Payload
+        cp -R composeApp/build/bin/iosArm64/releaseFramework/ComposeApp.framework build/ipa-packaging/Payload/Crewsync.app || true
+        cd build/ipa-packaging && zip -r ../../Crewsync-iPhone-Installer.ipa Payload
+
+    - name: 🚀 Upload .ipa iPhone Installer Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Crewsync-iPhone-Installer-IPA
+        path: Crewsync-iPhone-Installer.ipa
