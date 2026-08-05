@@ -11,6 +11,8 @@ jobs:
   build-ios-ipa:
     name: 🍎 Build iOS .ipa Installer (macOS Runner)
     runs-on: macos-latest
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6144m"
 
     steps:
     - name: 📥 Checkout Repository
