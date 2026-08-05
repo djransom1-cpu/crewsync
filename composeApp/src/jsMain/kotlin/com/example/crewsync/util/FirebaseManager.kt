@@ -6,7 +6,6 @@ import dev.gitlive.firebase.initialize
 
 actual fun initializeFirebase() {
     try {
-        // Standard Web Handshake for Browsers
         Firebase.initialize(
             options = FirebaseOptions(
                 applicationId = "1:516480819680:web:221b188f2a1a12a2b14b85",
@@ -15,7 +14,7 @@ actual fun initializeFirebase() {
                 storageBucket = "gen-lang-client-0438127279.firebasestorage.app"
             )
         )
-    } catch (e: Exception) {
-        // Ignore if already initialized
+    } catch (_: Throwable) {
+        // Ignore if already initialized or running offline
     }
 }

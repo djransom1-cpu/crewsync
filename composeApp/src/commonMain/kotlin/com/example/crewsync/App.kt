@@ -41,10 +41,9 @@ fun App() {
     LaunchedEffect(Unit) {
         try {
             initializeFirebase()
-            kotlinx.coroutines.delay(300)
+        } catch (_: Throwable) {
+        } finally {
             firebaseState = "ready"
-        } catch (e: Exception) {
-            firebaseState = "error"
         }
     }
 

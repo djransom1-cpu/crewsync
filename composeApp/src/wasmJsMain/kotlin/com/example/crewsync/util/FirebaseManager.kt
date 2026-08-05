@@ -14,7 +14,7 @@ actual fun initializeFirebase() {
                 storageBucket = "gen-lang-client-0438127279.firebasestorage.app"
             )
         )
-    } catch (e: Exception) {
-        // Ignore if already initialized
+    } catch (_: Throwable) {
+        // Ignore if already initialized or running offline
     }
 }
