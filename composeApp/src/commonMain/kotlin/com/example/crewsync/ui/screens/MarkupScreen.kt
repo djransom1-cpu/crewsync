@@ -6,11 +6,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -33,7 +33,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -83,7 +82,7 @@ fun MarkupScreen(
 
     var selectedColor by remember { mutableStateOf(Color.Red) }
     var strokeWidth by remember { mutableStateOf(8f) }
-    var toolMode by remember { mutableStateOf("Pen") } // Pen, Highlight, Arrow, Rect, Cloud, Text, Stamp, Measure, Eraser
+    var toolMode by remember { mutableStateOf("Pen") } // Pen, Highlight, Arrow, Rect, Cloud, Text, Stamp, Measure, Pan, Eraser
     
     var selectedStamp by remember { mutableStateOf("APPROVED") }
     var showStampMenu by remember { mutableStateOf(false) }
@@ -216,6 +215,7 @@ fun MarkupScreen(
                         showStampMenu = true
                     }
                     ToolChip("Measure", toolMode == "Measure", Icons.Default.Info) { toolMode = "Measure" }
+                    ToolChip("Pan", toolMode == "Pan", Icons.Default.Lock) { toolMode = "Pan" }
                     ToolChip("Eraser", toolMode == "Eraser", Icons.Default.Delete) { toolMode = "Eraser" }
 
                     Spacer(modifier = Modifier.width(8.dp))
@@ -259,12 +259,6 @@ fun MarkupScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .background(Color(0xFFDCDCDC))
-                .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        zoomScale = (zoomScale * zoom).coerceIn(1f, 5f)
-                        zoomOffset += pan
-                    }
-                }
         ) {
             if (projectFile == null) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -314,62 +308,69 @@ fun MarkupScreen(
                     Canvas(
                         modifier = Modifier
                             .fillMaxSize()
-                            .pointerInput(toolMode, currentPageIndex, selectedStamp) {
-                                detectDragGestures(
-                                    onDragStart = { offset ->
-                                        if (toolMode == "Text") {
-                                            tempTextPos = offset
-                                            showTextDialog = true
-                                        } else if (toolMode == "Stamp") {
-                                            actions.add(MarkupAction.Stamp(currentPageIndex, selectedStamp, offset))
-                                        } else if (toolMode in listOf("Arrow", "Rect", "Cloud", "Measure")) {
-                                            startOffset = offset
-                                            currentDragOffset = offset
-                                        } else {
-                                            currentPath = Path().apply { moveTo(offset.x, offset.y) }
-                                        }
-                                    },
-                                    onDrag = { change, _ ->
-                                        if (toolMode in listOf("Arrow", "Rect", "Cloud", "Measure")) {
-                                            currentDragOffset = change.position
-                                        } else if (toolMode in listOf("Pen", "Highlight", "Eraser")) {
-                                            currentPath?.lineTo(change.position.x, change.position.y)
-                                            val p = currentPath
-                                            currentPath = null
-                                            currentPath = p
-                                        }
-                                    },
-                                    onDragEnd = {
-                                        if (toolMode in listOf("Arrow", "Rect", "Cloud", "Measure") && startOffset != null && currentDragOffset != null) {
-                                            val s = startOffset!!
-                                            val e = currentDragOffset!!
-                                            when (toolMode) {
-                                                "Arrow" -> actions.add(MarkupAction.Arrow(currentPageIndex, s, e, selectedColor, strokeWidth))
-                                                "Rect" -> actions.add(MarkupAction.Rectangle(currentPageIndex, s, e, selectedColor, strokeWidth))
-                                                "Cloud" -> actions.add(MarkupAction.Cloud(currentPageIndex, s, e, selectedColor, strokeWidth))
-                                                "Measure" -> {
-                                                    val distPx = hypot(e.x - s.x, e.y - s.y).toDouble()
-                                                    val feet = distPx / pixelsPerFoot
-                                                    val ftInt = feet.toInt()
-                                                    val inInt = ((feet - ftInt) * 12.0).roundToInt()
-                                                    val label = "$ftInt'-$inInt\""
-                                                    actions.add(MarkupAction.Dimension(currentPageIndex, s, e, label, selectedColor))
-                                                }
-                                            }
-                                        } else {
-                                            currentPath?.let { path ->
-                                                when (toolMode) {
-                                                    "Eraser" -> actions.add(MarkupAction.Erase(currentPageIndex, path, strokeWidth))
-                                                    "Highlight" -> actions.add(MarkupAction.Highlight(currentPageIndex, path, selectedColor.copy(alpha = 0.4f), strokeWidth * 2.5f))
-                                                    else -> actions.add(MarkupAction.Draw(currentPageIndex, path, selectedColor, strokeWidth))
-                                                }
-                                            }
-                                        }
-                                        currentPath = null
-                                        startOffset = null
-                                        currentDragOffset = null
+                            .pointerInput(toolMode, currentPageIndex, selectedStamp, pixelsPerFoot) {
+                                if (toolMode == "Pan") {
+                                    detectTransformGestures { _, pan, zoom, _ ->
+                                        zoomScale = (zoomScale * zoom).coerceIn(1f, 5f)
+                                        zoomOffset += pan
                                     }
-                                )
+                                } else {
+                                    detectDragGestures(
+                                        onDragStart = { offset ->
+                                            if (toolMode == "Text") {
+                                                tempTextPos = offset
+                                                showTextDialog = true
+                                            } else if (toolMode == "Stamp") {
+                                                actions.add(MarkupAction.Stamp(currentPageIndex, selectedStamp, offset))
+                                            } else if (toolMode in listOf("Arrow", "Rect", "Cloud", "Measure")) {
+                                                startOffset = offset
+                                                currentDragOffset = offset
+                                            } else {
+                                                currentPath = Path().apply { moveTo(offset.x, offset.y) }
+                                            }
+                                        },
+                                        onDrag = { change, _ ->
+                                            if (toolMode in listOf("Arrow", "Rect", "Cloud", "Measure")) {
+                                                currentDragOffset = change.position
+                                            } else if (toolMode in listOf("Pen", "Highlight", "Eraser")) {
+                                                currentPath?.lineTo(change.position.x, change.position.y)
+                                                val p = currentPath
+                                                currentPath = null
+                                                currentPath = p
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            if (toolMode in listOf("Arrow", "Rect", "Cloud", "Measure") && startOffset != null && currentDragOffset != null) {
+                                                val s = startOffset!!
+                                                val e = currentDragOffset!!
+                                                when (toolMode) {
+                                                    "Arrow" -> actions.add(MarkupAction.Arrow(currentPageIndex, s, e, selectedColor, strokeWidth))
+                                                    "Rect" -> actions.add(MarkupAction.Rectangle(currentPageIndex, s, e, selectedColor, strokeWidth))
+                                                    "Cloud" -> actions.add(MarkupAction.Cloud(currentPageIndex, s, e, selectedColor, strokeWidth))
+                                                    "Measure" -> {
+                                                        val distPx = hypot(e.x - s.x, e.y - s.y).toDouble()
+                                                        val feet = distPx / pixelsPerFoot
+                                                        val ftInt = feet.toInt()
+                                                        val inInt = ((feet - ftInt) * 12.0).roundToInt()
+                                                        val label = "$ftInt'-$inInt\""
+                                                        actions.add(MarkupAction.Dimension(currentPageIndex, s, e, label, selectedColor))
+                                                    }
+                                                }
+                                            } else {
+                                                currentPath?.let { path ->
+                                                    when (toolMode) {
+                                                        "Eraser" -> actions.add(MarkupAction.Erase(currentPageIndex, path, strokeWidth))
+                                                        "Highlight" -> actions.add(MarkupAction.Highlight(currentPageIndex, path, selectedColor.copy(alpha = 0.4f), strokeWidth * 2.5f))
+                                                        else -> actions.add(MarkupAction.Draw(currentPageIndex, path, selectedColor, strokeWidth))
+                                                    }
+                                                }
+                                            }
+                                            currentPath = null
+                                            startOffset = null
+                                            currentDragOffset = null
+                                        }
+                                    )
+                                }
                             }
                     ) {
                         // Render Committed Actions for Current Page
