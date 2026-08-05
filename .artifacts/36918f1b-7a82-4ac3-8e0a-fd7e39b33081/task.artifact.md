@@ -1,0 +1,3 @@
+- [x] Disable built-in Kotlin in `gradle.properties`
+- [x] Disable new DSL in `gradle.properties`
+- [x] Verify Gradle sync

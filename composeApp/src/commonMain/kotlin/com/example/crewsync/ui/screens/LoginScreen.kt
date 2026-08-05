@@ -26,7 +26,9 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
     
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var successMessage by remember { mutableStateOf<String?>(null) }
     var isRegistering by remember { mutableStateOf(false) }
+    var showForgotPasswordDialog by remember { mutableStateOf(false) }
     
     val scope = rememberCoroutineScope()
     val auth = Firebase.auth
@@ -90,6 +92,15 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
             Text(
                 text = errorMessage!!,
                 color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        if (successMessage != null) {
+            Text(
+                text = successMessage!!,
+                color = MaterialTheme.colorScheme.primary,
                 style = MaterialTheme.typography.bodySmall
             )
             Spacer(modifier = Modifier.height(16.dp))
@@ -159,6 +170,14 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         }
 
         if (!isRegistering) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = { showForgotPasswordDialog = true }) {
+                    Text("Forgot Password?")
+                }
+            }
             TextButton(onClick = { biometricAuthenticator() }) {
                 Text("Login with Fingerprint")
             }
@@ -174,5 +193,68 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 else "Don't have an account? Sign Up"
             )
         }
+    }
+
+    if (showForgotPasswordDialog) {
+        var resetEmail by remember { mutableStateOf(email) }
+        var isSending by remember { mutableStateOf(false) }
+        var dialogError by remember { mutableStateOf<String?>(null) }
+        
+        AlertDialog(
+            onDismissRequest = { if (!isSending) showForgotPasswordDialog = false },
+            title = { Text("Reset Password") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Enter your email address and we'll send you a link to reset your password.")
+                    
+                    TextField(
+                        value = resetEmail,
+                        onValueChange = { resetEmail = it },
+                        label = { Text("Email Address") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isSending
+                    )
+
+                    if (dialogError != null) {
+                        Text(
+                            text = dialogError!!,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            isSending = true
+                            dialogError = null
+                            try {
+                                auth.sendPasswordResetEmail(resetEmail)
+                                successMessage = "Check your inbox! Reset link sent to $resetEmail"
+                                showForgotPasswordDialog = false
+                            } catch (e: Exception) {
+                                dialogError = e.message ?: "Failed to send reset email"
+                            } finally {
+                                isSending = false
+                            }
+                        }
+                    },
+                    enabled = !isSending && resetEmail.contains("@")
+                ) {
+                    if (isSending) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    else Text("Send Reset Link")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showForgotPasswordDialog = false },
+                    enabled = !isSending
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

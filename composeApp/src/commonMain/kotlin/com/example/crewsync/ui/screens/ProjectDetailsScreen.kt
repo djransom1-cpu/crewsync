@@ -1,9 +1,15 @@
 package com.example.crewsync.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -12,7 +18,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.crewsync.data.model.*
@@ -26,6 +36,7 @@ import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
+import coil3.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -467,6 +478,8 @@ fun FilesTab(
 ) {
     val currentFolders = folders.filter { it.parentFolderId == currentFolderId }
     val currentFiles = files.filter { it.folderId == currentFolderId }
+    var isGalleryView by remember { mutableStateOf(false) }
+    var fullScreenImage by remember { mutableStateOf<ProjectFile?>(null) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -474,7 +487,7 @@ fun FilesTab(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                 if (currentFolderId != null) {
                     IconButton(onClick = { 
                         val parent = folders.find { it.id == currentFolderId }?.parentFolderId
@@ -485,20 +498,28 @@ fun FilesTab(
                 }
                 Text(
                     text = if (currentFolderId == null) "Project Files" else folders.find { it.id == currentFolderId }?.name ?: "Folder",
-                    style = MaterialTheme.typography.titleMedium
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             
-            if (isLeader) {
-                Row {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { isGalleryView = !isGalleryView }) {
+                    Icon(
+                        if (isGalleryView) Icons.AutoMirrored.Filled.List else Icons.Default.Menu, 
+                        contentDescription = "Toggle View"
+                    )
+                }
+                if (isLeader) {
                     if (isUploading) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp))
                     } else {
                         IconButton(onClick = onAddFolder) {
-                            Icon(Icons.Default.AddCircle, contentDescription = "New Folder")
+                            Icon(Icons.Default.Add, contentDescription = "New Folder")
                         }
                         IconButton(onClick = onTakeCamera) {
-                            Icon(Icons.Default.Edit, contentDescription = "Camera")
+                            Icon(Icons.Default.Info, contentDescription = "Camera")
                         }
                         IconButton(onClick = onUpload) {
                             Icon(Icons.Default.Add, contentDescription = "Upload File")
@@ -507,46 +528,180 @@ fun FilesTab(
                 }
             }
         }
-        LazyColumn {
-            items(currentFolders) { folder ->
-                ListItem(
-                    headlineContent = { Text(folder.name, fontWeight = FontWeight.Bold) },
-                    leadingContent = { Icon(Icons.Default.Build, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                    modifier = Modifier.clickable { onFolderClick(folder.id) }
-                )
-            }
-            
-            if (currentFiles.isEmpty() && currentFolders.isEmpty()) {
-                item { Text("No items in this folder.", modifier = Modifier.padding(16.dp)) }
-            } else {
+
+        if (isGalleryView) {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 120.dp),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(currentFolders) { folder ->
+                    Card(
+                        modifier = Modifier.aspectRatio(1f),
+                        onClick = { onFolderClick(folder.id) }
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(Icons.Default.Build, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                            Text(folder.name, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+                        }
+                    }
+                }
                 items(currentFiles) { file ->
+                    val isImage = file.name.lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".png") }
+                    Card(
+                        modifier = Modifier.aspectRatio(1f),
+                        onClick = { 
+                            if (isImage) fullScreenImage = file
+                            else openUrl(file.url)
+                        }
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            if (isImage) {
+                                AsyncImage(
+                                    model = file.url,
+                                    contentDescription = file.name,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Column(
+                                    modifier = Modifier.fillMaxSize().padding(8.dp),
+                                    verticalArrangement = Arrangement.Center,
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(
+                                        if (file.name.lowercase().endsWith(".pdf")) Icons.Default.Info else Icons.Default.DateRange,
+                                        null,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                    Text(file.name, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                            
+                            IconButton(
+                                onClick = { onMarkupClick(file.url, file.name, file.id) },
+                                modifier = Modifier.align(Alignment.TopEnd).size(32.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape).padding(4.dp)
+                            ) {
+                                Icon(Icons.Default.Edit, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            LazyColumn {
+                items(currentFolders) { folder ->
                     ListItem(
-                        headlineContent = { Text(file.name) },
-                        supportingContent = { Text("By ${file.uploadedBy}") },
-                        leadingContent = { Icon(Icons.Default.Info, contentDescription = null) },
-                        trailingContent = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                TextButton(onClick = { onMarkupClick(file.url, file.name, file.id) }) {
-                                    Text("Markup")
+                        headlineContent = { Text(folder.name, fontWeight = FontWeight.Bold) },
+                        leadingContent = { Icon(Icons.Default.Build, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        modifier = Modifier.clickable { onFolderClick(folder.id) }
+                    )
+                }
+                
+                if (currentFiles.isEmpty() && currentFolders.isEmpty()) {
+                    item { Text("No items in this folder.", modifier = Modifier.padding(16.dp)) }
+                } else {
+                    items(currentFiles) { file ->
+                        ListItem(
+                            headlineContent = { Text(file.name) },
+                            supportingContent = { Text("By ${file.uploadedBy}") },
+                            leadingContent = { 
+                                val isImage = file.name.lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".png") }
+                                if (isImage) {
+                                    AsyncImage(
+                                        model = file.url,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(4.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Icon(Icons.Default.Info, contentDescription = null)
                                 }
-                                TextButton(onClick = { openUrl(file.url) }) {
-                                    Text("Open")
-                                }
-                                if (isLeader) {
-                                    IconButton(onClick = { onDeleteClick(file) }) {
-                                        Icon(
-                                            Icons.Default.Delete, 
-                                            contentDescription = "Delete", 
-                                            tint = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.size(20.dp)
-                                        )
+                            },
+                            trailingContent = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = { onMarkupClick(file.url, file.name, file.id) }) {
+                                        Text("Markup")
+                                    }
+                                    TextButton(onClick = { 
+                                        val isImage = file.name.lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".png") }
+                                        if (isImage) fullScreenImage = file
+                                        else openUrl(file.url)
+                                    }) {
+                                        Text("Open")
+                                    }
+                                    if (isLeader) {
+                                        IconButton(onClick = { onDeleteClick(file) }) {
+                                            Icon(
+                                                Icons.Default.Delete, 
+                                                contentDescription = "Delete", 
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
+        }
+    }
+
+    if (fullScreenImage != null) {
+        FullScreenImageDialog(
+            file = fullScreenImage!!,
+            onDismiss = { fullScreenImage = null },
+            onMarkup = { 
+                onMarkupClick(fullScreenImage!!.url, fullScreenImage!!.name, fullScreenImage!!.id)
+                fullScreenImage = null
+            }
+        )
+    }
+}
+
+@Composable
+fun FullScreenImageDialog(file: ProjectFile, onDismiss: () -> Unit, onMarkup: () -> Unit) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            AsyncImage(
+                model = file.url,
+                contentDescription = file.name,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit
+            )
+            
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopStart),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onDismiss, modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), CircleShape)) {
+                    Icon(Icons.Default.Close, null, tint = Color.White)
+                }
+                Button(onClick = onMarkup) {
+                    Icon(Icons.Default.Edit, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Markup")
+                }
+            }
+            
+            Text(
+                text = file.name,
+                color = Color.White,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp),
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
     }
 }

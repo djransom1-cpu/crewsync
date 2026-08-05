@@ -2,7 +2,7 @@
 agp = "9.3.1"
 kotlin = "2.1.0"
 compose-multiplatform = "1.7.3"
-firebase-kotlin-sdk = "2.5.0"
+firebase-kotlin-sdk = "2.1.0"
 firebase-bom = "34.17.0"
 google-services = "4.5.0"
 kotlinx-serialization = "1.7.3"

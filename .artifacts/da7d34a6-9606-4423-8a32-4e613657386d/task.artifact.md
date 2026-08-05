@@ -1,0 +1,39 @@
+- [x] Update `libs.versions.toml` with `firebase-bom` and latest `firebase-kotlin-sdk` version
+- [x] Add Firebase BoM to `composeApp/build.gradle.kts`
+- [x] Run Gradle Sync
+- [x] Verify build with `:composeApp:assembleDebug`
+- [x] Replace placeholder `google-services.json` with real content
+- [x] Add `libs.material` to `composeApp/build.gradle.kts`
+- [x] Update `compileSdk` to 37
+- [x] Rename project to "Crewsync" in `settings.gradle.kts`
+- [x] Update JVM target to 17
+- [x] Create `DashboardScreen.kt`
+- [x] Implement real Firebase Auth in `LoginScreen.kt`
+- [x] Connect navigation to Dashboard in `App.kt`
+- [x] Create `ProjectDetailsScreen.kt`
+- [x] Implement "Add Team Member" feature
+- [x] Navigate from Dashboard cards to Project Details
+- [x] Implement Project Files (Upload/Download)
+- [x] Integrate Firebase Storage for document management
+- [x] Implement "Remember Me" with DataStore
+- [x] Add Biometric (Fingerprint) login support
+- [x] Configure Autofill for login fields
+- [x] Implement Project Chat (In-App Messaging)
+- [x] Add Tabs to Project Details (General, Team, Files, Chat)
+- [x] Implement real-time message syncing with Firestore
+- [x] Implement Direct Messaging (One-on-One Chat)
+- [x] Add File Attachments to chat messages
+- [x] Enforce Team Leader permissions for project modification
+- [x] Create `Contact.kt` model
+- [x] Implement `ContactsScreen` with Company and Subcontractor tabs
+- [x] Add Contacts tab to bottom navigation
+- [x] Update `AddMemberDialog` to allow picking from Master Contacts list
+- [x] Implement "Import from Phone" feature for Master Contacts
+- [x] Add `READ_CONTACTS` permission and native contact picker logic
+- [x] Create `User.kt` profile model
+- [x] Implement Global Role System (Admin vs. Member)
+- [x] Restricted Project & Contact creation to Admins
+- [x] Enforced Project visibility (Members only see assigned projects)
+- [x] Expand Kanban statuses (Not Started, Started, In Progress, Paused, Done)
+- [x] Implement Task Details dialog with Checklists and Attachments
+- [x] Support multiple attachments per task card

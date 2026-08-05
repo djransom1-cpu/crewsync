@@ -43,6 +43,10 @@ fun ProfileScreen() {
     var isLoading by remember { mutableStateOf(true) }
     var isUploading by remember { mutableStateOf(false) }
 
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var showPasswordChange by remember { mutableStateOf(false) }
+
     val imagePicker = rememberFilePickerLauncher { pickedFile ->
         scope.launch {
             isUploading = true
@@ -221,6 +225,71 @@ fun ProfileScreen() {
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("e.g. Lead Carpenter") }
                 )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                
+                if (!showPasswordChange) {
+                    TextButton(onClick = { showPasswordChange = true }) {
+                        Text("Change Password")
+                    }
+                } else {
+                    Text("Change Password", style = MaterialTheme.typography.titleMedium)
+                    TextField(
+                        value = newPassword,
+                        onValueChange = { newPassword = it },
+                        label = { Text("New Password") },
+                        modifier = Modifier.fillMaxWidth(),
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
+                    )
+                    TextField(
+                        value = confirmPassword,
+                        onValueChange = { confirmPassword = it },
+                        label = { Text("Confirm New Password") },
+                        modifier = Modifier.fillMaxWidth(),
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                if (newPassword.length < 6) {
+                                    scope.launch { snackbarHostState.showSnackbar("Password must be at least 6 characters") }
+                                    return@Button
+                                }
+                                if (newPassword != confirmPassword) {
+                                    scope.launch { snackbarHostState.showSnackbar("Passwords do not match") }
+                                    return@Button
+                                }
+                                scope.launch {
+                                    try {
+                                        auth.currentUser?.updatePassword(newPassword)
+                                        snackbarHostState.showSnackbar("Password updated successfully!")
+                                        newPassword = ""
+                                        confirmPassword = ""
+                                        showPasswordChange = false
+                                    } catch (e: Exception) {
+                                        val msg = if (e.message?.contains("recent login") == true) {
+                                            "For security, please log out and log back in to change your password."
+                                        } else {
+                                            e.message ?: "Failed to update password"
+                                        }
+                                        snackbarHostState.showSnackbar(msg)
+                                    }
+                                }
+                            },
+                            enabled = newPassword.isNotEmpty() && confirmPassword.isNotEmpty()
+                        ) {
+                            Text("Update Password")
+                        }
+                        TextButton(onClick = { 
+                            showPasswordChange = false 
+                            newPassword = ""
+                            confirmPassword = ""
+                        }) {
+                            Text("Cancel")
+                        }
+                    }
+                }
             }
         }
     }
