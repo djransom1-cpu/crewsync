@@ -26,8 +26,8 @@ jobs:
     - name: 🔧 Grant Executable Permissions to Gradlew
       run: chmod +x gradlew
 
-    - name: 🛠️ Compile iOS Kotlin Multiplatform Framework (iosArm64)
-      run: ./gradlew :composeApp:compileKotlinIosArm64 :composeApp:linkReleaseFrameworkIosArm64
+    - name: 🛠️ Compile iOS Framework (iosArm64)
+      run: ./gradlew :composeApp:linkReleaseFrameworkIosArm64
 
     - name: 📱 Assemble Native Crewsync.app & Package .ipa Installer
       run: |
