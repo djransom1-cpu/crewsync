@@ -415,7 +415,7 @@ fun MarkupScreen(
                         }
                     }
 
-                    // Render Text Notes & Stamps Overlay
+                    // Render Text Notes, Stamps, and Dimension Badges Overlay
                     val density = LocalDensity.current
                     actions.filter { it.pageIndex == currentPageIndex }.forEach { action ->
                         when (action) {
@@ -448,7 +448,43 @@ fun MarkupScreen(
                                     Text(text, color = bg, fontSize = 16.sp, fontWeight = FontWeight.Black)
                                 }
                             }
+                            is MarkupAction.Dimension -> {
+                                val midX = (action.start.x + action.end.x) / 2f
+                                val midY = (action.start.y + action.end.y) / 2f
+                                Box(
+                                    modifier = Modifier
+                                        .offset(x = with(density) { midX.toDp() - 24.dp }, y = with(density) { midY.toDp() - 14.dp })
+                                        .background(Color.Yellow, RoundedCornerShape(4.dp))
+                                        .border(1.5.dp, Color.Black, RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(action.distanceStr, color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                                }
+                            }
                             else -> {}
+                        }
+                    }
+
+                    // Live Drag Preview Badge for Measure Tool
+                    if (toolMode == "Measure" && startOffset != null && currentDragOffset != null) {
+                        val s = startOffset!!
+                        val e = currentDragOffset!!
+                        val midX = (s.x + e.x) / 2f
+                        val midY = (s.y + e.y) / 2f
+                        val distPx = hypot(e.x - s.x, e.y - s.y).toDouble()
+                        val feet = distPx / pixelsPerFoot
+                        val ftInt = feet.toInt()
+                        val inInt = ((feet - ftInt) * 12.0).roundToInt()
+                        val liveText = "$ftInt'-$inInt\""
+
+                        Box(
+                            modifier = Modifier
+                                .offset(x = with(density) { midX.toDp() - 24.dp }, y = with(density) { midY.toDp() - 14.dp })
+                                .background(Color.Yellow, RoundedCornerShape(4.dp))
+                                .border(1.5.dp, Color.Black, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(liveText, color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Black)
                         }
                     }
                 }
