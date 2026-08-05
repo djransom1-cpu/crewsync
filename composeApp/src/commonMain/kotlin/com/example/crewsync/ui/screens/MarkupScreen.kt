@@ -7,8 +7,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -21,6 +23,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -43,12 +47,19 @@ import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
+import kotlin.math.*
 
 sealed class MarkupAction {
     abstract val pageIndex: Int
     data class Draw(override val pageIndex: Int, val path: Path, val color: Color, val strokeWidth: Float) : MarkupAction()
+    data class Highlight(override val pageIndex: Int, val path: Path, val color: Color, val strokeWidth: Float) : MarkupAction()
     data class Erase(override val pageIndex: Int, val path: Path, val strokeWidth: Float) : MarkupAction()
-    data class Text(override val pageIndex: Int, val text: String, val position: Offset, val color: Color, val size: Float) : MarkupAction()
+    data class Arrow(override val pageIndex: Int, val start: Offset, val end: Offset, val color: Color, val strokeWidth: Float) : MarkupAction()
+    data class Rectangle(override val pageIndex: Int, val start: Offset, val end: Offset, val color: Color, val strokeWidth: Float) : MarkupAction()
+    data class Cloud(override val pageIndex: Int, val start: Offset, val end: Offset, val color: Color, val strokeWidth: Float) : MarkupAction()
+    data class TextNote(override val pageIndex: Int, val text: String, val position: Offset, val color: Color, val size: Float) : MarkupAction()
+    data class Stamp(override val pageIndex: Int, val stampType: String, val position: Offset) : MarkupAction()
+    data class Dimension(override val pageIndex: Int, val start: Offset, val end: Offset, val distanceStr: String, val color: Color) : MarkupAction()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,25 +78,36 @@ fun MarkupScreen(
     
     var projectFile by remember { mutableStateOf<ProjectFile?>(null) }
     var currentPath by remember { mutableStateOf<Path?>(null) }
+    var startOffset by remember { mutableStateOf<Offset?>(null) }
+    var currentDragOffset by remember { mutableStateOf<Offset?>(null) }
+
     var selectedColor by remember { mutableStateOf(Color.Red) }
-    var strokeWidth by remember { mutableStateOf(10f) }
-    var toolMode by remember { mutableStateOf("Pen") } 
+    var strokeWidth by remember { mutableStateOf(8f) }
+    var toolMode by remember { mutableStateOf("Pen") } // Pen, Highlight, Arrow, Rect, Cloud, Text, Stamp, Measure, Eraser
     
+    var selectedStamp by remember { mutableStateOf("APPROVED") }
+    var showStampMenu by remember { mutableStateOf(false) }
     var showTextDialog by remember { mutableStateOf(false) }
+    var showScaleDialog by remember { mutableStateOf(false) }
     var tempTextPos by remember { mutableStateOf(Offset.Zero) }
     var isSaving by remember { mutableStateOf(false) }
 
-    // Multi-page Support
+    // Page Rotation, Zoom, & Scale
     var currentPageIndex by remember { mutableStateOf(0) }
+    var rotationDegrees by remember { mutableStateOf(0f) }
     var zoomScale by remember { mutableStateOf(1f) }
     var zoomOffset by remember { mutableStateOf(Offset.Zero) }
+
+    // Calibration: Pixels per Foot (Default 40.0 px = 1 ft)
+    var pixelsPerFoot by remember { mutableStateOf(40.0) }
+    var scalePresetName by remember { mutableStateOf("1/4\" = 1'-0\"") }
 
     LaunchedEffect(fileId) {
         firestore.collection("projects").document(projectId).collection("files").document(fileId).snapshots.collect { snap ->
             if (snap.exists) {
                 try {
                     projectFile = snap.data<ProjectFile>()
-                } catch (e: Exception) {}
+                } catch (_: Exception) {}
             }
         }
     }
@@ -101,10 +123,11 @@ fun MarkupScreen(
             TopAppBar(
                 title = { 
                     Column {
-                        Text(projectFile?.name ?: "Loading...", style = MaterialTheme.typography.titleMedium)
-                        if (isPdf && pdfRenderer != null) {
-                            Text("Page ${currentPageIndex + 1} of ${pdfRenderer.pageCount}", style = MaterialTheme.typography.labelSmall)
-                        }
+                        Text(projectFile?.name ?: "Blueprint Studio", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            if (isPdf && pdfRenderer != null) "Page ${currentPageIndex + 1}/${pdfRenderer.pageCount} | Scale: $scalePresetName" else "Scale: $scalePresetName",
+                            style = MaterialTheme.typography.labelSmall
+                        )
                     }
                 },
                 navigationIcon = {
@@ -113,6 +136,15 @@ fun MarkupScreen(
                     }
                 },
                 actions = {
+                    // Rotate Document
+                    IconButton(onClick = { rotationDegrees = (rotationDegrees + 90f) % 360f }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Rotate 90°")
+                    }
+                    // Calibration Scale Button
+                    IconButton(onClick = { showScaleDialog = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Scale")
+                    }
+                    // Undo Button
                     IconButton(onClick = { 
                         val lastOnPage = actions.findLast { it.pageIndex == currentPageIndex }
                         if (lastOnPage != null) actions.remove(lastOnPage)
@@ -120,60 +152,80 @@ fun MarkupScreen(
                         Icon(Icons.Default.Build, contentDescription = "Undo")
                     }
                     TextButton(onClick = { actions.removeAll { it.pageIndex == currentPageIndex } }) {
-                        Text("Clear Page", color = MaterialTheme.colorScheme.error)
+                        Text("Clear", color = MaterialTheme.colorScheme.error)
                     }
                 }
             )
         },
         bottomBar = {
             Column(modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
-                // Page Navigation for PDFs
+                // PDF Multi-Page Controls
                 if (isPdf && pdfRenderer != null && pdfRenderer.pageCount > 1) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(onClick = { if (currentPageIndex > 0) currentPageIndex-- }, enabled = currentPageIndex > 0) {
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Prev Page")
                         }
-                        Text("Blueprint Page Selector", style = MaterialTheme.typography.labelMedium)
+                        Text("Page ${currentPageIndex + 1} of ${pdfRenderer.pageCount}", style = MaterialTheme.typography.labelMedium)
                         IconButton(onClick = { if (currentPageIndex < pdfRenderer.pageCount - 1) currentPageIndex++ }, enabled = currentPageIndex < pdfRenderer.pageCount - 1) {
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next Page")
                         }
                     }
                 }
 
-                Row(modifier = Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(20.dp))
+                // Tool Options Row (Stroke Thickness & Zoom controls)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Size:", style = MaterialTheme.typography.labelSmall)
                     Slider(
                         value = strokeWidth,
                         onValueChange = { strokeWidth = it },
-                        valueRange = 2f..50f,
-                        modifier = Modifier.weight(1f).padding(horizontal = 16.dp)
+                        valueRange = 2f..40f,
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
                     )
-                    IconButton(onClick = { zoomScale = 1f; zoomOffset = Offset.Zero }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Reset Zoom")
+                    IconButton(onClick = { zoomScale = (zoomScale * 1.25f).coerceAtMost(5f) }) {
+                        Icon(Icons.Default.Add, contentDescription = "Zoom In")
+                    }
+                    IconButton(onClick = { zoomScale = (zoomScale / 1.25f).coerceAtLeast(1f) }) {
+                        Icon(Icons.Default.Menu, contentDescription = "Zoom Out")
+                    }
+                    IconButton(onClick = { zoomScale = 1f; zoomOffset = Offset.Zero; rotationDegrees = 0f }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Reset View")
                     }
                 }
-                
-                BottomAppBar {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        IconButton(onClick = { toolMode = "Pen" }) {
-                            Icon(Icons.Default.Build, contentDescription = "Pen", tint = if (toolMode == "Pen") MaterialTheme.colorScheme.primary else LocalContentColor.current)
-                        }
-                        IconButton(onClick = { toolMode = "Eraser" }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Eraser", tint = if (toolMode == "Eraser") MaterialTheme.colorScheme.primary else LocalContentColor.current)
-                        }
-                        IconButton(onClick = { toolMode = "Text" }) {
-                            Icon(Icons.Default.Add, contentDescription = "Text", tint = if (toolMode == "Text") MaterialTheme.colorScheme.primary else LocalContentColor.current)
-                        }
-                        VerticalDivider()
-                        ColorButton(Color.Red, selectedColor) { selectedColor = Color.Red }
-                        ColorButton(Color.Yellow, selectedColor) { selectedColor = Color.Yellow }
-                        ColorButton(Color.Green, selectedColor) { selectedColor = Color.Green }
-                        ColorButton(Color.Blue, selectedColor) { selectedColor = Color.Blue }
+
+                // Primary Architectural Tools Bar
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    ToolChip("Pen", toolMode == "Pen", Icons.Default.Edit) { toolMode = "Pen" }
+                    ToolChip("Highlight", toolMode == "Highlight", Icons.Default.Star) { toolMode = "Highlight" }
+                    ToolChip("Arrow", toolMode == "Arrow", Icons.Default.PlayArrow) { toolMode = "Arrow" }
+                    ToolChip("Rect", toolMode == "Rect", Icons.Default.Place) { toolMode = "Rect" }
+                    ToolChip("Cloud", toolMode == "Cloud", Icons.Default.AccountBox) { toolMode = "Cloud" }
+                    ToolChip("Text", toolMode == "Text", Icons.Default.Add) { toolMode = "Text" }
+                    ToolChip("Stamp", toolMode == "Stamp", Icons.Default.CheckCircle) { 
+                        toolMode = "Stamp"
+                        showStampMenu = true
                     }
+                    ToolChip("Measure", toolMode == "Measure", Icons.Default.Info) { toolMode = "Measure" }
+                    ToolChip("Eraser", toolMode == "Eraser", Icons.Default.Delete) { toolMode = "Eraser" }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    ColorButton(Color.Red, selectedColor) { selectedColor = Color.Red }
+                    ColorButton(Color.Yellow, selectedColor) { selectedColor = Color.Yellow }
+                    ColorButton(Color.Green, selectedColor) { selectedColor = Color.Green }
+                    ColorButton(Color.Cyan, selectedColor) { selectedColor = Color.Cyan }
+                    ColorButton(Color.Magenta, selectedColor) { selectedColor = Color.Magenta }
+                    ColorButton(Color.Black, selectedColor) { selectedColor = Color.Black }
                 }
             }
         },
@@ -191,14 +243,14 @@ fun MarkupScreen(
                         )
                         firestore.collection("projects").document(projectId).collection("files").add(markupFile)
                         onSaveSuccess()
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                     } finally {
                         isSaving = false
                     }
                 }
             }) {
                 if (isSaving) CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                else Icon(Icons.Default.Check, contentDescription = "Save")
+                else Icon(Icons.Default.Check, contentDescription = "Save Plan")
             }
         }
     ) { padding ->
@@ -206,9 +258,8 @@ fun MarkupScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .background(Color(0xFFEEEEEE)) // Light grey background for better blueprint contrast
+                .background(Color(0xFFDCDCDC))
                 .pointerInput(Unit) {
-                    // Zoom & Pan detection
                     detectTransformGestures { _, pan, zoom, _ ->
                         zoomScale = (zoomScale * zoom).coerceIn(1f, 5f)
                         zoomOffset += pan
@@ -225,7 +276,8 @@ fun MarkupScreen(
                             scaleX = zoomScale,
                             scaleY = zoomScale,
                             translationX = zoomOffset.x,
-                            translationY = zoomOffset.y
+                            translationY = zoomOffset.y,
+                            rotationZ = rotationDegrees
                         )
                         .drawWithContent {
                             graphicsLayer.record {
@@ -234,6 +286,7 @@ fun MarkupScreen(
                             drawLayer(graphicsLayer)
                         }
                 ) {
+                    // Blueprint Background Layer
                     if (isPdf) {
                         if (currentPdfPage != null) {
                             Image(
@@ -257,21 +310,29 @@ fun MarkupScreen(
                         )
                     }
 
+                    // Interactive Drawing & Annotation Canvas Layer
                     Canvas(
                         modifier = Modifier
                             .fillMaxSize()
-                            .pointerInput(toolMode, currentPageIndex) {
+                            .pointerInput(toolMode, currentPageIndex, selectedStamp) {
                                 detectDragGestures(
                                     onDragStart = { offset ->
                                         if (toolMode == "Text") {
                                             tempTextPos = offset
                                             showTextDialog = true
+                                        } else if (toolMode == "Stamp") {
+                                            actions.add(MarkupAction.Stamp(currentPageIndex, selectedStamp, offset))
+                                        } else if (toolMode in listOf("Arrow", "Rect", "Cloud", "Measure")) {
+                                            startOffset = offset
+                                            currentDragOffset = offset
                                         } else {
                                             currentPath = Path().apply { moveTo(offset.x, offset.y) }
                                         }
                                     },
                                     onDrag = { change, _ ->
-                                        if (toolMode != "Text") {
+                                        if (toolMode in listOf("Arrow", "Rect", "Cloud", "Measure")) {
+                                            currentDragOffset = change.position
+                                        } else if (toolMode in listOf("Pen", "Highlight", "Eraser")) {
                                             currentPath?.lineTo(change.position.x, change.position.y)
                                             val p = currentPath
                                             currentPath = null
@@ -279,92 +340,241 @@ fun MarkupScreen(
                                         }
                                     },
                                     onDragEnd = {
-                                        currentPath?.let {
-                                            if (toolMode == "Eraser") {
-                                                actions.add(MarkupAction.Erase(currentPageIndex, it, strokeWidth))
-                                            } else {
-                                                actions.add(MarkupAction.Draw(currentPageIndex, it, selectedColor, strokeWidth))
+                                        if (toolMode in listOf("Arrow", "Rect", "Cloud", "Measure") && startOffset != null && currentDragOffset != null) {
+                                            val s = startOffset!!
+                                            val e = currentDragOffset!!
+                                            when (toolMode) {
+                                                "Arrow" -> actions.add(MarkupAction.Arrow(currentPageIndex, s, e, selectedColor, strokeWidth))
+                                                "Rect" -> actions.add(MarkupAction.Rectangle(currentPageIndex, s, e, selectedColor, strokeWidth))
+                                                "Cloud" -> actions.add(MarkupAction.Cloud(currentPageIndex, s, e, selectedColor, strokeWidth))
+                                                "Measure" -> {
+                                                    val distPx = hypot(e.x - s.x, e.y - s.y).toDouble()
+                                                    val feet = distPx / pixelsPerFoot
+                                                    val ftInt = feet.toInt()
+                                                    val inInt = ((feet - ftInt) * 12.0).roundToInt()
+                                                    val label = "$ftInt'-$inInt\""
+                                                    actions.add(MarkupAction.Dimension(currentPageIndex, s, e, label, selectedColor))
+                                                }
+                                            }
+                                        } else {
+                                            currentPath?.let { path ->
+                                                when (toolMode) {
+                                                    "Eraser" -> actions.add(MarkupAction.Erase(currentPageIndex, path, strokeWidth))
+                                                    "Highlight" -> actions.add(MarkupAction.Highlight(currentPageIndex, path, selectedColor.copy(alpha = 0.4f), strokeWidth * 2.5f))
+                                                    else -> actions.add(MarkupAction.Draw(currentPageIndex, path, selectedColor, strokeWidth))
+                                                }
                                             }
                                         }
                                         currentPath = null
+                                        startOffset = null
+                                        currentDragOffset = null
                                     }
                                 )
                             }
                     ) {
+                        // Render Committed Actions for Current Page
                         actions.filter { it.pageIndex == currentPageIndex }.forEach { action ->
                             when (action) {
-                                is MarkupAction.Draw -> drawPath(
-                                    path = action.path,
-                                    color = action.color,
-                                    style = Stroke(width = action.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                                )
-                                is MarkupAction.Erase -> drawPath(
-                                    path = action.path,
-                                    color = Color(0xFFEEEEEE), 
-                                    style = Stroke(width = action.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                                )
+                                is MarkupAction.Draw -> drawPath(action.path, action.color, style = Stroke(width = action.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                                is MarkupAction.Highlight -> drawPath(action.path, action.color, style = Stroke(width = action.strokeWidth, cap = StrokeCap.Square, join = StrokeJoin.Bevel))
+                                is MarkupAction.Erase -> drawPath(action.path, Color(0xFFDCDCDC), style = Stroke(width = action.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
+                                is MarkupAction.Arrow -> drawArrow(action.start, action.end, action.color, action.strokeWidth)
+                                is MarkupAction.Rectangle -> drawRect(action.color, action.start, Size(action.end.x - action.start.x, action.end.y - action.start.y), style = Stroke(action.strokeWidth))
+                                is MarkupAction.Cloud -> drawRevisionCloud(action.start, action.end, action.color, action.strokeWidth)
+                                is MarkupAction.Dimension -> drawDimensionLine(action.start, action.end, action.distanceStr, action.color)
                                 else -> {}
                             }
                         }
-                        
+
+                        // Render Active Drag Preview
+                        if (startOffset != null && currentDragOffset != null) {
+                            val s = startOffset!!
+                            val e = currentDragOffset!!
+                            when (toolMode) {
+                                "Arrow" -> drawArrow(s, e, selectedColor, strokeWidth)
+                                "Rect" -> drawRect(selectedColor, s, Size(e.x - s.x, e.y - s.y), style = Stroke(strokeWidth))
+                                "Cloud" -> drawRevisionCloud(s, e, selectedColor, strokeWidth)
+                                "Measure" -> {
+                                    val distPx = hypot(e.x - s.x, e.y - s.y).toDouble()
+                                    val feet = distPx / pixelsPerFoot
+                                    val ftInt = feet.toInt()
+                                    val inInt = ((feet - ftInt) * 12.0).roundToInt()
+                                    drawDimensionLine(s, e, "$ftInt'-$inInt\"", selectedColor)
+                                }
+                            }
+                        }
+
+                        // Render Active Pen/Eraser Path
                         currentPath?.let { path ->
                             drawPath(
                                 path = path,
-                                color = if (toolMode == "Eraser") Color.White.copy(alpha = 0.5f) else selectedColor,
-                                style = Stroke(width = strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                                color = if (toolMode == "Eraser") Color.White.copy(alpha = 0.6f) else if (toolMode == "Highlight") selectedColor.copy(alpha = 0.4f) else selectedColor,
+                                style = Stroke(width = if (toolMode == "Highlight") strokeWidth * 2.5f else strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
                             )
                         }
                     }
-                    
+
+                    // Render Text Notes & Stamps Overlay
                     val density = LocalDensity.current
-                    actions.filterIsInstance<MarkupAction.Text>().filter { it.pageIndex == currentPageIndex }.forEach { textAction ->
-                        Box(
-                            modifier = Modifier.offset(
-                                x = with(density) { textAction.position.x.toDp() },
-                                y = with(density) { textAction.position.y.toDp() }
-                            )
-                            .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(4.dp))
-                            .border(1.5.dp, textAction.color, RoundedCornerShape(4.dp))
-                            .padding(8.dp)
-                        ) {
-                            Text(
-                                text = textAction.text,
-                                color = Color.Black, // Dark text for readability on white box
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                    actions.filter { it.pageIndex == currentPageIndex }.forEach { action ->
+                        when (action) {
+                            is MarkupAction.TextNote -> {
+                                Box(
+                                    modifier = Modifier
+                                        .offset(x = with(density) { action.position.x.toDp() }, y = with(density) { action.position.y.toDp() })
+                                        .background(Color.White.copy(alpha = 0.95f), RoundedCornerShape(4.dp))
+                                        .border(2.dp, action.color, RoundedCornerShape(4.dp))
+                                        .padding(6.dp)
+                                ) {
+                                    Text(action.text, color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            is MarkupAction.Stamp -> {
+                                val (bg, text) = when (action.stampType) {
+                                    "APPROVED" -> Color(0xFF2E7D32) to "APPROVED"
+                                    "REJECTED" -> Color(0xFFC62828) to "REJECTED"
+                                    "REVISED" -> Color(0xFFE65100) to "REVISED"
+                                    "PUNCH LIST" -> Color(0xFF6A1B9A) to "PUNCH LIST"
+                                    else -> Color(0xFF1565C0) to "FOR REVIEW"
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .offset(x = with(density) { action.position.x.toDp() }, y = with(density) { action.position.y.toDp() })
+                                        .border(3.dp, bg, RoundedCornerShape(6.dp))
+                                        .background(bg.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(text, color = bg, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                                }
+                            }
+                            else -> {}
                         }
                     }
                 }
             }
         }
 
+        // Add Text Callout Dialog
         if (showTextDialog) {
             AddTextDialog(
                 onDismiss = { showTextDialog = false },
                 onConfirm = { content ->
                     if (content.isNotEmpty()) {
-                        actions.add(MarkupAction.Text(currentPageIndex, content, tempTextPos, selectedColor, strokeWidth + 10))
+                        actions.add(MarkupAction.TextNote(currentPageIndex, content, tempTextPos, selectedColor, strokeWidth + 10))
                     }
                     showTextDialog = false
+                }
+            )
+        }
+
+        // Stamp Picker Sheet
+        if (showStampMenu) {
+            AlertDialog(
+                onDismissRequest = { showStampMenu = false },
+                title = { Text("Select Architectural Stamp") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("APPROVED", "REJECTED", "REVISED", "FOR REVIEW", "PUNCH LIST").forEach { stamp ->
+                            Button(
+                                onClick = {
+                                    selectedStamp = stamp
+                                    showStampMenu = false
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selectedStamp == stamp) MaterialTheme.colorScheme.primary else Color.LightGray
+                                )
+                            ) {
+                                Text(stamp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {}
+            )
+        }
+
+        // Calibration Scale Dialog
+        if (showScaleDialog) {
+            AlertDialog(
+                onDismissRequest = { showScaleDialog = false },
+                title = { Text("Drawing Scale Calibration") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Select standard architectural drawing scale:")
+                        listOf(
+                            "1/4\" = 1'-0\"" to 40.0,
+                            "1/8\" = 1'-0\"" to 20.0,
+                            "1/2\" = 1'-0\"" to 80.0,
+                            "1\" = 10'-0\"" to 12.0
+                        ).forEach { (preset, pxPerFt) ->
+                            OutlinedButton(
+                                onClick = {
+                                    pixelsPerFoot = pxPerFt
+                                    scalePresetName = preset
+                                    showScaleDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(preset, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showScaleDialog = false }) { Text("Close") }
                 }
             )
         }
     }
 }
 
+// Canvas Vector Drawing Helpers
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawArrow(start: Offset, end: Offset, color: Color, strokeWidth: Float) {
+    drawLine(color, start, end, strokeWidth = strokeWidth, cap = StrokeCap.Round)
+    val angle = atan2(end.y - start.y, end.x - start.x)
+    val arrowLen = (strokeWidth * 3.5f).coerceAtLeast(18f)
+    val wing1 = Offset(end.x - arrowLen * cos(angle - PI / 6).toFloat(), end.y - arrowLen * sin(angle - PI / 6).toFloat())
+    val wing2 = Offset(end.x - arrowLen * cos(angle + PI / 6).toFloat(), end.y - arrowLen * sin(angle + PI / 6).toFloat())
+    drawLine(color, end, wing1, strokeWidth = strokeWidth, cap = StrokeCap.Round)
+    drawLine(color, end, wing2, strokeWidth = strokeWidth, cap = StrokeCap.Round)
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawRevisionCloud(start: Offset, end: Offset, color: Color, strokeWidth: Float) {
+    val left = min(start.x, end.x)
+    val top = min(start.y, end.y)
+    val width = abs(end.x - start.x)
+    val height = abs(end.y - start.y)
+    if (width <= 0 || height <= 0) return
+
+    val cloudPath = Path()
+    val arcRadius = 15f
+    var curX = left
+    while (curX < left + width) {
+        cloudPath.addArc(Rect(curX, top - arcRadius, curX + (arcRadius * 2), top + arcRadius), 180f, 180f)
+        curX += arcRadius * 1.5f
+    }
+    var curY = top
+    while (curY < top + height) {
+        cloudPath.addArc(Rect(left + width - arcRadius, curY, left + width + arcRadius, curY + (arcRadius * 2)), 270f, 180f)
+        curY += arcRadius * 1.5f
+    }
+    drawPath(cloudPath, color, style = Stroke(strokeWidth))
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDimensionLine(start: Offset, end: Offset, label: String, color: Color) {
+    drawLine(color, start, end, strokeWidth = 3f, cap = StrokeCap.Round)
+    drawCircle(color, radius = 6f, center = start)
+    drawCircle(color, radius = 6f, center = end)
+}
+
 @Composable
-fun AddTextDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
-    var text by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add Note") },
-        text = {
-            TextField(value = text, onValueChange = { text = it }, placeholder = { Text("Type here...") })
-        },
-        confirmButton = {
-            Button(onClick = { onConfirm(text) }) { Text("Add") }
-        }
+fun ToolChip(label: String, selected: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+        leadingIcon = { Icon(icon, contentDescription = label, modifier = Modifier.size(14.dp)) }
     )
 }
 
@@ -372,14 +582,37 @@ fun AddTextDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
 fun ColorButton(color: Color, selected: Color, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(32.dp)
+            .size(28.dp)
             .clip(CircleShape)
             .background(color)
             .border(
-                width = if (color == selected) 3.dp else 0.dp,
-                color = if (color == selected) MaterialTheme.colorScheme.outline else Color.Transparent,
+                width = if (color == selected) 3.dp else 1.dp,
+                color = if (color == selected) MaterialTheme.colorScheme.primary else Color.Gray,
                 shape = CircleShape
             )
             .clickable { onClick() }
+    )
+}
+
+@Composable
+fun AddTextDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Plan Callout Note") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("Note / Callout Text") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(text) }) { Text("Add Callout") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
     )
 }
