@@ -1,9 +1,8 @@
 package com.example.crewsync
 
 import androidx.compose.ui.ExperimentalComposeUiApi
-import androidx.compose.ui.window.ComposeViewport
+import androidx.compose.ui.window.CanvasBasedWindow
 import com.example.crewsync.util.initializeFirebase
-import kotlinx.browser.document
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
@@ -12,10 +11,7 @@ fun main() {
     } catch (_: Throwable) {
     }
 
-    val body = document.body
-    if (body != null) {
-        ComposeViewport(body) {
-            App()
-        }
+    CanvasBasedWindow("Crewsync") {
+        App()
     }
 }
