@@ -16,12 +16,14 @@ fun main() {
 
     val canvas = document.getElementById("ComposeTarget") as? HTMLCanvasElement
     if (canvas != null) {
-        canvas.width = window.innerWidth
-        canvas.height = window.innerHeight
-        window.addEventListener("resize", {
-            canvas.width = window.innerWidth
-            canvas.height = window.innerHeight
-        })
+        fun updateCanvasSize() {
+            val dpr = window.devicePixelRatio
+            canvas.width = (window.innerWidth * dpr).toInt()
+            canvas.height = (window.innerHeight * dpr).toInt()
+        }
+        updateCanvasSize()
+        window.addEventListener("resize", { updateCanvasSize() })
+        window.addEventListener("orientationchange", { updateCanvasSize() })
     }
 
     CanvasBasedWindow(title = "Crewsync Web", canvasElementId = "ComposeTarget") {
