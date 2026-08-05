@@ -6,8 +6,12 @@ import com.example.crewsync.util.initializeFirebase
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
-    initializeFirebase()
-    CanvasBasedWindow("Crewsync Web") {
+    try {
+        initializeFirebase()
+    } catch (_: Throwable) {
+    }
+
+    CanvasBasedWindow(title = "Crewsync Web", canvasElementId = "ComposeTarget") {
         App()
     }
 }
