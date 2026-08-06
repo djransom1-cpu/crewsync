@@ -19,10 +19,26 @@
             display: block;
         }
     </style>
+    <script type="text/javascript" src="skiko.js"></script>
 </head>
 <body>
     <canvas id="ComposeTarget"></canvas>
-    <script type="text/javascript" src="skiko.js"></script>
-    <script type="text/javascript" src="composeApp.js"></script>
+    <script type="text/javascript">
+        function loadComposeApp() {
+            var script = document.createElement('script');
+            script.src = 'composeApp.js';
+            document.body.appendChild(script);
+        }
+
+        if (typeof onSkikoInit === 'function') {
+            onSkikoInit(function() {
+                loadComposeApp();
+            });
+        } else {
+            window.addEventListener('load', function() {
+                setTimeout(loadComposeApp, 100);
+            });
+        }
+    </script>
 </body>
 </html>
