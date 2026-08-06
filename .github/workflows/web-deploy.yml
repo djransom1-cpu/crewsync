@@ -18,6 +18,8 @@ jobs:
   build-and-deploy-web:
     name: 🌐 Build & Deploy CrewSync Web App
     runs-on: ubuntu-latest
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6144m"
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
