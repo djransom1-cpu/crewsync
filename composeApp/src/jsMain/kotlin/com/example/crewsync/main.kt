@@ -6,22 +6,39 @@ import com.example.crewsync.util.initializeFirebase
 import kotlinx.browser.document
 import kotlinx.browser.window
 
+external fun onSkikoInit(callback: () -> Unit)
+
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
-    fun launchApp() {
-        val body = document.body ?: return
-        try {
-            initializeFirebase()
-        } catch (_: Throwable) {
+    val launchApp = {
+        fun mount() {
+            val body = document.body ?: return
+            try {
+                initializeFirebase()
+            } catch (_: Throwable) {
+            }
+            ComposeViewport(body) {
+                App()
+            }
         }
-        ComposeViewport(body) {
-            App()
+
+        if (document.body != null) {
+            mount()
+        } else {
+            window.addEventListener("DOMContentLoaded", { mount() })
         }
     }
 
-    if (document.body != null) {
+    try {
+        val skikoInit = window.asDynamic().onSkikoInit
+        if (skikoInit != null) {
+            onSkikoInit {
+                launchApp()
+            }
+        } else {
+            launchApp()
+        }
+    } catch (_: Throwable) {
         launchApp()
-    } else {
-        window.addEventListener("DOMContentLoaded", { launchApp() })
     }
 }
