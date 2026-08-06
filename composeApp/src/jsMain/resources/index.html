@@ -7,6 +7,13 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" href="favicon.png">
+    <script type="text/javascript">
+        if (typeof globalThis.os === 'undefined') {
+            globalThis.os = { tmpdir: function() { return '/tmp'; } };
+        } else if (typeof globalThis.os.tmpdir === 'undefined') {
+            globalThis.os.tmpdir = function() { return '/tmp'; };
+        }
+    </script>
     <style>
         html, body {
             margin: 0;

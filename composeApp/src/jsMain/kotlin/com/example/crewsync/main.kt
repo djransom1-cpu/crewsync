@@ -10,6 +10,14 @@ external fun onSkikoInit(callback: () -> Unit)
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
+    js("""
+        if (typeof globalThis.os === 'undefined') {
+            globalThis.os = { tmpdir: function() { return '/tmp'; } };
+        } else if (typeof globalThis.os.tmpdir === 'undefined') {
+            globalThis.os.tmpdir = function() { return '/tmp'; };
+        }
+    """)
+
     val launchApp = {
         fun mount() {
             val body = document.body ?: return
