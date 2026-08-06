@@ -11,7 +11,7 @@ fun main() {
     } catch (_: Throwable) {
     }
 
-    CanvasBasedWindow("Crewsync") {
+    CanvasBasedWindow(title = "Crewsync", canvasElementId = "ComposeTarget") {
         App()
     }
 }
