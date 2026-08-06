@@ -7,12 +7,17 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+concurrency:
+  group: "ios-build-${{ github.ref }}"
+  cancel-in-progress: true
+
 jobs:
   build-ios-ipa:
     name: 🍎 Build iOS .ipa Installer (macOS Runner)
     runs-on: macos-latest
+    timeout-minutes: 20
     env:
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6144m"
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6144m -Dkotlin.native.ignoreDisabledTargets=true"
 
     steps:
     - name: 📥 Checkout Repository
