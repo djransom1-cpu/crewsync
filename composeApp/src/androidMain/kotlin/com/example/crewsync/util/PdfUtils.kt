@@ -17,22 +17,34 @@ import java.io.FileOutputStream
 class AndroidPdfRenderer(private val file: File) : com.example.crewsync.util.PdfRenderer {
     private val pfd: ParcelFileDescriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
     private val renderer: PdfRenderer = PdfRenderer(pfd)
+    private var lastBitmap: Bitmap? = null
 
     override val pageCount: Int = renderer.pageCount
 
     override fun renderPage(pageIndex: Int): ImageBitmap? {
         if (pageIndex < 0 || pageIndex >= pageCount) return null
         
+        lastBitmap?.recycle()
+        lastBitmap = null
+
         val page = renderer.openPage(pageIndex)
-        // High quality render for blueprints
-        val bitmap = Bitmap.createBitmap(page.width * 2, page.height * 2, Bitmap.Config.ARGB_8888)
+        // High quality render capped within max GPU texture limits (2560px max bound)
+        val maxDimension = 2560f
+        val scale = minOf(maxDimension / page.width, maxDimension / page.height, 2.0f)
+        val renderWidth = (page.width * scale).toInt().coerceAtLeast(1)
+        val renderHeight = (page.height * scale).toInt().coerceAtLeast(1)
+
+        val bitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
         page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
         page.close()
         
+        lastBitmap = bitmap
         return bitmap.asImageBitmap()
     }
 
     fun close() {
+        lastBitmap?.recycle()
+        lastBitmap = null
         renderer.close()
         pfd.close()
     }
@@ -44,6 +56,7 @@ actual fun rememberPdfRenderer(url: String): com.example.crewsync.util.PdfRender
     var renderer by remember { mutableStateOf<AndroidPdfRenderer?>(null) }
 
     LaunchedEffect(url) {
+        if (url.isBlank()) return@LaunchedEffect
         withContext(Dispatchers.IO) {
             try {
                 val client = OkHttpClient()
@@ -52,11 +65,14 @@ actual fun rememberPdfRenderer(url: String): com.example.crewsync.util.PdfRender
                 
                 if (response.isSuccessful) {
                     val tempFile = File(context.cacheDir, "temp_blueprint.pdf")
-                    val fos = FileOutputStream(tempFile)
-                    fos.write(response.body?.bytes() ?: return@withContext)
-                    fos.close()
+                    response.body?.byteStream()?.use { input ->
+                        FileOutputStream(tempFile).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
                     
                     withContext(Dispatchers.Main) {
+                        renderer?.close()
                         renderer = AndroidPdfRenderer(tempFile)
                     }
                 }
@@ -66,7 +82,7 @@ actual fun rememberPdfRenderer(url: String): com.example.crewsync.util.PdfRender
         }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(url) {
         onDispose {
             renderer?.close()
         }
