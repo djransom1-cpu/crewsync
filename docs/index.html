@@ -8,35 +8,11 @@
     <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" href="favicon.png">
     <script type="text/javascript">
-        (function() {
-            if (typeof globalThis.process === 'undefined') {
-                globalThis.process = { env: {} };
-            }
-            if (typeof globalThis.process.env === 'undefined') {
-                globalThis.process.env = {};
-            }
-            try {
-                Object.defineProperty(Object.prototype, 'tmpdir', {
-                    value: function() { return '/tmp'; },
-                    enumerable: false,
-                    writable: true,
-                    configurable: true
-                });
-                Object.defineProperty(Object.prototype, 'homedir', {
-                    value: function() { return '/home'; },
-                    enumerable: false,
-                    writable: true,
-                    configurable: true
-                });
-            } catch(e) {}
-            
-            window.addEventListener('unhandledrejection', function(event) {
-                console.error('UNHANDLED COROUTINE PROMISE REJECTION:', event.reason);
-            });
-            window.addEventListener('error', function(event) {
-                console.error('UNHANDLED COROUTINE ERROR:', event.error || event.message);
-            });
-        })();
+        if (typeof globalThis.os === 'undefined') {
+            globalThis.os = { tmpdir: function() { return '/tmp'; } };
+        } else if (typeof globalThis.os.tmpdir === 'undefined') {
+            globalThis.os.tmpdir = function() { return '/tmp'; };
+        }
     </script>
     <style>
         html, body {

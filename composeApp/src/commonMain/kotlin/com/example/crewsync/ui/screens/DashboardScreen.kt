@@ -48,24 +48,10 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
     LaunchedEffect(currentUid, currentUserEmail) {
         if (currentUid != null || currentUserEmail.isNotEmpty()) {
             try {
-                if (currentUid != null) {
-                    firestore.collection("users").document(currentUid).snapshots.collect { snap ->
-                        if (snap.exists) {
-                            userProfile = snap.toUserSafe(currentUserEmail)
-                        } else if (currentUserEmail.isNotEmpty()) {
-                            try {
-                                val emailSnap = firestore.collection("users").document(currentUserEmail).get()
-                                if (emailSnap.exists) {
-                                    userProfile = emailSnap.toUserSafe(currentUserEmail)
-                                }
-                            } catch (_: Exception) {}
-                        }
-                    }
-                } else if (currentUserEmail.isNotEmpty()) {
-                    firestore.collection("users").document(currentUserEmail).snapshots.collect { snap ->
-                        if (snap.exists) {
-                            userProfile = snap.toUserSafe(currentUserEmail)
-                        }
+                val docId = currentUid ?: currentUserEmail
+                firestore.collection("users").document(docId).snapshots.collect { snap ->
+                    if (snap.exists) {
+                        userProfile = snap.toUserSafe(currentUserEmail)
                     }
                 }
             } catch (_: Exception) {}
@@ -93,19 +79,21 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
         }
     }
 
-    val realTimeProjects by firestore.collection("projects")
-        .snapshots
-        .map { snapshot -> 
-            snapshot.documents.mapNotNull { doc -> 
-                try {
-                    doc.toProjectSafe()
-                } catch (e: Exception) {
-                    println("Error parsing project ${doc.id}: ${e.message}")
-                    Project(id = doc.id, name = "Project ${doc.id.take(4)}")
+    val realTimeProjectsFlow = remember {
+        firestore.collection("projects")
+            .snapshots
+            .map { snapshot -> 
+                snapshot.documents.mapNotNull { doc -> 
+                    try {
+                        doc.toProjectSafe()
+                    } catch (e: Exception) {
+                        println("Error parsing project ${doc.id}: ${e.message}")
+                        Project(id = doc.id, name = "Project ${doc.id.take(4)}")
+                    }
                 }
             }
-        }
-        .collectAsState(initial = emptyList())
+    }
+    val realTimeProjects by realTimeProjectsFlow.collectAsState(initial = emptyList())
 
     val projects = if (realTimeProjects.isNotEmpty()) realTimeProjects else fetchedProjects
 
@@ -119,31 +107,37 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
     }
 
     // For SuperAdmin diagnostic info
-    val allUsersCount by if (isSuperAdmin) {
-        firestore.collection("users").snapshots.map { 
-            try { it.documents.size } catch (_: Exception) { 0 }
-        }.collectAsState(0)
-    } else {
-        mutableStateOf(0)
+    val allUsersCountFlow = remember(isSuperAdmin) {
+        if (isSuperAdmin) {
+            firestore.collection("users").snapshots.map { 
+                try { it.documents.size } catch (_: Exception) { 0 }
+            }
+        } else null
     }
+    val allUsersCount by (allUsersCountFlow?.collectAsState(0) ?: remember { mutableStateOf(0) })
     
-    val rawProjectsCount by firestore.collection("projects").snapshots.map { 
-        try { it.documents.size } catch (_: Exception) { 0 }
-    }.collectAsState(0)
+    val rawProjectsCountFlow = remember {
+        firestore.collection("projects").snapshots.map { 
+            try { it.documents.size } catch (_: Exception) { 0 }
+        }
+    }
+    val rawProjectsCount by rawProjectsCountFlow.collectAsState(0)
 
     // Offline Status
     val isOnline by com.example.crewsync.util.rememberConnectivityState()
 
     // Check for Desktop Updates
-    val latestVersionInfo by firestore.collection("app_config").document("desktop").snapshots
-        .map { 
-            try {
-                if (it.exists) it.data<Map<String, String>>() else null 
-            } catch (_: Exception) {
-                null
+    val latestVersionInfoFlow = remember {
+        firestore.collection("app_config").document("desktop").snapshots
+            .map { 
+                try {
+                    if (it.exists) it.data<Map<String, String>>() else null 
+                } catch (_: Exception) {
+                    null
+                }
             }
-        }
-        .collectAsState(initial = null)
+    }
+    val latestVersionInfo by latestVersionInfoFlow.collectAsState(initial = null)
 
     val currentVersion = com.example.crewsync.util.getAppVersion()
     val needsUpdate = remember(latestVersionInfo) {

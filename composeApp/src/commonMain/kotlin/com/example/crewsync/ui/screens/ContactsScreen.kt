@@ -75,27 +75,31 @@ fun ContactsScreen() {
         }
     }
 
-    val registeredUsers by firestore.collection("users")
-        .snapshots
-        .map { snapshot -> 
-            snapshot.documents.mapNotNull { doc -> 
-                try {
-                    doc.data<User>().let { if (it.uid.isEmpty()) it.copy(uid = doc.id) else it }
-                } catch (e: Exception) { null }
+    val registeredUsersFlow = remember {
+        firestore.collection("users")
+            .snapshots
+            .map { snapshot -> 
+                snapshot.documents.mapNotNull { doc -> 
+                    try {
+                        doc.data<User>().let { if (it.uid.isEmpty()) it.copy(uid = doc.id) else it }
+                    } catch (e: Exception) { null }
+                }
             }
-        }
-        .collectAsState(initial = emptyList())
+    }
+    val registeredUsers by registeredUsersFlow.collectAsState(initial = emptyList())
 
-    val manualContacts by firestore.collection("contacts")
-        .snapshots
-        .map { snapshot -> 
-            snapshot.documents.mapNotNull { doc -> 
-                try {
-                    doc.data<Contact>().copy(id = doc.id)
-                } catch (e: Exception) { null }
+    val manualContactsFlow = remember {
+        firestore.collection("contacts")
+            .snapshots
+            .map { snapshot -> 
+                snapshot.documents.mapNotNull { doc -> 
+                    try {
+                        doc.data<Contact>().copy(id = doc.id)
+                    } catch (e: Exception) { null }
+                }
             }
-        }
-        .collectAsState(initial = emptyList())
+    }
+    val manualContacts by manualContactsFlow.collectAsState(initial = emptyList())
 
     Scaffold(
         topBar = {

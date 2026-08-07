@@ -62,9 +62,12 @@ fun ProjectDetailsScreen(
     var currentFolderId by remember { mutableStateOf<String?>(null) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
 
-    val folders by firestore.collection("projects").document(projectId).collection("folders").snapshots.map { snap ->
-        snap.documents.mapNotNull { try { it.data<ProjectFolder>().copy(id = it.id) } catch (e: Exception) { null } }
-    }.collectAsState(initial = emptyList())
+    val foldersFlow = remember(projectId) {
+        firestore.collection("projects").document(projectId).collection("folders").snapshots.map { snap ->
+            snap.documents.mapNotNull { try { it.data<ProjectFolder>().copy(id = it.id) } catch (e: Exception) { null } }
+        }
+    }
+    val folders by foldersFlow.collectAsState(initial = emptyList())
 
     LaunchedEffect(auth.currentUser?.uid) {
         auth.currentUser?.uid?.let { uid ->
@@ -78,44 +81,58 @@ fun ProjectDetailsScreen(
         }
     }
     
-    val allUsers by firestore.collection("users")
-        .snapshots
-        .map { snapshot ->
-            snapshot.documents.mapNotNull { doc ->
-                try {
-                    doc.data<User>().let { if (it.email.isEmpty()) it.copy(email = doc.id) else it }
-                } catch (e: Exception) { null }
+    val allUsersFlow = remember {
+        firestore.collection("users")
+            .snapshots
+            .map { snapshot ->
+                snapshot.documents.mapNotNull { doc ->
+                    try {
+                        doc.data<User>().let { if (it.email.isEmpty()) it.copy(email = doc.id) else it }
+                    } catch (e: Exception) { null }
+                }
             }
-        }
-        .collectAsState(initial = emptyList())
+    }
+    val allUsers by allUsersFlow.collectAsState(initial = emptyList())
 
-    val userMap = allUsers.associate { it.email to (it.name.ifEmpty { it.email }) }
-    val userPicMap = allUsers.associate { it.email to it.profilePictureUrl }
+    val userMap = remember(allUsers) { allUsers.associate { it.email to (it.name.ifEmpty { it.email }) } }
+    val userPicMap = remember(allUsers) { allUsers.associate { it.email to it.profilePictureUrl } }
 
     // Unified Data Fetching
-    val tasks by firestore.collection("tasks").snapshots.map { snap ->
-        snap.documents.mapNotNull { try { it.toTaskSafe() } catch (e: Exception) { null } }
-            .filter { it.projectId == projectId }
-    }.collectAsState(initial = emptyList())
-
-    val appointments by firestore.collection("projects").document(projectId).collection("appointments").snapshots.map { snap ->
-        snap.documents.mapNotNull { try { it.data<Appointment>().copy(id = it.id) } catch (e: Exception) { null } }
-    }.collectAsState(initial = emptyList())
-
-    val files by firestore.collection("projects").document(projectId).collection("files").snapshots.map { snap ->
-        snap.documents.mapNotNull { try { it.data<ProjectFile>().copy(id = it.id) } catch (e: Exception) { null } }
-    }.collectAsState(initial = emptyList())
-
-    val messages by firestore.collection("projects").document(projectId).collection("messages").snapshots.map { snap ->
-        val list = snap.documents.mapNotNull { try { it.data<ChatMessage>().copy(id = it.id) } catch (e: Exception) { null } }.sortedBy { it.timestamp }
-        if (list.isNotEmpty()) {
-            val last = list.last()
-            if (last.senderEmail != auth.currentUser?.email && last.timestamp > Clock.System.now().toEpochMilliseconds() - 5000) {
-                com.example.crewsync.util.notifyChatMessage(projectId, last.senderEmail, last.text)
-            }
+    val tasksFlow = remember(projectId) {
+        firestore.collection("tasks").snapshots.map { snap ->
+            snap.documents.mapNotNull { try { it.toTaskSafe() } catch (e: Exception) { null } }
+                .filter { it.projectId == projectId }
         }
-        list
-    }.collectAsState(initial = emptyList())
+    }
+    val tasks by tasksFlow.collectAsState(initial = emptyList())
+
+    val appointmentsFlow = remember(projectId) {
+        firestore.collection("projects").document(projectId).collection("appointments").snapshots.map { snap ->
+            snap.documents.mapNotNull { try { it.data<Appointment>().copy(id = it.id) } catch (e: Exception) { null } }
+        }
+    }
+    val appointments by appointmentsFlow.collectAsState(initial = emptyList())
+
+    val filesFlow = remember(projectId) {
+        firestore.collection("projects").document(projectId).collection("files").snapshots.map { snap ->
+            snap.documents.mapNotNull { try { it.data<ProjectFile>().copy(id = it.id) } catch (e: Exception) { null } }
+        }
+    }
+    val files by filesFlow.collectAsState(initial = emptyList())
+
+    val messagesFlow = remember(projectId) {
+        firestore.collection("projects").document(projectId).collection("messages").snapshots.map { snap ->
+            val list = snap.documents.mapNotNull { try { it.data<ChatMessage>().copy(id = it.id) } catch (e: Exception) { null } }.sortedBy { it.timestamp }
+            if (list.isNotEmpty()) {
+                val last = list.last()
+                if (last.senderEmail != auth.currentUser?.email && last.timestamp > Clock.System.now().toEpochMilliseconds() - 5000) {
+                    com.example.crewsync.util.notifyChatMessage(projectId, last.senderEmail, last.text)
+                }
+            }
+            list
+        }
+    }
+    val messages by messagesFlow.collectAsState(initial = emptyList())
 
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf(
