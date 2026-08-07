@@ -184,45 +184,84 @@ fun MarkupScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { 
-                    Column {
-                        Text(projectFile?.name ?: "Blueprint Studio", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            if (isPdf && pdfRenderer != null) "Page ${currentPageIndex + 1}/${pdfRenderer.pageCount} | Scale: $scalePresetName" else "Scale: $scalePresetName",
-                            style = MaterialTheme.typography.labelSmall
-                        )
+            Column(modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(projectFile?.name ?: "Blueprint Redline", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                            Text("Scale: $scalePresetName", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        // Rotate Document
+                        IconButton(onClick = { rotationDegrees = (rotationDegrees + 90f) % 360f }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Rotate 90°")
+                        }
+                        // Calibration Scale Button
+                        IconButton(onClick = { showScaleDialog = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Scale")
+                        }
+                        // Undo Button
+                        IconButton(onClick = { 
+                            val lastOnPage = actions.findLast { it.pageIndex == currentPageIndex }
+                            if (lastOnPage != null) actions.remove(lastOnPage)
+                        }) {
+                            Icon(Icons.Default.Build, contentDescription = "Undo")
+                        }
+                        TextButton(onClick = { actions.removeAll { it.pageIndex == currentPageIndex } }) {
+                            Text("Clear", color = MaterialTheme.colorScheme.error)
+                        }
                     }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                )
+
+                // Primary Architectural Tools Bar (Safely at Top)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    ToolChip("Pen", toolMode == "Pen", Icons.Default.Edit) { toolMode = "Pen" }
+                    ToolChip("Highlight", toolMode == "Highlight", Icons.Default.Star) { toolMode = "Highlight" }
+                    ToolChip("Arrow", toolMode == "Arrow", Icons.Default.PlayArrow) { toolMode = "Arrow" }
+                    ToolChip("Rect", toolMode == "Rect", Icons.Default.Place) { toolMode = "Rect" }
+                    ToolChip("Cloud", toolMode == "Cloud", Icons.Default.AccountBox) { toolMode = "Cloud" }
+                    ToolChip("Text", toolMode == "Text", Icons.Default.Add) { toolMode = "Text" }
+                    ToolChip("Stamp", toolMode == "Stamp", Icons.Default.CheckCircle) { 
+                        toolMode = "Stamp"
+                        showStampMenu = true
                     }
-                },
-                actions = {
-                    // Rotate Document
-                    IconButton(onClick = { rotationDegrees = (rotationDegrees + 90f) % 360f }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Rotate 90°")
-                    }
-                    // Calibration Scale Button
-                    IconButton(onClick = { showScaleDialog = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Scale")
-                    }
-                    // Undo Button
-                    IconButton(onClick = { 
-                        val lastOnPage = actions.findLast { it.pageIndex == currentPageIndex }
-                        if (lastOnPage != null) actions.remove(lastOnPage)
-                    }) {
-                        Icon(Icons.Default.Build, contentDescription = "Undo")
-                    }
-                    TextButton(onClick = { actions.removeAll { it.pageIndex == currentPageIndex } }) {
-                        Text("Clear", color = MaterialTheme.colorScheme.error)
-                    }
+                    ToolChip("Measure", toolMode == "Measure", Icons.Default.Info) { toolMode = "Measure" }
+                    ToolChip("Pan", toolMode == "Pan", Icons.Default.Lock) { toolMode = "Pan" }
+                    ToolChip("Eraser", toolMode == "Eraser", Icons.Default.Delete) { toolMode = "Eraser" }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    ColorButton(Color.Red, selectedColor) { selectedColor = Color.Red }
+                    ColorButton(Color.Yellow, selectedColor) { selectedColor = Color.Yellow }
+                    ColorButton(Color.Green, selectedColor) { selectedColor = Color.Green }
+                    ColorButton(Color.Cyan, selectedColor) { selectedColor = Color.Cyan }
+                    ColorButton(Color.Magenta, selectedColor) { selectedColor = Color.Magenta }
+                    ColorButton(Color.Black, selectedColor) { selectedColor = Color.Black }
                 }
-            )
+
+                HorizontalDivider()
+            }
         },
         bottomBar = {
-            Column(modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
+            Column(
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.surface)
+                    .navigationBarsPadding()
+                    .padding(bottom = 8.dp)
+            ) {
                 // PDF Multi-Page Controls
                 if (isPdf && pdfRenderer != null && pdfRenderer.pageCount > 1) {
                     Row(
@@ -261,36 +300,6 @@ fun MarkupScreen(
                     IconButton(onClick = { zoomScale = 1f; zoomOffset = Offset.Zero; rotationDegrees = 0f }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Reset View")
                     }
-                }
-
-                // Primary Architectural Tools Bar
-                Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    ToolChip("Pen", toolMode == "Pen", Icons.Default.Edit) { toolMode = "Pen" }
-                    ToolChip("Highlight", toolMode == "Highlight", Icons.Default.Star) { toolMode = "Highlight" }
-                    ToolChip("Arrow", toolMode == "Arrow", Icons.Default.PlayArrow) { toolMode = "Arrow" }
-                    ToolChip("Rect", toolMode == "Rect", Icons.Default.Place) { toolMode = "Rect" }
-                    ToolChip("Cloud", toolMode == "Cloud", Icons.Default.AccountBox) { toolMode = "Cloud" }
-                    ToolChip("Text", toolMode == "Text", Icons.Default.Add) { toolMode = "Text" }
-                    ToolChip("Stamp", toolMode == "Stamp", Icons.Default.CheckCircle) { 
-                        toolMode = "Stamp"
-                        showStampMenu = true
-                    }
-                    ToolChip("Measure", toolMode == "Measure", Icons.Default.Info) { toolMode = "Measure" }
-                    ToolChip("Pan", toolMode == "Pan", Icons.Default.Lock) { toolMode = "Pan" }
-                    ToolChip("Eraser", toolMode == "Eraser", Icons.Default.Delete) { toolMode = "Eraser" }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    ColorButton(Color.Red, selectedColor) { selectedColor = Color.Red }
-                    ColorButton(Color.Yellow, selectedColor) { selectedColor = Color.Yellow }
-                    ColorButton(Color.Green, selectedColor) { selectedColor = Color.Green }
-                    ColorButton(Color.Cyan, selectedColor) { selectedColor = Color.Cyan }
-                    ColorButton(Color.Magenta, selectedColor) { selectedColor = Color.Magenta }
-                    ColorButton(Color.Black, selectedColor) { selectedColor = Color.Black }
                 }
             }
         },

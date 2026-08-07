@@ -8,11 +8,49 @@
     <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" href="favicon.png">
     <script type="text/javascript">
-        if (typeof globalThis.os === 'undefined') {
-            globalThis.os = { tmpdir: function() { return '/tmp'; } };
-        } else if (typeof globalThis.os.tmpdir === 'undefined') {
-            globalThis.os.tmpdir = function() { return '/tmp'; };
-        }
+        (function() {
+            if (typeof globalThis.process === 'undefined') {
+                globalThis.process = { env: {} };
+            }
+            if (typeof globalThis.process.env === 'undefined') {
+                globalThis.process.env = {};
+            }
+            if (typeof globalThis.os === 'undefined') {
+                globalThis.os = { tmpdir: function() { return '/tmp'; }, homedir: function() { return '/home'; } };
+            }
+            
+            // WebGL Extension Polyfill for Skiko.js stability
+            (function() {
+                var getContext = HTMLCanvasElement.prototype.getContext;
+                if (getContext) {
+                    HTMLCanvasElement.prototype.getContext = function(type, attributes) {
+                        var gl = getContext.call(this, type, attributes);
+                        if (gl && (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl')) {
+                            try {
+                                var origGetParam = gl.getParameter;
+                                gl.getParameter = function(pname) {
+                                    if (pname === 0x9245) return 'WebKit';
+                                    if (pname === 0x9246) return 'WebKit WebGL';
+                                    try {
+                                        return origGetParam.call(this, pname);
+                                    } catch(e) {
+                                        return '';
+                                    }
+                                };
+                            } catch(e) {}
+                        }
+                        return gl;
+                    };
+                }
+            })();
+
+            window.addEventListener('unhandledrejection', function(event) {
+                console.error('UNHANDLED COROUTINE PROMISE REJECTION:', event.reason);
+            });
+            window.addEventListener('error', function(event) {
+                console.error('UNHANDLED COROUTINE ERROR:', event.error || event.message);
+            });
+        })();
     </script>
     <style>
         html, body {
