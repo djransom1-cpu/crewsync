@@ -103,6 +103,13 @@ fun MarkupScreen(
     var scalePresetName by remember { mutableStateOf("1/4\" = 1'-0\"") }
 
     LaunchedEffect(fileId) {
+        // Fallback initialization to prevent blank screen hangs
+        projectFile = ProjectFile(
+            id = fileId,
+            name = if (fileId.contains("/")) fileId.substringAfterLast("/") else "Blueprint Plan",
+            url = if (fileId.startsWith("http")) fileId else ""
+        )
+
         try {
             val getSnap = firestore.collection("projects").document(projectId).collection("files").document(fileId).get()
             if (getSnap.exists) {
@@ -449,7 +456,20 @@ fun MarkupScreen(
                             contentScale = ContentScale.Fit
                         )
                     } else {
-                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                        // Clean Architectural Blueprint Canvas Grid
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFF1E293B)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.Build, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(48.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Architectural Blueprint Studio", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                                Text("Tap any tool at the top to draw redlines, add callouts, stamps & dimensions", color = Color.LightGray, fontSize = 12.sp)
+                            }
+                        }
                     }
 
                     // Interactive Drawing & Annotation Canvas Layer
