@@ -38,6 +38,13 @@ import com.example.crewsync.util.toProjectSafe
 import org.koin.core.context.GlobalContext
 import org.koin.core.context.startKoin
 
+sealed class Screen(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    object Dashboard : Screen("dashboard", "Home", Icons.Default.Home)
+    object Contacts : Screen("contacts", "Contacts", Icons.AutoMirrored.Filled.List)
+    object Profile : Screen("profile", "Profile", Icons.Default.Person)
+    object About : Screen("about", "About", Icons.Default.DateRange)
+}
+
 @Composable
 fun App() {
     var firebaseState by remember { mutableStateOf("loading") } 
@@ -125,54 +132,52 @@ fun AppMainContent() {
     LaunchedEffect(currentUser?.uid, currentUser?.email) {
         val userEmail = currentUser?.email?.lowercase() ?: return@LaunchedEffect
         
-        kotlinx.coroutines.withContext(SupervisorJob() + safeHandler) {
-            // Listener 1: Site Alerts (Broadcasts)
-            launch {
-                try {
-                    firestore.collection("broadcasts").snapshots.collect { snapshot ->
-                        snapshot.documents.mapNotNull { doc ->
-                            try { doc.data<Broadcast>() } catch (_: Exception) { null }
-                        }.forEach { broadcast ->
-                            if (broadcast.timestamp > Clock.System.now().toEpochMilliseconds() - 10000) {
-                                notifyTaskUpdate(
-                                    title = "SITE ALERT: ${broadcast.title}",
-                                    message = broadcast.message
-                                )
-                                snackbarHostState.showSnackbar("🚨 SITE ALERT: ${broadcast.title} - ${broadcast.message}")
-                            }
+        // Listener 1: Site Alerts (Broadcasts)
+        launch {
+            try {
+                firestore.collection("broadcasts").snapshots.collect { snapshot ->
+                    snapshot.documents.mapNotNull { doc ->
+                        try { doc.data<Broadcast>() } catch (_: Exception) { null }
+                    }.forEach { broadcast ->
+                        if (broadcast.timestamp > Clock.System.now().toEpochMilliseconds() - 10000) {
+                            notifyTaskUpdate(
+                                title = "SITE ALERT: ${broadcast.title}",
+                                message = broadcast.message
+                            )
+                            snackbarHostState.showSnackbar("🚨 SITE ALERT: ${broadcast.title} - ${broadcast.message}")
                         }
                     }
-                } catch (_: Exception) {
                 }
+            } catch (_: Exception) {
             }
+        }
 
-            // Listener 2: Project Chat Messages Across User Projects
-            launch {
-                try {
-                    firestore.collection("projects").snapshots.collect { snapshot ->
-                        val projectIds = snapshot.documents.map { it.id }
-                        projectIds.forEach { projId ->
-                            launch {
-                                try {
-                                    firestore.collection("projects").document(projId).collection("messages").snapshots.collect { msgSnap ->
-                                        val msgs = msgSnap.documents.mapNotNull { doc ->
-                                            try { doc.data<ChatMessage>().copy(id = doc.id) } catch (_: Exception) { null }
-                                        }
-                                        if (msgs.isNotEmpty()) {
-                                            val last = msgs.maxByOrNull { it.timestamp }
-                                            if (last != null && last.senderEmail.lowercase() != userEmail && last.timestamp > Clock.System.now().toEpochMilliseconds() - 8000) {
-                                                val sender = last.senderEmail.substringBefore("@")
-                                                notifyChatMessage(projId, sender, last.text)
-                                                snackbarHostState.showSnackbar("💬 Chat ($sender): ${last.text}")
-                                            }
+        // Listener 2: Project Chat Messages Across User Projects
+        launch {
+            try {
+                firestore.collection("projects").snapshots.collect { snapshot ->
+                    val projectIds = snapshot.documents.map { it.id }
+                    projectIds.forEach { projId ->
+                        launch {
+                            try {
+                                firestore.collection("projects").document(projId).collection("messages").snapshots.collect { msgSnap ->
+                                    val msgs = msgSnap.documents.mapNotNull { doc ->
+                                        try { doc.data<ChatMessage>().copy(id = doc.id) } catch (_: Exception) { null }
+                                    }
+                                    if (msgs.isNotEmpty()) {
+                                        val last = msgs.maxByOrNull { it.timestamp }
+                                        if (last != null && last.senderEmail.lowercase() != userEmail && last.timestamp > Clock.System.now().toEpochMilliseconds() - 8000) {
+                                            val sender = last.senderEmail.substringBefore("@")
+                                            notifyChatMessage(projId, sender, last.text)
+                                            snackbarHostState.showSnackbar("💬 Chat ($sender): ${last.text}")
                                         }
                                     }
-                                } catch (_: Exception) {}
-                            }
+                                }
+                            } catch (_: Exception) {}
                         }
                     }
-                } catch (_: Exception) {}
-            }
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -205,7 +210,11 @@ fun AppMainContent() {
             LoginScreen(onLoginSuccess = { })
         }
     } else {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val isWideScreen = maxWidth >= 720.dp
 
             Row(modifier = Modifier.fillMaxSize()) {
@@ -339,21 +348,15 @@ fun AppMainContent() {
                     }
                 }
             }
+        }
 
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                SnackbarHost(
-                    hostState = snackbarHostState,
-                    modifier = Modifier.padding(top = 12.dp)
-                )
-            }
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.padding(top = 12.dp)
+            )
         }
     }
 }
 }
-
-sealed class Screen(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    object Dashboard : Screen("dashboard", "Home", Icons.Default.Home)
-    object Contacts : Screen("contacts", "Contacts", Icons.AutoMirrored.Filled.List)
-    object Profile : Screen("profile", "Profile", Icons.Default.Person)
-    object About : Screen("about", "About", Icons.Default.DateRange)
 }
