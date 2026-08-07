@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -71,7 +72,19 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
             val list = snap.documents.mapNotNull { doc ->
                 try { doc.toProjectSafe() } catch (_: Exception) { null }
             }
-            if (list.isNotEmpty()) {
+            if (list.isEmpty()) {
+                // Seed Default Sample Project if empty
+                val sampleProject = Project(
+                    id = "sample_proj_1",
+                    name = "Commercial Build - Site 101",
+                    description = "Sample framing, drywall, and electrical project",
+                    members = listOf(currentUserEmail),
+                    buckets = listOf("Not Started", "In Progress", "Inspection", "Completed"),
+                    createdAt = Clock.System.now().toEpochMilliseconds()
+                )
+                firestore.collection("projects").document(sampleProject.id).set(sampleProject.toFirestoreMap())
+                fetchedProjects = listOf(sampleProject)
+            } else {
                 fetchedProjects = list
             }
         } catch (e: Exception) {
@@ -382,23 +395,31 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
 fun ProjectCard(project: Project, isFirst: Boolean, isLast: Boolean, onClick: () -> Unit, onMove: (Int) -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        onClick = onClick
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
             modifier = Modifier.padding(16.dp)
         ) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(text = project.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = project.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f).clickable { onClick() }
+                )
                 Row {
                     if (!isFirst) {
                         IconButton(onClick = { onMove(-1) }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = null)
+                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up")
                         }
                     }
                     if (!isLast) {
                         IconButton(onClick = { onMove(1) }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down")
                         }
                     }
                 }
@@ -409,7 +430,8 @@ fun ProjectCard(project: Project, isFirst: Boolean, isLast: Boolean, onClick: ()
                     text = project.description,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2
+                    maxLines = 2,
+                    modifier = Modifier.clickable { onClick() }
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -417,8 +439,10 @@ fun ProjectCard(project: Project, isFirst: Boolean, isLast: Boolean, onClick: ()
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
             ) {
-                TextButton(onClick = onClick) {
-                    Text("View Project")
+                Button(onClick = onClick) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Open Project Board")
                 }
             }
         }
