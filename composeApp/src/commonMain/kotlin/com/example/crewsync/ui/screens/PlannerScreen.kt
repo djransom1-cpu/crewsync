@@ -7,9 +7,13 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -21,11 +25,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.crewsync.data.model.ChecklistItem
+import com.example.crewsync.data.model.DEFAULT_TASK_TEMPLATES
 import com.example.crewsync.data.model.ProjectFile
 import com.example.crewsync.data.model.Task
+import com.example.crewsync.data.model.TaskTemplate
 import com.example.crewsync.data.model.User
 import com.example.crewsync.util.*
 import dev.gitlive.firebase.Firebase
@@ -46,41 +54,72 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
     
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var showManageBucketsDialog by remember { mutableStateOf(false) }
+    var showManageTemplatesDialog by remember { mutableStateOf(false) }
     var selectedTask by remember { mutableStateOf<Task?>(null) }
     
-    val tasks by firestore.collection("tasks")
-        .snapshots
-        .map { snapshot -> 
-            snapshot.documents.mapNotNull { doc -> 
-                try {
-                    doc.toTaskSafe()
-                } catch (e: Exception) { null }
-            }.filter { it.projectId == projectId }
-        }
-        .collectAsState(initial = emptyList())
-
-    val allUsers by firestore.collection("users")
-        .snapshots
-        .map { snapshot ->
-            snapshot.documents.mapNotNull { doc ->
-                try {
-                    doc.data<User>().let { if (it.email.isEmpty()) it.copy(email = doc.id) else it }
-                } catch (e: Exception) { null }
+    val tasksFlow = remember(projectId) {
+        firestore.collection("tasks")
+            .snapshots
+            .map { snapshot -> 
+                snapshot.documents.mapNotNull { doc -> 
+                    try {
+                        doc.toTaskSafe()
+                    } catch (e: Exception) { null }
+                }.filter { it.projectId == projectId }
             }
-        }
-        .collectAsState(initial = emptyList())
+    }
+    val tasks by tasksFlow.collectAsState(initial = emptyList())
 
-    val userMap = allUsers.associate { it.email to it.name.ifEmpty { it.email } }
+    val allUsersFlow = remember {
+        firestore.collection("users")
+            .snapshots
+            .map { snapshot ->
+                snapshot.documents.mapNotNull { doc ->
+                    try {
+                        doc.data<User>().let { if (it.email.isEmpty()) it.copy(email = doc.id) else it }
+                    } catch (e: Exception) { null }
+                }
+            }
+    }
+    val allUsers by allUsersFlow.collectAsState(initial = emptyList())
+
+    val userMap = remember(allUsers) { allUsers.associate { it.email to it.name.ifEmpty { it.email } } }
+
+    val customTemplatesFlow = remember {
+        firestore.collection("task_templates")
+            .snapshots
+            .map { snapshot ->
+                snapshot.documents.mapNotNull { doc ->
+                    try { doc.toTaskTemplateSafe() } catch (e: Exception) { null }
+                }
+            }
+    }
+    val customTemplates by customTemplatesFlow.collectAsState(initial = emptyList())
+
+    val allTemplates = remember(customTemplates) {
+        val customMap = customTemplates.associateBy { it.title.lowercase() }
+        val merged = DEFAULT_TASK_TEMPLATES.map { defaultTpl ->
+            customMap[defaultTpl.title.lowercase()] ?: defaultTpl
+        } + customTemplates.filter { c -> DEFAULT_TASK_TEMPLATES.none { d -> d.title.equals(c.title, ignoreCase = true) } }
+        merged
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.End
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = { showManageBucketsDialog = true }) {
-                Icon(Icons.Default.Settings, contentDescription = null)
+            TextButton(onClick = { showManageTemplatesDialog = true }) {
+                Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Manage Buckets")
+                Text("Trade Task Database", fontSize = 12.sp)
+            }
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = { showManageBucketsDialog = true }) {
+                Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Manage Buckets", fontSize = 12.sp)
             }
         }
 
@@ -121,7 +160,7 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Task")
+                Icon(Icons.Default.Add, contentDescription = "Add Task Card")
             }
         }
     }
@@ -130,10 +169,14 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
         AddTaskDialog(
             members = projectMembers,
             userMap = userMap,
+            templates = allTemplates,
             onDismiss = { showAddTaskDialog = false },
-            onConfirm = { title, desc, start, due, assigned, color ->
+            onConfirm = { title, desc, start, due, assigned, color, saveToDb, checklistItems ->
                 showAddTaskDialog = false
                 scope.launch {
+                    val initialChecklist = checklistItems.mapIndexed { idx, text ->
+                        ChecklistItem(id = "chk_${idx}_${Clock.System.now().toEpochMilliseconds()}", text = text, isDone = false)
+                    }
                     val newTask = Task(
                         projectId = projectId,
                         title = title,
@@ -142,9 +185,39 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
                         status = projectBuckets.firstOrNull() ?: "Not Started",
                         startDate = start,
                         dueDate = due,
-                        color = color
+                        color = color,
+                        checklist = initialChecklist
                     )
                     firestore.collection("tasks").add(newTask.toFirestoreMap())
+
+                    if (saveToDb && title.isNotBlank()) {
+                        val newTemplate = TaskTemplate(
+                            id = "tpl_" + title.lowercase().replace(" ", "_"),
+                            title = title,
+                            trade = title,
+                            description = desc,
+                            defaultChecklist = checklistItems,
+                            colorHex = color
+                        )
+                        firestore.collection("task_templates").document(newTemplate.id).set(newTemplate.toFirestoreMap())
+                    }
+                }
+            }
+        )
+    }
+
+    if (showManageTemplatesDialog) {
+        ManageTaskTemplatesDialog(
+            templates = allTemplates,
+            onDismiss = { showManageTemplatesDialog = false },
+            onAddTemplate = { newTpl ->
+                scope.launch {
+                    firestore.collection("task_templates").document(newTpl.id).set(newTpl.toFirestoreMap())
+                }
+            },
+            onDeleteTemplate = { tplId ->
+                scope.launch {
+                    firestore.collection("task_templates").document(tplId).delete()
                 }
             }
         )
@@ -166,23 +239,20 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
     if (selectedTask != null) {
         TaskDetailsDialog(
             task = selectedTask!!,
-            buckets = projectBuckets,
             members = projectMembers,
             userMap = userMap,
+            allBuckets = projectBuckets,
             onDismiss = { selectedTask = null },
-            onUpdateTask = { updatedTask ->
-                selectedTask = updatedTask
+            onSave = { updatedTask ->
+                selectedTask = null
                 scope.launch {
                     firestore.collection("tasks").document(updatedTask.id).set(updatedTask.toFirestoreMap())
                 }
             },
-            onUploadAttachment = { pickedFile, onUrlReady ->
+            onDelete = { taskId ->
+                selectedTask = null
                 scope.launch {
-                    try {
-                        val path = "task_attachments/${selectedTask!!.id}/${pickedFile.name}"
-                        val url = uploadFile(path, pickedFile.platformFile)
-                        onUrlReady(url)
-                    } catch (e: Exception) {}
+                    firestore.collection("tasks").document(taskId).delete()
                 }
             }
         )
@@ -198,128 +268,132 @@ fun PlannerColumn(
     allBuckets: List<String>,
     userMap: Map<String, String>
 ) {
-    Column(
-        modifier = Modifier
-            .width(280.dp)
-            .fillMaxHeight()
-    ) {
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            shape = MaterialTheme.shapes.medium,
-            tonalElevation = 2.dp
-        ) {
-            Column(modifier = Modifier.padding(8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Badge(containerColor = MaterialTheme.colorScheme.secondaryContainer) {
-                        Text(tasks.size.toString())
-                    }
-                }
-                
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(tasks) { task ->
-                        TaskCard(
-                            task = task, 
-                            onClick = { onTaskClick(task) },
-                            onMove = { targetBucket -> onMoveTask(task, targetBucket) },
-                            allBuckets = allBuckets,
-                            userMap = userMap
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun TaskCard(task: Task, onClick: () -> Unit, onMove: (String) -> Unit, allBuckets: List<String>, userMap: Map<String, String>) {
-    var showMoveMenu by remember { mutableStateOf(false) }
-    val cardBg = try { Color(parseColor(task.color)) } catch (e: Exception) { MaterialTheme.colorScheme.surface }
-
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { onClick() },
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = cardBg)
+        modifier = Modifier
+            .width(300.dp)
+            .fillMaxHeight(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    text = task.title, 
-                    style = MaterialTheme.typography.titleSmall, 
-                    modifier = Modifier.weight(1f),
-                    color = if (isDarkColor(cardBg)) Color.White else Color.Black
-                )
-                Box {
-                    IconButton(onClick = { showMoveMenu = true }, modifier = Modifier.size(24.dp)) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowForward, 
-                            contentDescription = "Move", 
-                            modifier = Modifier.size(16.dp),
-                            tint = if (isDarkColor(cardBg)) Color.White else Color.Black
-                        )
-                    }
-                    DropdownMenu(expanded = showMoveMenu, onDismissRequest = { showMoveMenu = false }) {
-                        allBuckets.filter { it != task.status }.forEach { bucket ->
-                            DropdownMenuItem(
-                                text = { Text("Move to $bucket") },
-                                onClick = {
-                                    onMove(bucket)
-                                    showMoveMenu = false
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-            
-            if (task.description.isNotEmpty()) {
-                Text(
-                    text = task.description,
-                    maxLines = 2,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (isDarkColor(cardBg)) Color.White.copy(alpha = 0.7f) else Color.Black.copy(alpha = 0.7f)
-                )
-            }
-            
+        Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-            if (task.dueDate != null) {
-                val now = Clock.System.now().toEpochMilliseconds()
-                val isPastDue = task.dueDate < now && task.status != "Done"
                 Text(
-                    text = "Due: ${formatDate(task.dueDate)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (isPastDue) {
-                        if (isDarkColor(cardBg)) Color(0xFFFF8A80) else Color.Red
-                    } else {
-                        if (isDarkColor(cardBg)) Color.White.copy(alpha = 0.7f) else Color.Black.copy(alpha = 0.7f)
-                    },
-                    modifier = Modifier.padding(top = 4.dp)
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Badge(containerColor = MaterialTheme.colorScheme.secondaryContainer) {
+                    Text(tasks.size.toString())
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(tasks, key = { it.id }) { task ->
+                    TaskCard(
+                        task = task,
+                        onClick = { onTaskClick(task) },
+                        onMoveTask = { newStatus -> onMoveTask(task, newStatus) },
+                        allBuckets = allBuckets,
+                        userMap = userMap
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TaskCard(
+    task: Task,
+    onClick: () -> Unit,
+    onMoveTask: (String) -> Unit,
+    allBuckets: List<String>,
+    userMap: Map<String, String>
+) {
+    var showMenu by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(containerColor = Color(parseColor(task.color))),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = task.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Box {
+                    IconButton(
+                        onClick = { showMenu = true },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Move", modifier = Modifier.size(16.dp))
+                    }
+
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
+                    ) {
+                        allBuckets.filter { it != task.status }.forEach { targetBucket ->
+                            DropdownMenuItem(
+                                text = { Text("Move to $targetBucket") },
+                                onClick = {
+                                    showMenu = false
+                                    onMoveTask(targetBucket)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (task.description.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = task.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-                
-                if (task.assignedTo != null) {
-                    val displayName = userMap[task.assignedTo] ?: task.assignedTo
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val assignedName = userMap[task.assignedTo ?: ""] ?: "Unassigned"
+                Text(
+                    text = assignedName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                if (task.dueDate != null) {
                     Text(
-                        text = "@$displayName",
+                        text = formatDate(task.dueDate),
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isDarkColor(cardBg)) Color.White else Color.DarkGray,
-                        maxLines = 1
+                        color = MaterialTheme.colorScheme.error
                     )
                 }
             }
@@ -329,348 +403,24 @@ fun TaskCard(task: Task, onClick: () -> Unit, onMove: (String) -> Unit, allBucke
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TaskDetailsDialog(
-    task: Task,
-    buckets: List<String>,
+fun AddTaskDialog(
     members: List<String>,
     userMap: Map<String, String>,
+    templates: List<TaskTemplate>,
     onDismiss: () -> Unit,
-    onUpdateTask: (Task) -> Unit,
-    onUploadAttachment: (PickedFile, (String) -> Unit) -> Unit
+    onConfirm: (title: String, desc: String, start: Long?, due: Long?, assigned: String?, color: String, saveToDb: Boolean, checklist: List<String>) -> Unit
 ) {
-    var isUploading by remember { mutableStateOf(false) }
-    var newChecklistItem by remember { mutableStateOf("") }
-    
-    var editingDescription by remember { mutableStateOf(task.description) }
-    var showMemberPicker by remember { mutableStateOf(false) }
-
-    val colors = listOf("#FFFFFF", "#FFCDD2", "#C8E6C9", "#BBDEFB", "#FFF9C4", "#E1BEE7", "#F5F5F5", "#212121")
-
-    val attachmentLauncher = rememberFilePickerLauncher { pickedFile ->
-        isUploading = true
-        onUploadAttachment(pickedFile) { url ->
-            val newFile = ProjectFile(
-                name = pickedFile.name,
-                url = url,
-                uploadedAt = Clock.System.now().toEpochMilliseconds()
-            )
-            onUpdateTask(task.copy(attachments = task.attachments + newFile))
-            isUploading = false
-        }
-    }
-
-    var showStartDatePicker by remember { mutableStateOf(false) }
-    var showDueDatePicker by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(task.title) },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Column {
-                    Text("Description", style = MaterialTheme.typography.labelMedium)
-                    TextField(
-                        value = editingDescription,
-                        onValueChange = { editingDescription = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Add detail...") },
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, autoCorrectEnabled = true)
-                    )
-                }
-
-                Column {
-                    Text("Assigned To", style = MaterialTheme.typography.labelMedium)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val assignedName = userMap[task.assignedTo ?: ""] ?: "Unassigned"
-                        Text(assignedName, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { showMemberPicker = true }) {
-                            Text("Change")
-                        }
-                    }
-                    if (showMemberPicker) {
-                        DropdownMenu(expanded = showMemberPicker, onDismissRequest = { showMemberPicker = false }) {
-                            DropdownMenuItem(text = { Text("Unassigned") }, onClick = { 
-                                onUpdateTask(task.copy(assignedTo = null))
-                                showMemberPicker = false 
-                            })
-                            members.forEach { email ->
-                                val name = userMap[email] ?: email
-                                DropdownMenuItem(text = { Text(name) }, onClick = { 
-                                    onUpdateTask(task.copy(assignedTo = email))
-                                    showMemberPicker = false 
-                                })
-                            }
-                        }
-                    }
-                }
-
-                Column {
-                    Text("Card Color", style = MaterialTheme.typography.labelMedium)
-                    Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        colors.forEach { hex ->
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(parseColor(hex)))
-                                    .border(
-                                        width = if (task.color == hex) 2.dp else 1.dp,
-                                        color = if (task.color == hex) MaterialTheme.colorScheme.primary else Color.LightGray,
-                                        shape = CircleShape
-                                    )
-                                    .clickable { onUpdateTask(task.copy(color = hex)) }
-                            )
-                        }
-                    }
-                }
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Start Date", style = MaterialTheme.typography.labelMedium)
-                        Text(
-                            text = task.startDate?.let { formatDate(it) } ?: "Set date",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.clickable { showStartDatePicker = true }
-                        )
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Due Date", style = MaterialTheme.typography.labelMedium)
-                        Text(
-                            text = task.dueDate?.let { formatDate(it) } ?: "Set date",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.clickable { showDueDatePicker = true }
-                        )
-                    }
-                }
-
-                Column {
-                    Text("Bucket (Status)", style = MaterialTheme.typography.labelMedium)
-                    Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        buckets.forEach { status ->
-                            FilterChip(
-                                selected = task.status == status,
-                                onClick = { onUpdateTask(task.copy(status = status)) },
-                                label = { Text(status) }
-                            )
-                        }
-                    }
-                }
-
-                Column {
-                    Text("Checklist", style = MaterialTheme.typography.labelMedium)
-                    task.checklist.forEach { item ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = item.isDone,
-                                onCheckedChange = { isChecked ->
-                                    val newList = task.checklist.map {
-                                        if (it.id == item.id) it.copy(isDone = isChecked) else it
-                                    }
-                                    onUpdateTask(task.copy(checklist = newList))
-                                }
-                            )
-                            Text(item.text, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextField(
-                            value = newChecklistItem,
-                            onValueChange = { newChecklistItem = it },
-                            placeholder = { Text("Add item...") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = {
-                            if (newChecklistItem.isNotBlank()) {
-                                val item = ChecklistItem(id = "${task.checklist.size}_${Clock.System.now().toEpochMilliseconds()}", text = newChecklistItem)
-                                onUpdateTask(task.copy(checklist = task.checklist + item))
-                                newChecklistItem = ""
-                            }
-                        }) {
-                            Icon(Icons.Default.Add, contentDescription = "Add")
-                        }
-                    }
-                }
-
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Attachments", style = MaterialTheme.typography.labelMedium)
-                        if (isUploading) CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                        else IconButton(onClick = { attachmentLauncher() }) {
-                            Icon(Icons.Default.Add, contentDescription = "Upload")
-                        }
-                    }
-                    task.attachments.forEach { file ->
-                        ListItem(
-                            headlineContent = { Text(file.name, style = MaterialTheme.typography.bodySmall) },
-                            leadingContent = { Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                            modifier = Modifier.clickable { openUrl(file.url) }
-                        )
-                    }
-                }
-            }
-
-            if (showStartDatePicker) {
-                val state = rememberDatePickerState(initialSelectedDateMillis = task.startDate ?: Clock.System.now().toEpochMilliseconds())
-                DatePickerDialog(
-                    onDismissRequest = { showStartDatePicker = false },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            onUpdateTask(task.copy(startDate = state.selectedDateMillis))
-                            showStartDatePicker = false
-                        }) { Text("OK") }
-                    }
-                ) { DatePicker(state = state) }
-            }
-
-            if (showDueDatePicker) {
-                val state = rememberDatePickerState(initialSelectedDateMillis = task.dueDate ?: Clock.System.now().toEpochMilliseconds())
-                DatePickerDialog(
-                    onDismissRequest = { showDueDatePicker = false },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            onUpdateTask(task.copy(dueDate = state.selectedDateMillis))
-                            showDueDatePicker = false
-                        }) { Text("OK") }
-                    }
-                ) { DatePicker(state = state) }
-            }
-        },
-        confirmButton = {
-            Button(onClick = { 
-                onUpdateTask(task.copy(description = editingDescription))
-                onDismiss() 
-            }) { Text("Save & Close") }
-        }
-    )
-}
-
-@Composable
-fun ManageBucketsDialog(
-    currentBuckets: List<String>,
-    onDismiss: () -> Unit,
-    onUpdateBuckets: (List<String>) -> Unit
-) {
-    var buckets by remember { mutableStateOf(currentBuckets) }
-    var newBucketName by remember { mutableStateOf("") }
-    var editingIndex by remember { mutableStateOf<Int?>(null) }
-    var editingName by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Manage Planner Buckets") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
-                    items(buckets.size) { index ->
-                        val bucket = buckets[index]
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (editingIndex == index) {
-                                    TextField(
-                                        value = editingName,
-                                        onValueChange = { editingName = it },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(onClick = {
-                                        if (editingName.isNotBlank()) {
-                                            buckets = buckets.toMutableList().apply { set(index, editingName) }
-                                            editingIndex = null
-                                        }
-                                    }) {
-                                        Icon(Icons.Default.Check, contentDescription = "Save")
-                                    }
-                                } else {
-                                    Text(bucket, modifier = Modifier.weight(1f))
-                                    Row {
-                                        IconButton(onClick = { 
-                                            editingIndex = index
-                                            editingName = bucket 
-                                        }) {
-                                            Icon(Icons.Default.Edit, contentDescription = "Edit")
-                                        }
-                                        if (index > 0) {
-                                            IconButton(onClick = {
-                                                buckets = buckets.toMutableList().apply {
-                                                    val temp = get(index)
-                                                    set(index, get(index - 1))
-                                                    set(index - 1, temp)
-                                                }
-                                            }) {
-                                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up")
-                                            }
-                                        }
-                                        if (index < buckets.size - 1) {
-                                            IconButton(onClick = {
-                                                buckets = buckets.toMutableList().apply {
-                                                    val temp = get(index)
-                                                    set(index, get(index + 1))
-                                                    set(index + 1, temp)
-                                                }
-                                            }) {
-                                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down")
-                                            }
-                                        }
-                                        IconButton(onClick = { buckets = buckets.filterIndexed { i, _ -> i != index } }) {
-                                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
-                                        }
-                                    }
-                                }
-                            }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                        }
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextField(
-                        value = newBucketName,
-                        onValueChange = { newBucketName = it },
-                        label = { Text("New Bucket") },
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(onClick = {
-                        if (newBucketName.isNotBlank()) {
-                            buckets = buckets + newBucketName
-                            newBucketName = ""
-                        }
-                    }) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = { onUpdateBuckets(buckets) }) { Text("Save Changes") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AddTaskDialog(members: List<String>, userMap: Map<String, String>, onDismiss: () -> Unit, onConfirm: (String, String, Long?, Long?, String?, String) -> Unit) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var assignedTo by remember { mutableStateOf<String?>(null) }
     var selectedColor by remember { mutableStateOf("#FFFFFF") }
+    var saveToDb by remember { mutableStateOf(false) }
+    var checklistItems by remember { mutableStateOf<List<String>>(emptyList()) }
     
     var startDate by remember { mutableStateOf<Long?>(null) }
     var dueDate by remember { mutableStateOf<Long?>(null) }
     
+    var showTemplateDropdown by remember { mutableStateOf(false) }
     var showStartDatePicker by remember { mutableStateOf(false) }
     var showDueDatePicker by remember { mutableStateOf(false) }
     var showMemberPicker by remember { mutableStateOf(false) }
@@ -679,17 +429,61 @@ fun AddTaskDialog(members: List<String>, userMap: Map<String, String>, onDismiss
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New Project Task") },
+        title = { Text("New Project Task Card", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
-                TextField(
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
+                // Template Selector Dropdown
+                Column {
+                    Text("Select from Master Trade Task Database:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Box {
+                        OutlinedButton(
+                            onClick = { showTemplateDropdown = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (title.isEmpty()) "Choose Trade Template (Framing, Demo, Drywall, etc.)" else "Template: $title",
+                                fontSize = 12.sp
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showTemplateDropdown,
+                            onDismissRequest = { showTemplateDropdown = false },
+                            modifier = Modifier.heightIn(max = 300.dp)
+                        ) {
+                            templates.forEach { tpl ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                            Text(tpl.title, fontWeight = FontWeight.Bold)
+                                            Text(tpl.trade, fontSize = 11.sp, color = Color.Gray)
+                                        }
+                                    },
+                                    onClick = {
+                                        title = tpl.title
+                                        description = tpl.description
+                                        selectedColor = tpl.colorHex
+                                        checklistItems = tpl.defaultChecklist
+                                        showTemplateDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
+                OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("Task Title") },
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
                 )
-                TextField(
+                OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
                     label = { Text("Detailed Description") },
@@ -718,6 +512,15 @@ fun AddTaskDialog(members: List<String>, userMap: Map<String, String>, onDismiss
                             }
                         }
                     }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(
+                        checked = saveToDb,
+                        onCheckedChange = { saveToDb = it }
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Save this task to Master Database for future projects", fontSize = 11.sp)
                 }
 
                 Column {
@@ -765,7 +568,7 @@ fun AddTaskDialog(members: List<String>, userMap: Map<String, String>, onDismiss
                     }
                 ) { DatePicker(state = state) }
             }
-            
+
             if (showDueDatePicker) {
                 val state = rememberDatePickerState()
                 DatePickerDialog(
@@ -780,20 +583,284 @@ fun AddTaskDialog(members: List<String>, userMap: Map<String, String>, onDismiss
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(title, description, startDate, dueDate, assignedTo, selectedColor) }, enabled = title.isNotBlank()) {
-                Text("Add to Planner")
+            Button(
+                onClick = {
+                    if (title.isNotBlank()) {
+                        onConfirm(title, description, startDate, dueDate, assignedTo, selectedColor, saveToDb, checklistItems)
+                    }
+                },
+                enabled = title.isNotBlank()
+            ) {
+                Text("Create Task Card")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+fun ManageTaskTemplatesDialog(
+    templates: List<TaskTemplate>,
+    onDismiss: () -> Unit,
+    onAddTemplate: (TaskTemplate) -> Unit,
+    onDeleteTemplate: (String) -> Unit
+) {
+    var newTitle by remember { mutableStateOf("") }
+    var newTrade by remember { mutableStateOf("") }
+    var newDesc by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Master Trade Task Database", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().height(400.dp)) {
+                Text("Pre-built & Custom Task Templates (${templates.size} available):", fontSize = 12.sp, color = Color.Gray)
+                
+                LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(templates) { tpl ->
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(tpl.title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text(tpl.description, fontSize = 11.sp, color = Color.Gray, maxLines = 1)
+                                }
+                                if (!tpl.id.startsWith("tpl_")) {
+                                    IconButton(onClick = { onDeleteTemplate(tpl.id) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red, modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+                Text("Add New Custom Trade Template:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                OutlinedTextField(
+                    value = newTitle,
+                    onValueChange = { newTitle = it },
+                    label = { Text("Task Card Title (e.g. Solar Panels)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = newDesc,
+                    onValueChange = { newDesc = it },
+                    label = { Text("Short Description") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Button(
+                    onClick = {
+                        if (newTitle.isNotBlank()) {
+                            val newTpl = TaskTemplate(
+                                id = "tpl_" + Clock.System.now().toEpochMilliseconds(),
+                                title = newTitle,
+                                trade = newTrade.ifEmpty { newTitle },
+                                description = newDesc,
+                                colorHex = "#38BDF8"
+                            )
+                            onAddTemplate(newTpl)
+                            newTitle = ""
+                            newTrade = ""
+                            newDesc = ""
+                        }
+                    },
+                    enabled = newTitle.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Add to Master Database")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
+}
+
+@Composable
+fun ManageBucketsDialog(
+    currentBuckets: List<String>,
+    onDismiss: () -> Unit,
+    onUpdateBuckets: (List<String>) -> Unit
+) {
+    var buckets by remember { mutableStateOf(currentBuckets.toMutableList()) }
+    var newBucketName by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Manage Task Buckets") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = newBucketName,
+                        onValueChange = { newBucketName = it },
+                        label = { Text("New Bucket Name") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            if (newBucketName.isNotBlank() && !buckets.contains(newBucketName.trim())) {
+                                buckets = (buckets + newBucketName.trim()).toMutableList()
+                                newBucketName = ""
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.CenterVertically)
+                    ) { Text("Add") }
+                }
+
+                LazyColumn {
+                    items(buckets) { bucket ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(bucket)
+                            if (buckets.size > 1) {
+                                IconButton(onClick = { buckets = buckets.filter { it != bucket }.toMutableList() }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onUpdateBuckets(buckets) }) { Text("Save Buckets") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+fun TaskDetailsDialog(
+    task: Task,
+    members: List<String>,
+    userMap: Map<String, String>,
+    allBuckets: List<String>,
+    onDismiss: () -> Unit,
+    onSave: (Task) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    var title by remember { mutableStateOf(task.title) }
+    var description by remember { mutableStateOf(task.description) }
+    var assignedTo by remember { mutableStateOf(task.assignedTo) }
+    var status by remember { mutableStateOf(task.status) }
+    var color by remember { mutableStateOf(task.color) }
+    var checklist by remember { mutableStateOf(task.checklist) }
+    var newCheckitemText by remember { mutableStateOf("") }
+
+    val scope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Task Card Details") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text("Status Bucket", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    allBuckets.forEach { bucket ->
+                        FilterChip(
+                            selected = status == bucket,
+                            onClick = { status = bucket },
+                            label = { Text(bucket) }
+                        )
+                    }
+                }
+
+                Text("Checklist Subtasks:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                checklist.forEachIndexed { idx, item ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = item.isDone,
+                            onCheckedChange = { isDone ->
+                                val updated = checklist.toMutableList()
+                                updated[idx] = item.copy(isDone = isDone)
+                                checklist = updated
+                            }
+                        )
+                        Text(item.text, fontSize = 12.sp)
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newCheckitemText,
+                        onValueChange = { newCheckitemText = it },
+                        label = { Text("Add Checklist Step") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Button(onClick = {
+                        if (newCheckitemText.isNotBlank()) {
+                            checklist = checklist + ChecklistItem(id = "chk_" + Clock.System.now().toEpochMilliseconds(), text = newCheckitemText, isDone = false)
+                            newCheckitemText = ""
+                        }
+                    }) { Text("Add") }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val updated = task.copy(
+                    title = title,
+                    description = description,
+                    assignedTo = assignedTo,
+                    status = status,
+                    color = color,
+                    checklist = checklist
+                )
+                onSave(updated)
+            }) { Text("Save Changes") }
+        },
+        dismissButton = {
+            TextButton(onClick = { onDelete(task.id) }, colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)) {
+                Text("Delete Card")
             }
         }
     )
 }
 
-fun formatDate(timestamp: Long): String {
-    val instant = Instant.fromEpochMilliseconds(timestamp)
-    val date = instant.toLocalDateTime(TimeZone.currentSystemDefault())
+fun formatDate(millis: Long): String {
+    val instant = Instant.fromEpochMilliseconds(millis)
+    val date = instant.toLocalDateTime(TimeZone.currentSystemDefault()).date
     return "${date.monthNumber}/${date.dayOfMonth}/${date.year}"
+}
+
+fun parseColor(hex: String): Long {
+    return try {
+        val clean = hex.removePrefix("#")
+        if (clean.length == 6) ("FF$clean").toLong(16) else clean.toLong(16)
+    } catch (_: Exception) {
+        0xFFFFFFFF
+    }
 }

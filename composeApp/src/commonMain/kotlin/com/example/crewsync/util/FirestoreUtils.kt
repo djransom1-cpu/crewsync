@@ -105,8 +105,32 @@ fun com.example.crewsync.data.model.Task.toFirestoreMap(): Map<String, Any?> {
     if (startDate != null) map["startDate"] = startDate.toDouble()
     if (dueDate != null) map["dueDate"] = dueDate.toDouble()
     map["checklist"] = checklist.map { mapOf("id" to it.id, "text" to it.text, "isDone" to it.isDone) }
-    map["attachments"] = attachments.map { mapOf("id" to it.id, "name" to it.name, "url" to it.url) }
+    map["attachments"] = attachments.map { mapOf("id" to it.id, "name" to it.name, "url" to it.url, "uploadedBy" to it.uploadedBy, "uploadedAt" to it.uploadedAt) }
     return map
+}
+
+fun DocumentSnapshot.toTaskTemplateSafe(): TaskTemplate {
+    return try {
+        this.data<TaskTemplate>().copy(id = this.id)
+    } catch (_: Exception) {
+        val titleStr: String = try { this.get("title") } catch (_: Exception) { "Task Template" }
+        val tradeStr: String = try { this.get("trade") } catch (_: Exception) { "" }
+        val descStr: String = try { this.get("description") } catch (_: Exception) { "" }
+        val colorStr: String = try { this.get("colorHex") } catch (_: Exception) { "#38BDF8" }
+        val checkList: List<String> = try { this.get("defaultChecklist") } catch (_: Exception) { emptyList() }
+        TaskTemplate(this.id, titleStr, tradeStr, descStr, checkList, colorStr)
+    }
+}
+
+fun TaskTemplate.toFirestoreMap(): Map<String, Any> {
+    return mapOf(
+        "id" to id,
+        "title" to title,
+        "trade" to trade,
+        "description" to description,
+        "defaultChecklist" to defaultChecklist,
+        "colorHex" to colorHex
+    )
 }
 
 fun com.example.crewsync.data.model.Project.toFirestoreMap(): Map<String, Any?> {
