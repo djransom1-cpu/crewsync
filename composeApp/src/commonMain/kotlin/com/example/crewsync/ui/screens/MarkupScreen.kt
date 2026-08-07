@@ -50,9 +50,9 @@ import kotlin.math.*
 
 sealed class MarkupAction {
     abstract val pageIndex: Int
-    data class Draw(override val pageIndex: Int, val path: Path, val color: Color, val strokeWidth: Float) : MarkupAction()
-    data class Highlight(override val pageIndex: Int, val path: Path, val color: Color, val strokeWidth: Float) : MarkupAction()
-    data class Erase(override val pageIndex: Int, val path: Path, val strokeWidth: Float) : MarkupAction()
+    data class Draw(override val pageIndex: Int, val path: Path, val points: List<Offset>, val color: Color, val strokeWidth: Float) : MarkupAction()
+    data class Highlight(override val pageIndex: Int, val path: Path, val points: List<Offset>, val color: Color, val strokeWidth: Float) : MarkupAction()
+    data class Erase(override val pageIndex: Int, val path: Path, val points: List<Offset>, val strokeWidth: Float) : MarkupAction()
     data class Arrow(override val pageIndex: Int, val start: Offset, val end: Offset, val color: Color, val strokeWidth: Float) : MarkupAction()
     data class Rectangle(override val pageIndex: Int, val start: Offset, val end: Offset, val color: Color, val strokeWidth: Float) : MarkupAction()
     data class Cloud(override val pageIndex: Int, val start: Offset, val end: Offset, val color: Color, val strokeWidth: Float) : MarkupAction()
@@ -73,6 +73,7 @@ fun MarkupScreen(
     val auth = Firebase.auth
     val scope = rememberCoroutineScope()
     val actions = remember { mutableStateListOf<MarkupAction>() }
+    val currentPoints = remember { mutableStateListOf<Offset>() }
     val graphicsLayer = rememberGraphicsLayer()
     
     var projectFile by remember { mutableStateOf<ProjectFile?>(null) }
@@ -102,12 +103,76 @@ fun MarkupScreen(
     var scalePresetName by remember { mutableStateOf("1/4\" = 1'-0\"") }
 
     LaunchedEffect(fileId) {
+        try {
+            val getSnap = firestore.collection("projects").document(projectId).collection("files").document(fileId).get()
+            if (getSnap.exists) {
+                projectFile = getSnap.toProjectFileSafe()
+            }
+        } catch (_: Exception) {}
+
         firestore.collection("projects").document(projectId).collection("files").document(fileId).snapshots.collect { snap ->
             if (snap.exists) {
                 try {
-                    projectFile = snap.data<ProjectFile>()
+                    projectFile = snap.toProjectFileSafe()
                 } catch (_: Exception) {}
             }
+        }
+    }
+
+    LaunchedEffect(fileId) {
+        firestore.collection("projects").document(projectId).collection("files").document(fileId).collection("markups").snapshots.collect { snap ->
+            val loadedActions = snap.documents.mapNotNull { doc ->
+                try {
+                    val pageIdx = (doc.get<Any?>("pageIndex") as? Number)?.toInt() ?: 0
+                    val type = doc.get<String>("type")
+                    val colorHex = try { doc.get<String>("colorHex") } catch (_: Exception) { "#FF0000" }
+                    val strokeW = (doc.get<Any?>("strokeWidth") as? Number)?.toFloat() ?: 8f
+                    val color = try { Color(colorHex.removePrefix("#").toLong(16) or 0xFF000000) } catch (_: Exception) { Color.Red }
+                    
+                    val startX = (doc.get<Any?>("startX") as? Number)?.toFloat() ?: 0f
+                    val startY = (doc.get<Any?>("startY") as? Number)?.toFloat() ?: 0f
+                    val endX = (doc.get<Any?>("endX") as? Number)?.toFloat() ?: 0f
+                    val endY = (doc.get<Any?>("endY") as? Number)?.toFloat() ?: 0f
+                    val start = Offset(startX, startY)
+                    val end = Offset(endX, endY)
+                    
+                    val text = try { doc.get<String>("text") } catch (_: Exception) { "" }
+                    val stampType = try { doc.get<String>("stampType") } catch (_: Exception) { "APPROVED" }
+                    val distStr = try { doc.get<String>("distanceStr") } catch (_: Exception) { "" }
+                    val ptsRaw = try { doc.get<List<Any?>>("points") } catch (_: Exception) { emptyList() }
+                    val pts = ptsRaw.mapNotNull { (it as? Number)?.toFloat() }
+                    val offsets = mutableListOf<Offset>()
+                    for (i in 0 until pts.size - 1 step 2) {
+                        offsets.add(Offset(pts[i], pts[i+1]))
+                    }
+
+                    fun buildPath(offsets: List<Offset>): Path {
+                        val p = Path()
+                        if (offsets.isNotEmpty()) {
+                            p.moveTo(offsets[0].x, offsets[0].y)
+                            for (i in 1 until offsets.size) {
+                                p.lineTo(offsets[i].x, offsets[i].y)
+                            }
+                        }
+                        return p
+                    }
+
+                    when (type) {
+                        "Draw" -> MarkupAction.Draw(pageIdx, buildPath(offsets), offsets, color, strokeW)
+                        "Highlight" -> MarkupAction.Highlight(pageIdx, buildPath(offsets), offsets, color, strokeW)
+                        "Erase" -> MarkupAction.Erase(pageIdx, buildPath(offsets), offsets, strokeW)
+                        "Arrow" -> MarkupAction.Arrow(pageIdx, start, end, color, strokeW)
+                        "Rect" -> MarkupAction.Rectangle(pageIdx, start, end, color, strokeW)
+                        "Cloud" -> MarkupAction.Cloud(pageIdx, start, end, color, strokeW)
+                        "TextNote" -> MarkupAction.TextNote(pageIdx, text, start, color, strokeW)
+                        "Stamp" -> MarkupAction.Stamp(pageIdx, stampType, start)
+                        "Dimension" -> MarkupAction.Dimension(pageIdx, start, end, distStr, color)
+                        else -> null
+                    }
+                } catch (_: Exception) { null }
+            }
+            actions.clear()
+            actions.addAll(loadedActions)
         }
     }
 
@@ -235,13 +300,89 @@ fun MarkupScreen(
                 scope.launch {
                     isSaving = true
                     try {
+                        val markupsColl = firestore.collection("projects").document(projectId).collection("files").document(fileId).collection("markups")
+                        actions.forEach { action ->
+                            val map = mutableMapOf<String, Any?>()
+                            map["pageIndex"] = action.pageIndex
+                            when (action) {
+                                is MarkupAction.Draw -> {
+                                    map["type"] = "Draw"
+                                    map["colorHex"] = "#" + action.color.toArgb().toUInt().toString(16)
+                                    map["strokeWidth"] = action.strokeWidth.toDouble()
+                                    map["points"] = action.points.flatMap { listOf(it.x.toDouble(), it.y.toDouble()) }
+                                }
+                                is MarkupAction.Highlight -> {
+                                    map["type"] = "Highlight"
+                                    map["colorHex"] = "#" + action.color.toArgb().toUInt().toString(16)
+                                    map["strokeWidth"] = action.strokeWidth.toDouble()
+                                    map["points"] = action.points.flatMap { listOf(it.x.toDouble(), it.y.toDouble()) }
+                                }
+                                is MarkupAction.Erase -> {
+                                    map["type"] = "Erase"
+                                    map["strokeWidth"] = action.strokeWidth.toDouble()
+                                    map["points"] = action.points.flatMap { listOf(it.x.toDouble(), it.y.toDouble()) }
+                                }
+                                is MarkupAction.Arrow -> {
+                                    map["type"] = "Arrow"
+                                    map["startX"] = action.start.x.toDouble()
+                                    map["startY"] = action.start.y.toDouble()
+                                    map["endX"] = action.end.x.toDouble()
+                                    map["endY"] = action.end.y.toDouble()
+                                    map["colorHex"] = "#" + action.color.toArgb().toUInt().toString(16)
+                                    map["strokeWidth"] = action.strokeWidth.toDouble()
+                                }
+                                is MarkupAction.Rectangle -> {
+                                    map["type"] = "Rect"
+                                    map["startX"] = action.start.x.toDouble()
+                                    map["startY"] = action.start.y.toDouble()
+                                    map["endX"] = action.end.x.toDouble()
+                                    map["endY"] = action.end.y.toDouble()
+                                    map["colorHex"] = "#" + action.color.toArgb().toUInt().toString(16)
+                                    map["strokeWidth"] = action.strokeWidth.toDouble()
+                                }
+                                is MarkupAction.Cloud -> {
+                                    map["type"] = "Cloud"
+                                    map["startX"] = action.start.x.toDouble()
+                                    map["startY"] = action.start.y.toDouble()
+                                    map["endX"] = action.end.x.toDouble()
+                                    map["endY"] = action.end.y.toDouble()
+                                    map["colorHex"] = "#" + action.color.toArgb().toUInt().toString(16)
+                                    map["strokeWidth"] = action.strokeWidth.toDouble()
+                                }
+                                is MarkupAction.TextNote -> {
+                                    map["type"] = "TextNote"
+                                    map["text"] = action.text
+                                    map["startX"] = action.position.x.toDouble()
+                                    map["startY"] = action.position.y.toDouble()
+                                    map["colorHex"] = "#" + action.color.toArgb().toUInt().toString(16)
+                                    map["strokeWidth"] = action.size.toDouble()
+                                }
+                                is MarkupAction.Stamp -> {
+                                    map["type"] = "Stamp"
+                                    map["stampType"] = action.stampType
+                                    map["startX"] = action.position.x.toDouble()
+                                    map["startY"] = action.position.y.toDouble()
+                                }
+                                is MarkupAction.Dimension -> {
+                                    map["type"] = "Dimension"
+                                    map["startX"] = action.start.x.toDouble()
+                                    map["startY"] = action.start.y.toDouble()
+                                    map["endX"] = action.end.x.toDouble()
+                                    map["endY"] = action.end.y.toDouble()
+                                    map["distanceStr"] = action.distanceStr
+                                    map["colorHex"] = "#" + action.color.toArgb().toUInt().toString(16)
+                                }
+                            }
+                            markupsColl.add(map)
+                        }
+
                         val markupFile = ProjectFile(
                             name = "Redlined_${projectFile!!.name}",
                             url = projectFile!!.url,
                             uploadedBy = auth.currentUser?.email ?: "Admin",
                             uploadedAt = Clock.System.now().toEpochMilliseconds()
                         )
-                        firestore.collection("projects").document(projectId).collection("files").add(markupFile)
+                        firestore.collection("projects").document(projectId).collection("files").add(markupFile.toFirestoreMap())
                         onSaveSuccess()
                     } catch (_: Exception) {
                     } finally {
@@ -281,18 +422,14 @@ fun MarkupScreen(
                         }
                 ) {
                     // Blueprint Background Layer
-                    if (isPdf) {
-                        if (currentPdfPage != null) {
-                            Image(
-                                bitmap = currentPdfPage,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Fit
-                            )
-                        } else {
-                            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                        }
-                    } else {
+                    if (currentPdfPage != null) {
+                        Image(
+                            bitmap = currentPdfPage,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
+                    } else if (projectFile?.url?.isNotEmpty() == true) {
                         AsyncImage(
                             model = ImageRequest.Builder(LocalPlatformContext.current)
                                 .data(projectFile!!.url)
@@ -302,6 +439,8 @@ fun MarkupScreen(
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Fit
                         )
+                    } else {
+                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                     }
 
                     // Interactive Drawing & Annotation Canvas Layer
@@ -317,6 +456,8 @@ fun MarkupScreen(
                                 } else {
                                     detectDragGestures(
                                         onDragStart = { offset ->
+                                            currentPoints.clear()
+                                            currentPoints.add(offset)
                                             if (toolMode == "Text") {
                                                 tempTextPos = offset
                                                 showTextDialog = true
@@ -330,6 +471,7 @@ fun MarkupScreen(
                                             }
                                         },
                                         onDrag = { change, _ ->
+                                            currentPoints.add(change.position)
                                             if (toolMode in listOf("Arrow", "Rect", "Cloud", "Measure")) {
                                                 currentDragOffset = change.position
                                             } else if (toolMode in listOf("Pen", "Highlight", "Eraser")) {
@@ -358,10 +500,11 @@ fun MarkupScreen(
                                                 }
                                             } else {
                                                 currentPath?.let { path ->
+                                                    val pts = currentPoints.toList()
                                                     when (toolMode) {
-                                                        "Eraser" -> actions.add(MarkupAction.Erase(currentPageIndex, path, strokeWidth))
-                                                        "Highlight" -> actions.add(MarkupAction.Highlight(currentPageIndex, path, selectedColor.copy(alpha = 0.4f), strokeWidth * 2.5f))
-                                                        else -> actions.add(MarkupAction.Draw(currentPageIndex, path, selectedColor, strokeWidth))
+                                                        "Eraser" -> actions.add(MarkupAction.Erase(currentPageIndex, path, pts, strokeWidth))
+                                                        "Highlight" -> actions.add(MarkupAction.Highlight(currentPageIndex, path, pts, selectedColor.copy(alpha = 0.4f), strokeWidth * 2.5f))
+                                                        else -> actions.add(MarkupAction.Draw(currentPageIndex, path, pts, selectedColor, strokeWidth))
                                                     }
                                                 }
                                             }

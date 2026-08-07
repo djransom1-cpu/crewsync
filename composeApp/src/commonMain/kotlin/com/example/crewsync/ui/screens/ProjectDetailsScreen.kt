@@ -36,6 +36,9 @@ import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
+import com.example.crewsync.util.toProjectSafe
+import com.example.crewsync.util.toTaskSafe
+import com.example.crewsync.util.toFirestoreMap
 import coil3.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -91,7 +94,7 @@ fun ProjectDetailsScreen(
 
     // Unified Data Fetching
     val tasks by firestore.collection("tasks").snapshots.map { snap ->
-        snap.documents.mapNotNull { try { it.data<Task>().copy(id = it.id) } catch (e: Exception) { null } }
+        snap.documents.mapNotNull { try { it.toTaskSafe() } catch (e: Exception) { null } }
             .filter { it.projectId == projectId }
     }.collectAsState(initial = emptyList())
 
@@ -141,7 +144,7 @@ fun ProjectDetailsScreen(
                     uploadedBy = auth.currentUser?.email ?: "Unknown",
                     uploadedAt = Clock.System.now().toEpochMilliseconds()
                 )
-                firestore.collection("projects").document(projectId).collection("files").add(projectFile)
+                firestore.collection("projects").document(projectId).collection("files").add(projectFile.toFirestoreMap())
             } catch (e: Exception) {
             } finally {
                 isUploading = false
@@ -162,7 +165,7 @@ fun ProjectDetailsScreen(
                     uploadedBy = auth.currentUser?.email ?: "Unknown",
                     uploadedAt = Clock.System.now().toEpochMilliseconds()
                 )
-                firestore.collection("projects").document(projectId).collection("files").add(projectFile)
+                firestore.collection("projects").document(projectId).collection("files").add(projectFile.toFirestoreMap())
             } catch (e: Exception) {
             } finally {
                 isUploading = false
@@ -174,8 +177,8 @@ fun ProjectDetailsScreen(
         firestore.collection("projects").document(projectId).snapshots.collect { snapshot ->
             if (snapshot.exists) {
                 try {
-                    project = snapshot.data<Project>().copy(id = snapshot.id)
-                } catch (e: Exception) {}
+                    project = snapshot.toProjectSafe()
+                } catch (_: Exception) {}
             }
         }
     }
@@ -313,7 +316,7 @@ fun ProjectDetailsScreen(
                                         attachmentName = name,
                                         timestamp = Clock.System.now().toEpochMilliseconds()
                                     )
-                                    firestore.collection("projects").document(projectId).collection("messages").add(msg)
+                                    firestore.collection("projects").document(projectId).collection("messages").add(msg.toFirestoreMap())
                                 }
                             },
                             onUploadAttachment = { pickedFile, onUrlReady ->
@@ -380,7 +383,7 @@ fun ProjectDetailsScreen(
                                 message = message,
                                 timestamp = Clock.System.now().toEpochMilliseconds()
                             )
-                            firestore.collection("broadcasts").add(alert)
+                            firestore.collection("broadcasts").add(alert.toFirestoreMap())
                             showProjectAlertDialog = false
                         }
                     }

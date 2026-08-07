@@ -44,13 +44,17 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
     ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
         Text(
             text = if (isRegistering) "Create Account" else "Crewsync",
             style = MaterialTheme.typography.headlineLarge,
@@ -60,20 +64,28 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         
         TextField(
             value = email,
-            onValueChange = { email = it },
+            onValueChange = { 
+                email = it 
+                if (errorMessage != null) errorMessage = null
+            },
             label = { Text("Email") },
             modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading
+            enabled = !isLoading,
+            singleLine = true
         )
         Spacer(modifier = Modifier.height(8.dp))
         
         TextField(
             value = password,
-            onValueChange = { password = it },
+            onValueChange = { 
+                password = it 
+                if (errorMessage != null) errorMessage = null
+            },
             label = { Text("Password") },
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
-            enabled = !isLoading
+            enabled = !isLoading,
+            singleLine = true
         )
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -108,6 +120,10 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         
         Spacer(modifier = Modifier.height(16.dp))
         
+        val cleanEmail = email.trim()
+        val cleanPassword = password.trim()
+        val isInputValid = cleanEmail.isNotEmpty() && cleanPassword.isNotEmpty()
+
         Button(
             onClick = { 
                 scope.launch {
@@ -115,34 +131,34 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                     errorMessage = null
                     try {
                         if (isRegistering) {
-                            val authResult = auth.createUserWithEmailAndPassword(email, password)
+                            val authResult = auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword)
                             val uid = authResult.user?.uid ?: ""
                             
                             // Check if a placeholder profile exists for this email
-                            val inviteSnap = firestore.collection("users").document(email).get()
+                            val inviteSnap = firestore.collection("users").document(cleanEmail).get()
                             if (inviteSnap.exists) {
                                 try {
                                     val invitedUser = inviteSnap.data<User>()
                                     // Move invitation data to UID-based doc
                                     firestore.collection("users").document(uid).set(invitedUser.copy(uid = uid))
                                     // Delete the email-based doc
-                                    firestore.collection("users").document(email).delete()
+                                    firestore.collection("users").document(cleanEmail).delete()
                                 } catch (e: Exception) {
                                     // Fallback if data format is old
-                                    firestore.collection("users").document(uid).set(User(uid = uid, email = email))
+                                    firestore.collection("users").document(uid).set(User(uid = uid, email = cleanEmail))
                                 }
                             } else {
                                 // determine role for new user
                                 val usersSnap = firestore.collection("users").get()
                                 val role = if (usersSnap.documents.isEmpty()) "Admin" else "Member"
-                                firestore.collection("users").document(uid).set(User(uid = uid, email = email, role = role))
+                                firestore.collection("users").document(uid).set(User(uid = uid, email = cleanEmail, role = role))
                             }
                         } else {
-                            auth.signInWithEmailAndPassword(email, password)
+                            auth.signInWithEmailAndPassword(cleanEmail, cleanPassword)
                         }
                         
                         if (rememberMe) {
-                            settings.putString("saved_email", email)
+                            settings.putString("saved_email", cleanEmail)
                         } else {
                             settings.putString("saved_email", "")
                         }
@@ -156,7 +172,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading && email.isNotEmpty() && password.isNotEmpty()
+            enabled = !isLoading && isInputValid
         ) {
             if (isLoading) {
                 CircularProgressIndicator(
@@ -194,6 +210,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
             )
         }
     }
+}
 
     if (showForgotPasswordDialog) {
         var resetEmail by remember { mutableStateOf(email) }
@@ -258,3 +275,4 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         )
     }
 }
+

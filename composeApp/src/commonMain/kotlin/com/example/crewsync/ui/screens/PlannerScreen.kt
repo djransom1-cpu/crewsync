@@ -53,7 +53,7 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
         .map { snapshot -> 
             snapshot.documents.mapNotNull { doc -> 
                 try {
-                    doc.data<Task>().copy(id = doc.id)
+                    doc.toTaskSafe()
                 } catch (e: Exception) { null }
             }.filter { it.projectId == projectId }
         }
@@ -144,7 +144,7 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
                         dueDate = due,
                         color = color
                     )
-                    firestore.collection("tasks").add(newTask)
+                    firestore.collection("tasks").add(newTask.toFirestoreMap())
                 }
             }
         )
@@ -173,7 +173,7 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
             onUpdateTask = { updatedTask ->
                 selectedTask = updatedTask
                 scope.launch {
-                    firestore.collection("tasks").document(updatedTask.id).set(updatedTask)
+                    firestore.collection("tasks").document(updatedTask.id).set(updatedTask.toFirestoreMap())
                 }
             },
             onUploadAttachment = { pickedFile, onUrlReady ->

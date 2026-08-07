@@ -10,26 +10,23 @@ external fun onSkikoInit(callback: () -> Unit)
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
-    js("""
-        if (typeof globalThis.os === 'undefined') {
-            globalThis.os = { tmpdir: function() { return '/tmp'; } };
-        } else if (typeof globalThis.os.tmpdir === 'undefined') {
-            globalThis.os.tmpdir = function() { return '/tmp'; };
+
+    var mounted = false
+
+    fun mount() {
+        if (mounted) return
+        val body = document.body ?: return
+        mounted = true
+        try {
+            initializeFirebase()
+        } catch (_: Throwable) {
         }
-    """)
+        ComposeViewport(body) {
+            App()
+        }
+    }
 
     val launchApp = {
-        fun mount() {
-            val body = document.body ?: return
-            try {
-                initializeFirebase()
-            } catch (_: Throwable) {
-            }
-            ComposeViewport(body) {
-                App()
-            }
-        }
-
         if (document.body != null) {
             mount()
         } else {
@@ -38,13 +35,25 @@ fun main() {
     }
 
     try {
-        val skikoInit = window.asDynamic().onSkikoInit
-        if (skikoInit != null) {
-            onSkikoInit {
+        val win = window.asDynamic()
+        if (win.onSkikoInit != null && js("typeof win.onSkikoInit === 'function'")) {
+            onSkikoInit { launchApp() }
+        } else if (win.Module != null) {
+            val mod = win.Module
+            if (mod.runtimeInitialized == true || mod.calledRun == true) {
                 launchApp()
+            } else {
+                val prevInit = mod.onRuntimeInitialized
+                mod.onRuntimeInitialized = {
+                    if (prevInit != null && js("typeof prevInit === 'function'")) {
+                        prevInit()
+                    }
+                    launchApp()
+                }
             }
         } else {
-            launchApp()
+            // Fallback delayed launch to allow skiko.wasm async instantiation
+            window.setTimeout({ launchApp() }, 100)
         }
     } catch (_: Throwable) {
         launchApp()

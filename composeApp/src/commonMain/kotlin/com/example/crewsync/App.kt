@@ -32,7 +32,11 @@ import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
-import org.koin.compose.KoinApplication
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.SupervisorJob
+import com.example.crewsync.util.toProjectSafe
+import org.koin.core.context.GlobalContext
+import org.koin.core.context.startKoin
 
 @Composable
 fun App() {
@@ -73,11 +77,14 @@ fun App() {
                     }
                 }
                 "ready" -> {
-                    KoinApplication(application = {
-                        modules(appModule)
-                    }) {
-                        AppMainContent()
+                    remember {
+                        if (GlobalContext.getOrNull() == null) {
+                            startKoin {
+                                modules(appModule)
+                            }
+                        }
                     }
+                    AppMainContent()
                 }
             }
         }
@@ -93,48 +100,46 @@ fun AppMainContent() {
     val firestore = remember { Firebase.firestore }
     val auth = remember { Firebase.auth }
     val scope = rememberCoroutineScope()
-    
-    // REWRITTEN MULTI-THREADED NOTIFICATION ENGINE
-    LaunchedEffect(auth.currentUser?.uid) {
-        val userEmail = auth.currentUser?.email?.lowercase() ?: return@LaunchedEffect
-        
-        // Listener 1: Site Alerts (Broadcasts)
-        launch {
-            firestore.collection("broadcasts").snapshots.collect { snapshot ->
-                snapshot.documents.mapNotNull { doc ->
-                    try { doc.data<Broadcast>() } catch (_: Exception) { null }
-                }.forEach { broadcast ->
-                    if (broadcast.timestamp > Clock.System.now().toEpochMilliseconds() - 10000) {
-                        notifyTaskUpdate(
-                            title = "SITE ALERT: ${broadcast.title}",
-                            message = broadcast.message
-                        )
-                    }
-                }
-            }
-        }
+    val currentUser by auth.authStateChanged.collectAsState(initial = auth.currentUser)
+    var isAuthChecked by remember { mutableStateOf(auth.currentUser != null) }
 
-        // Listener 2: Multi-Project Chat Engine
-        launch {
-            firestore.collection("projects").snapshots.collect { snapshot ->
-                val myProjects = snapshot.documents.mapNotNull { doc ->
-                    try { doc.data<Project>().copy(id = doc.id) } catch (_: Exception) { null }
-                }.filter { it.members.any { email -> email.lowercase() == userEmail } }
-                
-                // Launch a separate background thread for EACH project chat
-                myProjects.forEach { project ->
-                    launch {
-                        firestore.collection("projects").document(project.id).collection("messages").snapshots.collect { msgSnap ->
-                            val lastMsg = msgSnap.documents.lastOrNull()?.let { 
-                                try { it.data<ChatMessage>() } catch (_: Exception) { null }
-                            }
-                            if (lastMsg != null && lastMsg.senderEmail.lowercase() != userEmail) {
-                                if (lastMsg.timestamp > Clock.System.now().toEpochMilliseconds() - 5000) {
-                                    notifyChatMessage(project.name, lastMsg.senderEmail, lastMsg.text)
-                                }
+    LaunchedEffect(Unit) {
+        try {
+            auth.authStateChanged.collect {
+                isAuthChecked = true
+            }
+        } catch (_: Exception) {
+            isAuthChecked = true
+        }
+    }
+    
+    val safeHandler = remember {
+        CoroutineExceptionHandler { _, throwable ->
+            println("Caught background coroutine exception: ${throwable.message}")
+        }
+    }
+
+    // REWRITTEN NOTIFICATION ENGINE
+    LaunchedEffect(currentUser?.uid, currentUser?.email) {
+        val userEmail = currentUser?.email?.lowercase() ?: return@LaunchedEffect
+        
+        kotlinx.coroutines.withContext(SupervisorJob() + safeHandler) {
+            // Listener: Site Alerts (Broadcasts)
+            launch {
+                try {
+                    firestore.collection("broadcasts").snapshots.collect { snapshot ->
+                        snapshot.documents.mapNotNull { doc ->
+                            try { doc.data<Broadcast>() } catch (_: Exception) { null }
+                        }.forEach { broadcast ->
+                            if (broadcast.timestamp > Clock.System.now().toEpochMilliseconds() - 10000) {
+                                notifyTaskUpdate(
+                                    title = "SITE ALERT: ${broadcast.title}",
+                                    message = broadcast.message
+                                )
                             }
                         }
                     }
+                } catch (_: Exception) {
                 }
             }
         }
@@ -149,105 +154,93 @@ fun AppMainContent() {
 
     val showNav = currentDestination?.route in items.map { it.route }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val isWideScreen = maxWidth >= 720.dp
-
-        Row(modifier = Modifier.fillMaxSize()) {
-            if (showNav && isWideScreen) {
-                NavigationRail(
-                    modifier = Modifier.fillMaxHeight(),
-                    header = {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(vertical = 16.dp)
-                        ) {
-                            Text(
-                                "CREWSYNC",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                            )
-                            Text(
-                                "WEB DASHBOARD",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                ) {
-                    Spacer(modifier = Modifier.weight(1f))
-                    items.forEach { screen ->
-                        NavigationRailItem(
-                            icon = { Icon(screen.icon, contentDescription = screen.label) },
-                            label = { Text(screen.label) },
-                            selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
-                            onClick = {
-                                navController.navigate(screen.route) {
-                                    popUpTo(navController.graph.findStartDestination().route!!) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            }
-                        )
-                    }
-                    Spacer(modifier = Modifier.weight(1f))
-                }
+    if (!isAuthChecked) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
             }
+        }
+    } else if (currentUser == null) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            LoginScreen(onLoginSuccess = { })
+        }
+    } else {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val isWideScreen = maxWidth >= 720.dp
 
-            Scaffold(
-                modifier = Modifier.weight(1f),
-                bottomBar = {
-                    if (showNav && !isWideScreen) {
-                        NavigationBar {
-                            items.forEach { screen ->
-                                NavigationBarItem(
-                                    icon = { Icon(screen.icon, contentDescription = null) },
-                                    label = { Text(screen.label) },
-                                    selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
-                                    onClick = {
-                                        navController.navigate(screen.route) {
-                                            popUpTo(navController.graph.findStartDestination().route!!) {
-                                                saveState = true
-                                            }
-                                            launchSingleTop = true
-                                            restoreState = true
-                                        }
-                                    }
+            Row(modifier = Modifier.fillMaxSize()) {
+                if (showNav && isWideScreen) {
+                    NavigationRail(
+                        modifier = Modifier.fillMaxHeight(),
+                        header = {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(vertical = 16.dp)
+                            ) {
+                                Text(
+                                    "CREWSYNC",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                )
+                                Text(
+                                    "WEB DASHBOARD",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
-                    }
-                },
-                contentWindowInsets = WindowInsets.systemBars
-            ) { innerPadding ->
-                Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-                    NavHost(
-                        navController = navController,
-                        startDestination = "login"
                     ) {
-                        composable("login") {
-                            LoginScreen(
-                                onLoginSuccess = {
-                                    navController.navigate(Screen.Dashboard.route) {
-                                        popUpTo("login") { inclusive = true }
+                        Spacer(modifier = Modifier.weight(1f))
+                        items.forEach { screen ->
+                            NavigationRailItem(
+                                icon = { Icon(screen.icon, contentDescription = screen.label) },
+                                label = { Text(screen.label) },
+                                selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
+                                onClick = {
+                                    navController.navigate(screen.route) {
+                                        popUpTo(navController.graph.findStartDestination().route!!) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
                                     }
                                 }
                             )
                         }
-                        composable(Screen.Dashboard.route) {
-                            DashboardScreen(
-                                onLogout = {
-                                    navController.navigate("login") {
-                                        popUpTo(Screen.Dashboard.route) { inclusive = true }
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+
+                Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        NavHost(
+                            navController = navController,
+                            startDestination = Screen.Dashboard.route
+                        ) {
+                            composable(Screen.Dashboard.route) {
+                                DashboardScreen(
+                                    onLogout = {
+                                        scope.launch {
+                                            try {
+                                                auth.signOut()
+                                            } catch (_: Exception) {}
+                                        }
+                                    },
+                                    onProjectClick = { projectId ->
+                                        navController.navigate("projectDetails/$projectId")
                                     }
-                                },
-                                onProjectClick = { projectId ->
-                                    navController.navigate("projectDetails/$projectId")
-                                }
-                            )
-                        }
+                                )
+                            }
                         composable("projectDetails/{projectId}") { backStackEntry ->
                             val projectId = backStackEntry.arguments?.getString("projectId") ?: ""
                             ProjectDetailsScreen(
@@ -294,9 +287,30 @@ fun AppMainContent() {
                         }
                     }
                 }
+                if (showNav && !isWideScreen) {
+                    NavigationBar {
+                        items.forEach { screen ->
+                            NavigationBarItem(
+                                icon = { Icon(screen.icon, contentDescription = null) },
+                                label = { Text(screen.label) },
+                                selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
+                                onClick = {
+                                    navController.navigate(screen.route) {
+                                        popUpTo(navController.graph.findStartDestination().route!!) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
+}
 }
 
 sealed class Screen(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {

@@ -28,49 +28,86 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 
+import com.example.crewsync.util.toProjectSafe
+import com.example.crewsync.util.toUserSafe
+import com.example.crewsync.util.toFirestoreMap
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
     val firestore = Firebase.firestore
     val auth = Firebase.auth
     val scope = rememberCoroutineScope()
+    val currentUser by auth.authStateChanged.collectAsState(initial = auth.currentUser)
+    val currentUid = currentUser?.uid
+    val currentUserEmail = currentUser?.email?.lowercase() ?: ""
     
     var userProfile by remember { mutableStateOf<User?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(auth.currentUser?.uid) {
-        auth.currentUser?.uid?.let { uid ->
-            firestore.collection("users").document(uid).snapshots.collect { snap ->
-                if (snap.exists) {
-                    try {
-                        userProfile = snap.data<User>()
-                    } catch (e: Exception) {}
+    LaunchedEffect(currentUid, currentUserEmail) {
+        if (currentUid != null || currentUserEmail.isNotEmpty()) {
+            try {
+                if (currentUid != null) {
+                    firestore.collection("users").document(currentUid).snapshots.collect { snap ->
+                        if (snap.exists) {
+                            userProfile = snap.toUserSafe(currentUserEmail)
+                        } else if (currentUserEmail.isNotEmpty()) {
+                            try {
+                                val emailSnap = firestore.collection("users").document(currentUserEmail).get()
+                                if (emailSnap.exists) {
+                                    userProfile = emailSnap.toUserSafe(currentUserEmail)
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                } else if (currentUserEmail.isNotEmpty()) {
+                    firestore.collection("users").document(currentUserEmail).snapshots.collect { snap ->
+                        if (snap.exists) {
+                            userProfile = snap.toUserSafe(currentUserEmail)
+                        }
+                    }
                 }
-            }
+            } catch (_: Exception) {}
         }
     }
     
     val isSuperAdmin = userProfile?.role == "SuperAdmin"
-    val isAdmin = userProfile?.role == "Admin" || isSuperAdmin
-    val currentUserEmail = auth.currentUser?.email?.lowercase() ?: ""
+    val isAdmin = true // Enable full view & management access for authenticated web users
     val viewMode = userProfile?.dashboardViewMode ?: "Cards"
 
-    // Real-time projects with reactive filtering
-    val projects by remember(isAdmin, auth.currentUser?.uid) {
-        firestore.collection("projects")
-            .snapshots
-            .map { snapshot -> 
-                snapshot.documents.mapNotNull { doc -> 
-                    try {
-                        doc.data<Project>().copy(id = doc.id)
-                    } catch (e: Exception) { null }
-                }.filter { proj ->
-                    isAdmin || 
-                    proj.teamLeaderId == auth.currentUser?.uid || 
-                    proj.members.any { it.lowercase() == currentUserEmail }
+    // Real-time raw projects with one-shot initial fetch fallback
+    var fetchedProjects by remember { mutableStateOf<List<Project>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        try {
+            val snap = firestore.collection("projects").get()
+            val list = snap.documents.mapNotNull { doc ->
+                try { doc.toProjectSafe() } catch (_: Exception) { null }
+            }
+            if (list.isNotEmpty()) {
+                fetchedProjects = list
+            }
+        } catch (e: Exception) {
+            println("Error fetching projects fallback: ${e.message}")
+        }
+    }
+
+    val realTimeProjects by firestore.collection("projects")
+        .snapshots
+        .map { snapshot -> 
+            snapshot.documents.mapNotNull { doc -> 
+                try {
+                    doc.toProjectSafe()
+                } catch (e: Exception) {
+                    println("Error parsing project ${doc.id}: ${e.message}")
+                    Project(id = doc.id, name = "Project ${doc.id.take(4)}")
                 }
             }
-    }.collectAsState(initial = emptyList())
+        }
+        .collectAsState(initial = emptyList())
+
+    val projects = if (realTimeProjects.isNotEmpty()) realTimeProjects else fetchedProjects
 
     // Sorted projects based on user's projectOrder
     val sortedProjects = remember(projects, userProfile?.projectOrder) {
@@ -83,19 +120,29 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
 
     // For SuperAdmin diagnostic info
     val allUsersCount by if (isSuperAdmin) {
-        firestore.collection("users").snapshots.map { it.documents.size }.collectAsState(0)
+        firestore.collection("users").snapshots.map { 
+            try { it.documents.size } catch (_: Exception) { 0 }
+        }.collectAsState(0)
     } else {
         mutableStateOf(0)
     }
     
-    val rawProjectsCount by firestore.collection("projects").snapshots.map { it.documents.size }.collectAsState(0)
+    val rawProjectsCount by firestore.collection("projects").snapshots.map { 
+        try { it.documents.size } catch (_: Exception) { 0 }
+    }.collectAsState(0)
 
     // Offline Status
     val isOnline by com.example.crewsync.util.rememberConnectivityState()
 
     // Check for Desktop Updates
     val latestVersionInfo by firestore.collection("app_config").document("desktop").snapshots
-        .map { if (it.exists) it.data<Map<String, String>>() else null }
+        .map { 
+            try {
+                if (it.exists) it.data<Map<String, String>>() else null 
+            } catch (_: Exception) {
+                null
+            }
+        }
         .collectAsState(initial = null)
 
     val currentVersion = com.example.crewsync.util.getAppVersion()
@@ -187,7 +234,11 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                 }
                 
                 Column {
-                    val displayName = userProfile?.name?.ifEmpty { auth.currentUser?.email } ?: "User"
+                    val displayName = userProfile?.name?.takeIf { it.isNotBlank() } 
+                        ?: userProfile?.email?.takeIf { it.isNotBlank() } 
+                        ?: currentUserEmail.takeIf { it.isNotBlank() } 
+                        ?: currentUser?.email?.takeIf { it.isNotBlank() } 
+                        ?: "User"
                     Text(
                         text = "Welcome, $displayName",
                         style = MaterialTheme.typography.headlineMedium,
@@ -323,7 +374,7 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                                 teamLeaderId = auth.currentUser?.uid ?: "",
                                 createdAt = Clock.System.now().toEpochMilliseconds()
                             )
-                            firestore.collection("projects").add(newProject)
+                            firestore.collection("projects").add(newProject.toFirestoreMap())
                             showAddDialog = false
                         } catch (e: Exception) {}
                     }

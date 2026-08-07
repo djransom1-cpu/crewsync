@@ -21,6 +21,7 @@ import coil3.compose.AsyncImage
 import com.example.crewsync.data.model.User
 import com.example.crewsync.util.rememberFilePickerLauncher
 import com.example.crewsync.util.uploadFile
+import com.example.crewsync.util.toFirestoreMap
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
@@ -55,6 +56,8 @@ fun ProfileScreen() {
                 val path = "profile_pictures/$uid"
                 val url = uploadFile(path, pickedFile.platformFile)
                 profilePictureUrl = url
+                firestore.collection("users").document(uid).update("profilePictureUrl" to url)
+                snackbarHostState.showSnackbar("Profile picture uploaded!")
             } catch (e: Exception) {
                 snackbarHostState.showSnackbar("Failed to upload image: ${e.message}")
             } finally {
@@ -125,7 +128,7 @@ fun ProfileScreen() {
                         role = role,
                         profilePictureUrl = profilePictureUrl
                     )
-                    firestore.collection("users").document(uid).set(updatedUser)
+                    firestore.collection("users").document(uid).set(updatedUser.toFirestoreMap())
                     snackbarHostState.showSnackbar("Profile updated successfully!")
                 }
             }) {

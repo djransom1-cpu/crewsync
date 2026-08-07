@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import com.example.crewsync.data.model.ChatMessage
 import com.example.crewsync.ui.components.ChatTab
 import com.example.crewsync.util.uploadFile
+import com.example.crewsync.util.toFirestoreMap
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
@@ -60,7 +61,7 @@ fun DirectChatScreen(otherUserEmail: String, onBack: () -> Unit) {
                             attachmentName = name,
                             timestamp = Clock.System.now().toEpochMilliseconds()
                         )
-                        firestore.collection("direct_messages").document(chatId).collection("messages").add(msg)
+                        firestore.collection("direct_messages").document(chatId).collection("messages").add(msg.toFirestoreMap())
                     }
                 },
                 onUploadAttachment = { pickedFile, onUrlReady ->

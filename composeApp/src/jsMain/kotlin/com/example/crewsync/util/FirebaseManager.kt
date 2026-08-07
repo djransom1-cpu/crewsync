@@ -8,8 +8,9 @@ actual fun initializeFirebase() {
     try {
         Firebase.initialize(
             options = FirebaseOptions(
-                applicationId = "1:516480819680:web:221b188f2a1a12a2b14b85",
+                applicationId = "gen-lang-client-0438127279",
                 apiKey = "AIzaSyD7VnuipzkUGy3aQ6Pg0jhIfw24IjjsayI",
+                authDomain = "gen-lang-client-0438127279.firebaseapp.com",
                 projectId = "gen-lang-client-0438127279",
                 storageBucket = "gen-lang-client-0438127279.firebasestorage.app"
             )

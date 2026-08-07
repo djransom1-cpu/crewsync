@@ -140,9 +140,9 @@ fun CalendarScreen(
                 onConfirm = { appt ->
                     scope.launch {
                         if (appt.id.isEmpty()) {
-                            firestore.collection("projects").document(projectId).collection("appointments").add(appt)
+                            firestore.collection("projects").document(projectId).collection("appointments").add(appt.toFirestoreMap())
                         } else {
-                            firestore.collection("projects").document(projectId).collection("appointments").document(appt.id).set(appt)
+                            firestore.collection("projects").document(projectId).collection("appointments").document(appt.id).set(appt.toFirestoreMap())
                         }
                         showAddAppointmentDialog = false
                         appointmentToEdit = null
