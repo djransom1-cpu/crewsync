@@ -72,6 +72,7 @@ fun DocumentSnapshot.toTaskSafe(): com.example.crewsync.data.model.Task {
             val descStr: String = try { this.get("description") } catch (_: Exception) { "" }
             val statusStr: String = try { this.get("status") } catch (_: Exception) { "Not Started" }
             val assigned: String? = try { this.get("assignedTo") } catch (_: Exception) { null }
+            val assignedList: List<String> = try { this.get("assignedMembers") } catch (_: Exception) { emptyList() }
             val colorStr: String = try { this.get("color") } catch (_: Exception) { "#FFFFFF" }
             val start: Long? = try { this.get("startDate") } catch (_: Exception) { null }
             val due: Long? = try { this.get("dueDate") } catch (_: Exception) { null }
@@ -83,6 +84,7 @@ fun DocumentSnapshot.toTaskSafe(): com.example.crewsync.data.model.Task {
                 description = descStr,
                 status = statusStr,
                 assignedTo = assigned,
+                assignedMembers = if (assignedList.isNotEmpty()) assignedList else (if (assigned != null) listOf(assigned) else emptyList()),
                 color = colorStr,
                 startDate = start,
                 dueDate = due
@@ -101,6 +103,7 @@ fun com.example.crewsync.data.model.Task.toFirestoreMap(): Map<String, Any?> {
     map["description"] = description
     map["status"] = status
     if (assignedTo != null) map["assignedTo"] = assignedTo
+    map["assignedMembers"] = assignedMembers
     map["color"] = color
     if (startDate != null) map["startDate"] = startDate.toDouble()
     if (dueDate != null) map["dueDate"] = dueDate.toDouble()

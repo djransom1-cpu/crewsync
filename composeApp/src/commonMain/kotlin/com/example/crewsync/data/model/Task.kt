@@ -9,13 +9,22 @@ data class Task(
     val title: String = "",
     val description: String = "",
     val status: String = "Not Started",
-    val assignedTo: String? = null, // Email of the assigned member
-    val color: String = "#FFFFFF", // Hex color for the card
+    val assignedTo: String? = null,
+    val assignedMembers: List<String> = emptyList(),
+    val color: String = "#FFFFFF",
     val startDate: Long? = null,
     val dueDate: Long? = null,
     val checklist: List<ChecklistItem> = emptyList(),
     val attachments: List<ProjectFile> = emptyList()
-)
+) {
+    fun getAllAssignedEmails(): List<String> {
+        val list = assignedMembers.toMutableList()
+        if (assignedTo != null && assignedTo.isNotBlank() && !list.contains(assignedTo)) {
+            list.add(assignedTo)
+        }
+        return list
+    }
+}
 
 @Serializable
 data class ChecklistItem(
