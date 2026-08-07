@@ -44,6 +44,7 @@ fun DocumentSnapshot.toUserSafe(fallbackEmail: String = ""): User {
             val tokenStr: String? = try { this.get("fcmToken") } catch (_: Exception) { null }
             val orderList: List<String> = try { this.get("projectOrder") } catch (_: Exception) { emptyList() }
             val viewModeStr: String = try { this.get("dashboardViewMode") } catch (_: Exception) { "Cards" }
+            val firstDayStr: String = try { this.get("firstDayOfWeek") } catch (_: Exception) { "Sunday" }
             User(
                 uid = this.id,
                 email = emailStr,
@@ -54,7 +55,8 @@ fun DocumentSnapshot.toUserSafe(fallbackEmail: String = ""): User {
                 profilePictureUrl = picUrl,
                 fcmToken = tokenStr,
                 projectOrder = orderList,
-                dashboardViewMode = viewModeStr
+                dashboardViewMode = viewModeStr,
+                firstDayOfWeek = firstDayStr
             )
         } catch (_: Exception) {
             User(uid = this.id, email = fallbackEmail)
@@ -213,6 +215,7 @@ fun User.toFirestoreMap(): Map<String, Any?> {
     if (fcmToken != null) map["fcmToken"] = fcmToken
     map["projectOrder"] = projectOrder
     map["dashboardViewMode"] = dashboardViewMode
+    map["firstDayOfWeek"] = firstDayOfWeek
     return map
 }
 

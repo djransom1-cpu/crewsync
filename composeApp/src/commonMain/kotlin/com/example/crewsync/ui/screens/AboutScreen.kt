@@ -12,7 +12,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.crewsync.data.model.Feedback
 import com.example.crewsync.data.model.User
 import com.example.crewsync.util.getAppVersion
@@ -96,7 +98,41 @@ fun AboutScreen(onNavigateToReports: () -> Unit) {
                 )
             }
             
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Calendar First Day Preference
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Calendar Preferences", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                    Text("First day of the week:", fontSize = 12.sp, color = Color.Gray)
+                    
+                    val currentFirstDay = userProfile?.firstDayOfWeek ?: "Sunday"
+                    val options = listOf("Sunday", "Monday", "Saturday")
+                    
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        options.forEach { dayOption ->
+                            FilterChip(
+                                selected = currentFirstDay == dayOption,
+                                onClick = {
+                                    scope.launch {
+                                        auth.currentUser?.uid?.let { uid ->
+                                            firestore.collection("users").document(uid).update("firstDayOfWeek" to dayOption)
+                                            userProfile = userProfile?.copy(firstDayOfWeek = dayOption)
+                                            snackbarHostState.showSnackbar("Calendar set to start on $dayOption")
+                                        }
+                                    }
+                                },
+                                label = { Text(dayOption, fontSize = 12.sp) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
 
             Button(
                 onClick = { showFeedbackDialog = true },

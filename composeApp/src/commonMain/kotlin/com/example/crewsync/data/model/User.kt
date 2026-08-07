@@ -13,5 +13,6 @@ data class User(
     val profilePictureUrl: String? = null,
     val fcmToken: String? = null,
     val projectOrder: List<String> = emptyList(),
-    val dashboardViewMode: String = "Cards" // "Cards" or "List"
+    val dashboardViewMode: String = "Cards", // "Cards" or "List"
+    val firstDayOfWeek: String = "Sunday" // "Sunday", "Monday", or "Saturday"
 )
