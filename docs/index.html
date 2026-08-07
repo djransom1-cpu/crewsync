@@ -8,11 +8,73 @@
     <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" href="favicon.png">
     <script type="text/javascript">
-        if (typeof globalThis.os === 'undefined') {
-            globalThis.os = { tmpdir: function() { return '/tmp'; } };
-        } else if (typeof globalThis.os.tmpdir === 'undefined') {
-            globalThis.os.tmpdir = function() { return '/tmp'; };
-        }
+        (function() {
+            var tmpFn = function() { return '/tmp'; };
+            var osObj = {
+                tmpdir: tmpFn,
+                homedir: function() { return '/home'; },
+                hostname: function() { return 'localhost'; },
+                platform: function() { return 'browser'; },
+                release: function() { return '1.0.0'; },
+                type: function() { return 'Browser'; },
+                endianness: function() { return 'LE'; }
+            };
+
+            if (typeof globalThis !== 'undefined') {
+                globalThis.os = globalThis.os || osObj;
+                if (!globalThis.os.tmpdir) globalThis.os.tmpdir = tmpFn;
+            }
+            if (typeof window !== 'undefined') {
+                window.os = window.os || osObj;
+                if (!window.os.tmpdir) window.os.tmpdir = tmpFn;
+            }
+            if (typeof process === 'undefined') {
+                globalThis.process = { env: {}, binding: function() { return osObj; } };
+            } else {
+                if (!process.env) process.env = {};
+            }
+
+            if (typeof globalThis.require === 'undefined') {
+                globalThis.require = function(mod) {
+                    if (mod === 'os') return osObj;
+                    if (mod === 'fs') return { readFileSync: function() { return ''; }, existsSync: function() { return false; } };
+                    if (mod === 'path') return { resolve: function() { return ''; }, join: function() { return ''; } };
+                    return {};
+                };
+            }
+
+            // WebGL Extension Polyfill for Skiko.js stability
+            (function() {
+                var getContext = HTMLCanvasElement.prototype.getContext;
+                if (getContext) {
+                    HTMLCanvasElement.prototype.getContext = function(type, attributes) {
+                        var gl = getContext.call(this, type, attributes);
+                        if (gl && (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl')) {
+                            try {
+                                var origGetParam = gl.getParameter;
+                                gl.getParameter = function(pname) {
+                                    if (pname === 0x9245) return 'WebKit';
+                                    if (pname === 0x9246) return 'WebKit WebGL';
+                                    try {
+                                        return origGetParam.call(this, pname);
+                                    } catch(e) {
+                                        return '';
+                                    }
+                                };
+                            } catch(e) {}
+                        }
+                        return gl;
+                    };
+                }
+            })();
+
+            window.addEventListener('unhandledrejection', function(event) {
+                console.error('UNHANDLED COROUTINE PROMISE REJECTION:', event.reason);
+            });
+            window.addEventListener('error', function(event) {
+                console.error('UNHANDLED COROUTINE ERROR:', event.error || event.message);
+            });
+        })();
     </script>
     <style>
         html, body {
