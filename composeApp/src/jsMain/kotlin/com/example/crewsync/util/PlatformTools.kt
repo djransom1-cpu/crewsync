@@ -20,17 +20,47 @@ actual fun sendEmail(address: String, subject: String, body: String) {
 
 @Composable
 actual fun rememberConnectivityState(): State<Boolean> {
-    return remember { mutableStateOf(true) } // Browser usually has consistent state
+    return remember { mutableStateOf(true) }
 }
 
-actual fun getAppVersion(): String = "1.3-Web"
+actual fun getAppVersion(): String = "1.4-Web"
 
 actual fun notifyTaskUpdate(title: String, message: String) {
-    // Browser notification placeholder
+    try {
+        js("""
+            if ('Notification' in window) {
+                if (Notification.permission === 'granted') {
+                    new Notification(title, { body: message });
+                } else if (Notification.permission !== 'denied') {
+                    Notification.requestPermission().then(function (permission) {
+                        if (permission === 'granted') {
+                            new Notification(title, { body: message });
+                        }
+                    });
+                }
+            }
+        """)
+    } catch (_: Throwable) {}
 }
 
 actual fun notifyChatMessage(projectId: String, senderName: String, message: String) {
-    // Browser notification placeholder
+    try {
+        val notifTitle = "Crew Chat - " + senderName
+        val notifBody = message
+        js("""
+            if ('Notification' in window) {
+                if (Notification.permission === 'granted') {
+                    new Notification(notifTitle, { body: notifBody });
+                } else if (Notification.permission !== 'denied') {
+                    Notification.requestPermission().then(function (permission) {
+                        if (permission === 'granted') {
+                            new Notification(notifTitle, { body: notifBody });
+                        }
+                    });
+                }
+            }
+        """)
+    } catch (_: Throwable) {}
 }
 
 actual fun addToExternalCalendar(appointment: Appointment) {

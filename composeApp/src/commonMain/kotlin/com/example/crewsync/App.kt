@@ -119,12 +119,14 @@ fun AppMainContent() {
         }
     }
 
-    // REWRITTEN NOTIFICATION ENGINE
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // GLOBAL CROSS-PLATFORM NOTIFICATION ENGINE
     LaunchedEffect(currentUser?.uid, currentUser?.email) {
         val userEmail = currentUser?.email?.lowercase() ?: return@LaunchedEffect
         
         kotlinx.coroutines.withContext(SupervisorJob() + safeHandler) {
-            // Listener: Site Alerts (Broadcasts)
+            // Listener 1: Site Alerts (Broadcasts)
             launch {
                 try {
                     firestore.collection("broadcasts").snapshots.collect { snapshot ->
@@ -136,11 +138,40 @@ fun AppMainContent() {
                                     title = "SITE ALERT: ${broadcast.title}",
                                     message = broadcast.message
                                 )
+                                snackbarHostState.showSnackbar("🚨 SITE ALERT: ${broadcast.title} - ${broadcast.message}")
                             }
                         }
                     }
                 } catch (_: Exception) {
                 }
+            }
+
+            // Listener 2: Project Chat Messages Across User Projects
+            launch {
+                try {
+                    firestore.collection("projects").snapshots.collect { snapshot ->
+                        val projectIds = snapshot.documents.map { it.id }
+                        projectIds.forEach { projId ->
+                            launch {
+                                try {
+                                    firestore.collection("projects").document(projId).collection("messages").snapshots.collect { msgSnap ->
+                                        val msgs = msgSnap.documents.mapNotNull { doc ->
+                                            try { doc.data<ChatMessage>().copy(id = doc.id) } catch (_: Exception) { null }
+                                        }
+                                        if (msgs.isNotEmpty()) {
+                                            val last = msgs.maxByOrNull { it.timestamp }
+                                            if (last != null && last.senderEmail.lowercase() != userEmail && last.timestamp > Clock.System.now().toEpochMilliseconds() - 8000) {
+                                                val sender = last.senderEmail.substringBefore("@")
+                                                notifyChatMessage(projId, sender, last.text)
+                                                snackbarHostState.showSnackbar("💬 Chat ($sender): ${last.text}")
+                                            }
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
             }
         }
     }
@@ -307,6 +338,13 @@ fun AppMainContent() {
                         }
                     }
                 }
+            }
+
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                SnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
             }
         }
     }
