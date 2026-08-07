@@ -748,6 +748,7 @@ fun ManageBucketsDialog(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TaskDetailsDialog(
     task: Task,
@@ -762,15 +763,22 @@ fun TaskDetailsDialog(
     var description by remember { mutableStateOf(task.description) }
     var assignedTo by remember { mutableStateOf(task.assignedTo) }
     var status by remember { mutableStateOf(task.status) }
-    var color by remember { mutableStateOf(task.color) }
+    var selectedColor by remember { mutableStateOf(task.color) }
     var checklist by remember { mutableStateOf(task.checklist) }
     var newCheckitemText by remember { mutableStateOf("") }
 
-    val scope = rememberCoroutineScope()
+    var startDate by remember { mutableStateOf(task.startDate) }
+    var dueDate by remember { mutableStateOf(task.dueDate) }
+
+    var showStartDatePicker by remember { mutableStateOf(false) }
+    var showDueDatePicker by remember { mutableStateOf(false) }
+    var showMemberPicker by remember { mutableStateOf(false) }
+
+    val colors = listOf("#FFFFFF", "#FFCDD2", "#C8E6C9", "#BBDEFB", "#FFF9C4", "#E1BEE7", "#F5F5F5", "#212121", "#38BDF8", "#EF4444", "#F59E0B", "#10B981")
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Task Card Details") },
+        title = { Text("Task Card Details & Subtasks", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
@@ -786,8 +794,33 @@ fun TaskDetailsDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                // Assignee Picker
+                Column {
+                    Text("Assigned Crew Member", style = MaterialTheme.typography.labelMedium)
+                    Box {
+                        OutlinedButton(onClick = { showMemberPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                            val assignedName = userMap[assignedTo ?: ""] ?: "Unassigned"
+                            Text(assignedName)
+                        }
+                        DropdownMenu(expanded = showMemberPicker, onDismissRequest = { showMemberPicker = false }) {
+                            DropdownMenuItem(text = { Text("Unassigned") }, onClick = { 
+                                assignedTo = null
+                                showMemberPicker = false 
+                            })
+                            members.forEach { email ->
+                                val name = userMap[email] ?: email
+                                DropdownMenuItem(text = { Text(name) }, onClick = { 
+                                    assignedTo = email
+                                    showMemberPicker = false 
+                                })
+                            }
+                        }
+                    }
+                }
+
+                // Status Bucket
                 Text("Status Bucket", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     allBuckets.forEach { bucket ->
                         FilterChip(
                             selected = status == bucket,
@@ -797,18 +830,65 @@ fun TaskDetailsDialog(
                     }
                 }
 
-                Text("Checklist Subtasks:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                // Card Color Picker
+                Column {
+                    Text("Card Color", style = MaterialTheme.typography.labelMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        colors.forEach { hex ->
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(parseColor(hex)))
+                                    .border(
+                                        width = if (selectedColor == hex) 2.dp else 1.dp,
+                                        color = if (selectedColor == hex) MaterialTheme.colorScheme.primary else Color.LightGray,
+                                        shape = CircleShape
+                                    )
+                                    .clickable { selectedColor = hex }
+                            )
+                        }
+                    }
+                }
+
+                // Dates
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { showStartDatePicker = true }, modifier = Modifier.weight(1f)) {
+                        Text(startDate?.let { "Start: ${formatDate(it)}" } ?: "Set Start Date")
+                    }
+                    Button(onClick = { showDueDatePicker = true }, modifier = Modifier.weight(1f)) {
+                        Text(dueDate?.let { "Due: ${formatDate(it)}" } ?: "Set Due Date")
+                    }
+                }
+
+                // Checklist Editing
+                HorizontalDivider()
+                Text("Checklist & Steps (${checklist.count { it.isDone }}/${checklist.size}):", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 checklist.forEachIndexed { idx, item ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = item.isDone,
-                            onCheckedChange = { isDone ->
-                                val updated = checklist.toMutableList()
-                                updated[idx] = item.copy(isDone = isDone)
-                                checklist = updated
-                            }
-                        )
-                        Text(item.text, fontSize = 12.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Checkbox(
+                                checked = item.isDone,
+                                onCheckedChange = { isDone ->
+                                    val updated = checklist.toMutableList()
+                                    updated[idx] = item.copy(isDone = isDone)
+                                    checklist = updated
+                                }
+                            )
+                            Text(item.text, fontSize = 12.sp)
+                        }
+                        IconButton(onClick = {
+                            checklist = checklist.filterIndexed { i, _ -> i != idx }
+                        }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Remove Step", tint = Color.Red, modifier = Modifier.size(16.dp))
+                        }
                     }
                 }
 
@@ -816,17 +896,43 @@ fun TaskDetailsDialog(
                     OutlinedTextField(
                         value = newCheckitemText,
                         onValueChange = { newCheckitemText = it },
-                        label = { Text("Add Checklist Step") },
+                        label = { Text("Add New Checklist Step") },
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(Modifier.width(6.dp))
                     Button(onClick = {
                         if (newCheckitemText.isNotBlank()) {
-                            checklist = checklist + ChecklistItem(id = "chk_" + Clock.System.now().toEpochMilliseconds(), text = newCheckitemText, isDone = false)
+                            checklist = checklist + ChecklistItem(id = "chk_" + Clock.System.now().toEpochMilliseconds(), text = newCheckitemText.trim(), isDone = false)
                             newCheckitemText = ""
                         }
                     }) { Text("Add") }
                 }
+            }
+
+            if (showStartDatePicker) {
+                val state = rememberDatePickerState()
+                DatePickerDialog(
+                    onDismissRequest = { showStartDatePicker = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            startDate = state.selectedDateMillis
+                            showStartDatePicker = false
+                        }) { Text("OK") }
+                    }
+                ) { DatePicker(state = state) }
+            }
+
+            if (showDueDatePicker) {
+                val state = rememberDatePickerState()
+                DatePickerDialog(
+                    onDismissRequest = { showDueDatePicker = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            dueDate = state.selectedDateMillis
+                            showDueDatePicker = false
+                        }) { Text("OK") }
+                    }
+                ) { DatePicker(state = state) }
             }
         },
         confirmButton = {
@@ -836,7 +942,9 @@ fun TaskDetailsDialog(
                     description = description,
                     assignedTo = assignedTo,
                     status = status,
-                    color = color,
+                    color = selectedColor,
+                    startDate = startDate,
+                    dueDate = dueDate,
                     checklist = checklist
                 )
                 onSave(updated)
