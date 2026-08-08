@@ -107,15 +107,18 @@ fun AppMainContent() {
     val firestore = remember { Firebase.firestore }
     val auth = remember { Firebase.auth }
     val scope = rememberCoroutineScope()
-    val currentUser by auth.authStateChanged.collectAsState(initial = auth.currentUser)
-    var isAuthChecked by remember { mutableStateOf(auth.currentUser != null) }
+    val authStateFlow = remember(auth) {
+        try { auth.authStateChanged } catch (_: Throwable) { kotlinx.coroutines.flow.emptyFlow() }
+    }
+    val currentUser by authStateFlow.collectAsState(initial = null)
+    var isAuthChecked by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         try {
-            auth.authStateChanged.collect {
+            authStateFlow.collect {
                 isAuthChecked = true
             }
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             isAuthChecked = true
         }
     }
