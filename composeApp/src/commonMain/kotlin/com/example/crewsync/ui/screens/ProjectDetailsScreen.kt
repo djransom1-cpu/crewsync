@@ -351,7 +351,8 @@ fun ProjectDetailsScreen(
                             projectId = projectId,
                             tasks = tasks,
                             appointments = appointments,
-                            canEdit = isLeader
+                            canEdit = isLeader,
+                            firstDayOfWeek = userProfile?.firstDayOfWeek ?: "Sunday"
                         )
                     }
                 }

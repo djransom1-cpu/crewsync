@@ -65,7 +65,7 @@ fun DocumentSnapshot.toUserSafe(fallbackEmail: String = ""): User {
 }
 
 fun DocumentSnapshot.toTaskSafe(): com.example.crewsync.data.model.Task {
-    return try {
+    val task = try {
         this.data<com.example.crewsync.data.model.Task>().copy(id = this.id)
     } catch (_: Exception) {
         try {
@@ -78,7 +78,7 @@ fun DocumentSnapshot.toTaskSafe(): com.example.crewsync.data.model.Task {
             val colorStr: String = try { this.get("color") } catch (_: Exception) { "#FFFFFF" }
             val start: Long? = try { this.get("startDate") } catch (_: Exception) { null }
             val due: Long? = try { this.get("dueDate") } catch (_: Exception) { null }
-            
+
             com.example.crewsync.data.model.Task(
                 id = this.id,
                 projectId = projId,
@@ -95,6 +95,32 @@ fun DocumentSnapshot.toTaskSafe(): com.example.crewsync.data.model.Task {
             com.example.crewsync.data.model.Task(id = this.id, title = "Task ${this.id.take(4)}")
         }
     }
+    // Tasks written before checklists were grouped only have a flat "checklist" array on the
+    // document, not "checklistGroups" - whichever path above produced this Task, if it came
+    // back with no groups, try to recover that legacy data as a single default group instead
+    // of silently losing it. Once the task is saved again under the new schema both fields
+    // stay in sync (see toFirestoreMap below), so this only ever fires for pre-migration data.
+    return if (task.checklistGroups.isEmpty()) {
+        legacyChecklistAsGroup()?.let { task.copy(checklistGroups = listOf(it)) } ?: task
+    } else task
+}
+
+private fun DocumentSnapshot.legacyChecklistAsGroup(): com.example.crewsync.data.model.ChecklistGroup? {
+    return try {
+        val raw: List<Map<String, Any?>> = this.get("checklist")
+        if (raw.isEmpty()) return null
+        val items = raw.mapIndexedNotNull { idx, m ->
+            val text = m["text"] as? String ?: return@mapIndexedNotNull null
+            com.example.crewsync.data.model.ChecklistItem(
+                id = (m["id"] as? String) ?: "chk_legacy_$idx",
+                text = text,
+                isDone = (m["isDone"] as? Boolean) ?: false
+            )
+        }
+        if (items.isEmpty()) null else com.example.crewsync.data.model.ChecklistGroup(id = "chk_grp_legacy", title = "Checklist", items = items)
+    } catch (_: Exception) {
+        null
+    }
 }
 
 fun com.example.crewsync.data.model.Task.toFirestoreMap(): Map<String, Any?> {
@@ -109,7 +135,16 @@ fun com.example.crewsync.data.model.Task.toFirestoreMap(): Map<String, Any?> {
     map["color"] = color
     if (startDate != null) map["startDate"] = startDate.toDouble()
     if (dueDate != null) map["dueDate"] = dueDate.toDouble()
-    map["checklist"] = checklist.map { mapOf("id" to it.id, "text" to it.text, "isDone" to it.isDone) }
+    map["checklistGroups"] = checklistGroups.map { g ->
+        mapOf(
+            "id" to g.id,
+            "title" to g.title,
+            "items" to g.items.map { mapOf("id" to it.id, "text" to it.text, "isDone" to it.isDone) }
+        )
+    }
+    // Kept in sync as a flattened legacy field too - cheap insurance for an older installed
+    // build of the app (or any other tooling) that still only reads the flat "checklist" array.
+    map["checklist"] = allChecklistItems().map { mapOf("id" to it.id, "text" to it.text, "isDone" to it.isDone) }
     map["attachments"] = attachments.map { mapOf("id" to it.id, "name" to it.name, "url" to it.url, "uploadedBy" to it.uploadedBy, "uploadedAt" to it.uploadedAt) }
     return map
 }

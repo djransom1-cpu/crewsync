@@ -42,8 +42,10 @@ fun CalendarScreen(
     projectId: String,
     tasks: List<Task>,
     appointments: List<Appointment>,
-    canEdit: Boolean
+    canEdit: Boolean,
+    firstDayOfWeek: String = "Sunday"
 ) {
+    val startDow = parseFirstDayOfWeek(firstDayOfWeek)
     val firestore = Firebase.firestore
     val scope = rememberCoroutineScope()
     
@@ -66,8 +68,8 @@ fun CalendarScreen(
             
             Box(modifier = Modifier.weight(1f)) {
                 when (viewMode) {
-                    "Month" -> MonthView(currentMonth, selectedDate, tasks, appointments) { selectedDate = it }
-                    "Week" -> WeekView(selectedDate, tasks, appointments) { selectedDate = it }
+                    "Month" -> MonthView(currentMonth, selectedDate, tasks, appointments, startDow) { selectedDate = it }
+                    "Week" -> WeekView(selectedDate, tasks, appointments, startDow) { selectedDate = it }
                     "Day" -> DayView(selectedDate, tasks, appointments)
                 }
             }
@@ -248,11 +250,13 @@ fun MonthView(
     selectedDate: LocalDate,
     tasks: List<Task>,
     appointments: List<Appointment>,
+    firstDayOfWeek: DayOfWeek = DayOfWeek.SUNDAY,
     onDateSelected: (LocalDate) -> Unit
 ) {
     val daysInMonth = getDaysInMonth(currentMonth.year, currentMonth.monthNumber)
     val firstDayOfMonth = LocalDate(currentMonth.year, currentMonth.monthNumber, 1)
-    val dayOfWeekOffset = (firstDayOfMonth.dayOfWeek.ordinal) % 7 
+    val dayOfWeekOffset = weekdayOffsetFrom(firstDayOfMonth, firstDayOfWeek)
+    val weekDayLabels = orderedWeekDays(firstDayOfWeek)
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
         // Optimized Aspect Ratio for Fold 4 (Landscape vs Portrait)
@@ -260,9 +264,9 @@ fun MonthView(
 
         Column {
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").forEach { day ->
+                weekDayLabels.forEach { dow ->
                     Text(
-                        text = day,
+                        text = dow.name.lowercase().replaceFirstChar { it.uppercase() }.take(3),
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.labelSmall,
@@ -374,10 +378,11 @@ fun WeekView(
     selectedDate: LocalDate,
     tasks: List<Task>,
     appointments: List<Appointment>,
+    firstDayOfWeek: DayOfWeek = DayOfWeek.SUNDAY,
     onDateSelected: (LocalDate) -> Unit
 ) {
-    val dayOfWeek = selectedDate.dayOfWeek.ordinal
-    val startOfWeek = selectedDate.minus(dayOfWeek.toLong(), DateTimeUnit.DAY)
+    val offset = weekdayOffsetFrom(selectedDate, firstDayOfWeek)
+    val startOfWeek = selectedDate.minus(offset.toLong(), DateTimeUnit.DAY)
     
     Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -763,6 +768,27 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+private fun parseFirstDayOfWeek(pref: String): DayOfWeek = when (pref) {
+    "Monday" -> DayOfWeek.MONDAY
+    "Saturday" -> DayOfWeek.SATURDAY
+    else -> DayOfWeek.SUNDAY
+}
+
+/** kotlinx-datetime's DayOfWeek follows ISO-8601 (MONDAY=0 ... SUNDAY=6) regardless of any
+ * user preference - these two helpers translate that fixed ordinal into "how many days after
+ * the user's chosen first day of the week is this", which is what both the month grid's
+ * leading blank cells and the week view's start date actually need. */
+private fun weekdayOffsetFrom(date: LocalDate, firstDay: DayOfWeek): Int {
+    val diff = date.dayOfWeek.ordinal - firstDay.ordinal
+    return ((diff % 7) + 7) % 7
+}
+
+private fun orderedWeekDays(firstDay: DayOfWeek): List<DayOfWeek> {
+    val all = DayOfWeek.values()
+    val startIdx = all.indexOf(firstDay)
+    return (0 until 7).map { all[(startIdx + it) % 7] }
 }
 
 private fun getDaysInMonth(year: Int, month: Int): Int {
