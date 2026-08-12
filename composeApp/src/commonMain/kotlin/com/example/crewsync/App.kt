@@ -104,11 +104,21 @@ fun AppMainContent() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
-    val firestore = remember { Firebase.firestore }
-    val auth = remember { Firebase.auth }
+    val firestore = remember {
+        try { Firebase.firestore } catch (e: Throwable) {
+            println("AppMainContent: Firestore note: ${e.message}")
+            null
+        }
+    }
+    val auth = remember {
+        try { Firebase.auth } catch (e: Throwable) {
+            println("AppMainContent: Auth note: ${e.message}")
+            null
+        }
+    }
     val scope = rememberCoroutineScope()
     val authStateFlow = remember(auth) {
-        try { auth.authStateChanged } catch (_: Throwable) { kotlinx.coroutines.flow.emptyFlow() }
+        try { auth?.authStateChanged ?: kotlinx.coroutines.flow.emptyFlow() } catch (_: Throwable) { kotlinx.coroutines.flow.emptyFlow() }
     }
     val currentUser by authStateFlow.collectAsState(initial = null)
     var isAuthChecked by remember { mutableStateOf(false) }
@@ -134,11 +144,12 @@ fun AppMainContent() {
     // GLOBAL CROSS-PLATFORM NOTIFICATION ENGINE
     LaunchedEffect(currentUser?.uid, currentUser?.email) {
         val userEmail = currentUser?.email?.lowercase() ?: return@LaunchedEffect
+        val fStore = firestore ?: return@LaunchedEffect
         
         // Listener 1: Site Alerts (Broadcasts)
         launch {
             try {
-                firestore.collection("broadcasts").snapshots.collect { snapshot ->
+                fStore.collection("broadcasts").snapshots.collect { snapshot ->
                     snapshot.documents.mapNotNull { doc ->
                         try { doc.data<Broadcast>() } catch (_: Exception) { null }
                     }.forEach { broadcast ->
@@ -158,12 +169,12 @@ fun AppMainContent() {
         // Listener 2: Project Chat Messages Across User Projects
         launch {
             try {
-                firestore.collection("projects").snapshots.collect { snapshot ->
+                fStore.collection("projects").snapshots.collect { snapshot ->
                     val projectIds = snapshot.documents.map { it.id }
                     projectIds.forEach { projId ->
                         launch {
                             try {
-                                firestore.collection("projects").document(projId).collection("messages").snapshots.collect { msgSnap ->
+                                fStore.collection("projects").document(projId).collection("messages").snapshots.collect { msgSnap ->
                                     val msgs = msgSnap.documents.mapNotNull { doc ->
                                         try { doc.data<ChatMessage>().copy(id = doc.id) } catch (_: Exception) { null }
                                     }
@@ -275,7 +286,7 @@ fun AppMainContent() {
                                     onLogout = {
                                         scope.launch {
                                             try {
-                                                auth.signOut()
+                                                auth?.signOut()
                                             } catch (_: Exception) {}
                                         }
                                     },
