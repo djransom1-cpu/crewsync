@@ -27,6 +27,9 @@ import com.example.crewsync.data.model.User
 import com.example.crewsync.util.makePhoneCall
 import com.example.crewsync.util.sendEmail
 import com.example.crewsync.util.rememberContactPickerLauncher
+import com.example.crewsync.util.rememberCameraLauncher
+import com.example.crewsync.util.recognizeTextInImage
+import com.example.crewsync.util.parseBusinessCardText
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
@@ -47,6 +50,7 @@ fun ContactsScreen() {
     var contactToEdit by remember { mutableStateOf<Contact?>(null) }
     var showAddContactDialog by remember { mutableStateOf(false) }
     var showAddUserDialog by remember { mutableStateOf(false) }
+    var isScanningCard by remember { mutableStateOf(false) }
 
     LaunchedEffect(auth.currentUser?.uid) {
         auth.currentUser?.uid?.let { uid ->
@@ -72,6 +76,28 @@ fun ContactsScreen() {
                 type = if (selectedTab == 1) "Company" else "Subcontractor"
             )
             firestore.collection("contacts").add(newContact)
+        }
+    }
+
+    val cardScanCameraLauncher = rememberCameraLauncher { pickedFile ->
+        scope.launch {
+            isScanningCard = true
+            try {
+                val text = recognizeTextInImage(pickedFile.platformFile)
+                val parsed = parseBusinessCardText(text)
+                contactToEdit = Contact(
+                    name = parsed.name,
+                    jobTitle = parsed.jobTitle,
+                    company = parsed.company,
+                    email = parsed.email,
+                    phone = parsed.phone,
+                    type = if (selectedTab == 1) "Company" else "Subcontractor"
+                )
+                showAddContactDialog = true
+            } catch (_: Exception) {
+            } finally {
+                isScanningCard = false
+            }
         }
     }
 
@@ -125,14 +151,20 @@ fun ContactsScreen() {
                 } else if (selectedTab != 0) {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         SmallFloatingActionButton(
+                            onClick = { cardScanCameraLauncher() },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Icon(Icons.Default.Info, contentDescription = "Scan Business Card")
+                        }
+                        SmallFloatingActionButton(
                             onClick = { contactPickerLauncher() },
                             containerColor = MaterialTheme.colorScheme.secondaryContainer
                         ) {
                             Icon(Icons.Default.Person, contentDescription = "Import from Phone")
                         }
-                        FloatingActionButton(onClick = { 
+                        FloatingActionButton(onClick = {
                             contactToEdit = null
-                            showAddContactDialog = true 
+                            showAddContactDialog = true
                         }) {
                             Icon(Icons.Default.Add, contentDescription = "Add Contact")
                         }
@@ -216,6 +248,21 @@ fun ContactsScreen() {
                         showAddUserDialog = false
                     }
                 }
+            )
+        }
+
+        if (isScanningCard) {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("Scanning Business Card…") },
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(16.dp))
+                        Text("Reading text from the photo. This can take a few seconds.")
+                    }
+                },
+                confirmButton = {}
             )
         }
 

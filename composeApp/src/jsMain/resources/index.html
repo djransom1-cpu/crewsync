@@ -109,6 +109,10 @@
          the same way the Android build renders PDF pages to a bitmap. Loaded as a plain global
          (window.pdfjsLib) rather than an npm/webpack dependency to keep the JS interop simple. -->
     <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
+    <!-- Tesseract.js: in-browser OCR for the business card scanner (Contacts screen), the web
+         equivalent of Android's on-device ML Kit text recognition. Loaded as a plain global
+         (window.Tesseract) for the same reason as pdf.js above. -->
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
     <script type="text/javascript" src="composeApp.js"></script>

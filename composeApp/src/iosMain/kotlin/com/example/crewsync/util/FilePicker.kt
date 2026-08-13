@@ -47,3 +47,5 @@ actual suspend fun uploadFile(path: String, platformFile: Any): String {
     storageRef.putData(data)
     return storageRef.getDownloadUrl()
 }
+
+actual suspend fun recognizeTextInImage(platformFile: Any): String = ""

@@ -50,6 +50,7 @@ firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging
 androidx-biometric = { group = "androidx.biometric", name = "biometric-ktx", version.ref = "biometric" }
 androidx-datastore = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 androidx-browser = { group = "androidx.browser", name = "browser", version = "1.8.0" }
+mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version = "16.0.1" }
 
 # DI
 koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }

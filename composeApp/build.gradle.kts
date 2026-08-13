@@ -82,6 +82,7 @@ kotlin {
             implementation(libs.androidx.datastore)
             implementation(libs.androidx.browser)
             implementation(libs.ktor.client.okhttp)
+            implementation(libs.mlkit.text.recognition)
         }
         commonTest.dependencies {
             implementation(libs.junit)

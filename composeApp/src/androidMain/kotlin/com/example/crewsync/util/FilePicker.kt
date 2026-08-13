@@ -17,7 +17,7 @@ import dev.gitlive.firebase.storage.Data
 import dev.gitlive.firebase.storage.storage
 import java.io.File
 
-private var appContext: Context? = null
+internal var appContext: Context? = null
 
 @Composable
 actual fun rememberFilePickerLauncher(onFilePicked: (PickedFile) -> Unit): () -> Unit {

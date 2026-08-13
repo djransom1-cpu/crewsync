@@ -23,3 +23,5 @@ actual fun rememberCameraLauncher(onFilePicked: (PickedFile) -> Unit): () -> Uni
 }
 
 actual suspend fun uploadFile(path: String, platformFile: Any): String = ""
+
+actual suspend fun recognizeTextInImage(platformFile: Any): String = ""

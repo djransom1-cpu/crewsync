@@ -29,3 +29,5 @@ actual suspend fun uploadFile(path: String, platformFile: Any): String {
     // Note: gitlive-firebase usually works on JVM but might need specific setup
     return ""
 }
+
+actual suspend fun recognizeTextInImage(platformFile: Any): String = ""
