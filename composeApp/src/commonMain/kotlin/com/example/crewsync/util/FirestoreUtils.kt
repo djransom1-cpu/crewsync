@@ -142,9 +142,13 @@ fun com.example.crewsync.data.model.Task.toFirestoreMap(): Map<String, Any?> {
             "items" to g.items.map { mapOf("id" to it.id, "text" to it.text, "isDone" to it.isDone) }
         )
     }
-    // Kept in sync as a flattened legacy field too - cheap insurance for an older installed
-    // build of the app (or any other tooling) that still only reads the flat "checklist" array.
-    map["checklist"] = allChecklistItems().map { mapOf("id" to it.id, "text" to it.text, "isDone" to it.isDone) }
+    // Deliberately NOT writing the legacy flat "checklist" field here. It used to be mirrored
+    // on every save as a compatibility shim, but that meant any save - even one that never
+    // touched checklists - overwrote it with whatever checklistGroups held at that moment,
+    // which is how real checklist data got permanently wiped for tasks whose groups were empty
+    // at save time. Leaving the old field alone means any task that still has intact legacy
+    // data sitting untouched in Firestore keeps being recovered by legacyChecklistAsGroup()
+    // on every load, indefinitely, instead of being one save away from destroying it.
     map["attachments"] = attachments.map { mapOf("id" to it.id, "name" to it.name, "url" to it.url, "uploadedBy" to it.uploadedBy, "uploadedAt" to it.uploadedAt) }
     return map
 }

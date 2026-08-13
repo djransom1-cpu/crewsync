@@ -57,69 +57,70 @@ fun CalendarScreen(
     var showAddAppointmentDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf<Appointment?>(null) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            CalendarHeader(
-                currentMonth = currentMonth,
-                viewMode = viewMode,
-                onViewModeChange = { viewMode = it },
-                onMonthChange = { currentMonth = it }
-            )
-            
-            Box(modifier = Modifier.weight(1f)) {
-                when (viewMode) {
-                    "Month" -> MonthView(currentMonth, selectedDate, tasks, appointments, startDow) { selectedDate = it }
-                    "Week" -> WeekView(selectedDate, tasks, appointments, startDow) { selectedDate = it }
-                    "Day" -> DayView(selectedDate, tasks, appointments)
-                }
+    val selectedDateItems = (tasks.filter { task ->
+        task.dueDate?.let { isSameDay(it, selectedDate) } == true ||
+        task.startDate?.let { isSameDay(it, selectedDate) } == true ||
+        (task.startDate != null && task.dueDate != null && selectedDate >= timestampToDate(task.startDate) && selectedDate <= timestampToDate(task.dueDate))
+    }.map { CalendarItem.TaskItem(it) } + appointments.filter {
+        isAppointmentOnDay(it, selectedDate)
+    }.map { CalendarItem.AppointmentItem(it) }).sortedBy { it.sortKey }
+
+    val calendarGrid: @Composable ColumnScope.() -> Unit = {
+        CalendarHeader(
+            currentMonth = currentMonth,
+            viewMode = viewMode,
+            onViewModeChange = { viewMode = it },
+            onMonthChange = { currentMonth = it }
+        )
+        Box(modifier = Modifier.weight(1f)) {
+            when (viewMode) {
+                "Month" -> MonthView(currentMonth, selectedDate, tasks, appointments, startDow) { selectedDate = it }
+                "Week" -> WeekView(selectedDate, tasks, appointments, startDow) { selectedDate = it }
+                "Day" -> DayView(selectedDate, tasks, appointments)
             }
+        }
+    }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        // In landscape the schedule list sits in a narrow side rail so the calendar itself
+        // keeps its full height instead of getting squeezed short by a bottom panel. This has
+        // to be an aspect-ratio check (width > height), not a fixed dp width threshold - large
+        // tablets are comfortably past any reasonable width breakpoint even in portrait.
+        val isWide = maxWidth > maxHeight
 
-            Text(
-                text = "Schedule for ${selectedDate.month.name} ${selectedDate.dayOfMonth}, ${selectedDate.year}",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            )
-
-            val selectedDateItems = (tasks.filter { task ->
-                task.dueDate?.let { isSameDay(it, selectedDate) } == true ||
-                task.startDate?.let { isSameDay(it, selectedDate) } == true ||
-                (task.startDate != null && task.dueDate != null && selectedDate >= timestampToDate(task.startDate) && selectedDate <= timestampToDate(task.dueDate))
-            }.map { CalendarItem.TaskItem(it) } + appointments.filter { 
-                isAppointmentOnDay(it, selectedDate)
-            }.map { CalendarItem.AppointmentItem(it) }).sortedBy { it.sortKey }
-
-            if (selectedDateItems.isEmpty()) {
-                Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                    Text("No events scheduled.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().weight(0.5f),
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(selectedDateItems) { item ->
-                        when (item) {
-                            is CalendarItem.TaskItem -> TaskItemSimple(item.task)
-                            is CalendarItem.AppointmentItem -> AppointmentItemCard(
-                                appointment = item.appointment,
-                                showActions = canEdit,
-                                onEdit = { appointmentToEdit = it },
-                                onDelete = { showDeleteConfirm = it }
-                            )
-                        }
-                    }
-                }
+        if (isWide) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                Column(modifier = Modifier.weight(1f).fillMaxHeight(), content = calendarGrid)
+                VerticalDivider()
+                ScheduleForDayPanel(
+                    selectedDate = selectedDate,
+                    calendarItems = selectedDateItems,
+                    canEdit = canEdit,
+                    onEdit = { appointmentToEdit = it },
+                    onDelete = { showDeleteConfirm = it },
+                    modifier = Modifier.width(300.dp).fillMaxHeight()
+                )
+            }
+        } else {
+            Column(modifier = Modifier.fillMaxSize()) {
+                calendarGrid()
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                ScheduleForDayPanel(
+                    selectedDate = selectedDate,
+                    calendarItems = selectedDateItems,
+                    canEdit = canEdit,
+                    onEdit = { appointmentToEdit = it },
+                    onDelete = { showDeleteConfirm = it },
+                    modifier = Modifier.fillMaxWidth().weight(0.5f)
+                )
             }
         }
 
         if (canEdit) {
             FloatingActionButton(
-                onClick = { 
+                onClick = {
                     appointmentToEdit = null
-                    showAddAppointmentDialog = true 
+                    showAddAppointmentDialog = true
                 },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
             ) {
@@ -185,6 +186,50 @@ sealed class CalendarItem {
     }
     data class AppointmentItem(val appointment: Appointment) : CalendarItem() {
         override val sortKey = appointment.startDate
+    }
+}
+
+/** The "what's scheduled today" list - stacked under the calendar in portrait, or a narrow
+ * side rail next to it in landscape so the calendar grid keeps its full height. */
+@Composable
+private fun ScheduleForDayPanel(
+    selectedDate: LocalDate,
+    calendarItems: List<CalendarItem>,
+    canEdit: Boolean,
+    onEdit: (Appointment) -> Unit,
+    onDelete: (Appointment) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = "Schedule for ${selectedDate.month.name} ${selectedDate.dayOfMonth}, ${selectedDate.year}",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        if (calendarItems.isEmpty()) {
+            Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                Text("No events scheduled.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(calendarItems) { item ->
+                    when (item) {
+                        is CalendarItem.TaskItem -> TaskItemSimple(item.task)
+                        is CalendarItem.AppointmentItem -> AppointmentItemCard(
+                            appointment = item.appointment,
+                            showActions = canEdit,
+                            onEdit = onEdit,
+                            onDelete = onDelete
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -269,9 +314,9 @@ fun MonthView(
                         text = dow.name.lowercase().replaceFirstChar { it.uppercase() }.take(3),
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelMedium,
                         color = Color.Gray,
-                        fontSize = 10.sp
+                        fontSize = 12.sp
                     )
                 }
             }
@@ -323,46 +368,46 @@ fun MonthCell(
                     text = date.dayOfMonth.toString(),
                     modifier = Modifier.fillMaxWidth().padding(end = 4.dp),
                     textAlign = TextAlign.End,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = 11.sp,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = 13.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                     color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray
                 )
-                
+
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     val dayTasks = tasks.filter { task ->
-                        task.startDate != null && task.dueDate != null && 
+                        task.startDate != null && task.dueDate != null &&
                         date >= timestampToDate(task.startDate) && date <= timestampToDate(task.dueDate)
                     }
                     val dayAppts = appointments.filter { isAppointmentOnDay(it, date) }
-                    
+
                     val allEvents = (dayTasks.map { it.title to it.color } + dayAppts.map { it.title to it.color }).take(3)
-                    
+
                     allEvents.forEach { (title, colorHex) ->
                         val bgColor = Color(parseColor(colorHex))
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(16.dp)
-                                .clip(RoundedCornerShape(2.dp))
+                                .height(20.dp)
+                                .clip(RoundedCornerShape(3.dp))
                                 .background(bgColor),
                             contentAlignment = Alignment.CenterStart
                         ) {
                             Text(
                                 text = title,
-                                fontSize = 8.sp,
+                                fontSize = 10.sp,
                                 color = if (isDarkColor(bgColor)) Color.White else Color.Black,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = 2.dp),
-                                lineHeight = 8.sp
+                                modifier = Modifier.padding(horizontal = 3.dp),
+                                lineHeight = 12.sp
                             )
                         }
                     }
                     if (dayTasks.size + dayAppts.size > 3) {
                         Text(
-                            "+${dayTasks.size + dayAppts.size - 3} more", 
-                            fontSize = 7.sp, 
+                            "+${dayTasks.size + dayAppts.size - 3} more",
+                            fontSize = 9.sp,
                             modifier = Modifier.padding(start = 2.dp),
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -410,14 +455,15 @@ fun WeekView(
         
         LazyColumn(modifier = Modifier.weight(1f)) {
             items(24) { hour ->
-                Row(modifier = Modifier.fillMaxWidth().height(60.dp)) {
+                Row(modifier = Modifier.fillMaxWidth().height(68.dp)) {
                     Text(
                         text = if (hour == 0) "12 AM" else if (hour < 12) "$hour AM" else if (hour == 12) "12 PM" else "${hour-12} PM",
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.width(40.dp).padding(top = 4.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontSize = 12.sp,
+                        modifier = Modifier.width(48.dp).padding(top = 4.dp),
                         textAlign = TextAlign.End
                     )
-                    
+
                     Box(modifier = Modifier.weight(1f).fillMaxHeight().border(0.5.dp, Color.LightGray.copy(alpha = 0.2f))) {
                         Row(modifier = Modifier.fillMaxSize()) {
                             for (i in 0 until 7) {
@@ -431,11 +477,11 @@ fun WeekView(
                                             Box(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .height(20.dp)
-                                                    .background(Color(parseColor(appt.color)).copy(alpha = 0.7f), RoundedCornerShape(2.dp))
-                                                    .padding(2.dp)
+                                                    .height(26.dp)
+                                                    .background(Color(parseColor(appt.color)).copy(alpha = 0.7f), RoundedCornerShape(3.dp))
+                                                    .padding(3.dp)
                                             ) {
-                                                Text(appt.title, fontSize = 8.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text(appt.title, fontSize = 11.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             }
                                         }
                                     }
@@ -475,11 +521,12 @@ fun DayView(
         }
         
         items(24) { hour ->
-            Row(modifier = Modifier.fillMaxWidth().height(80.dp)) {
+            Row(modifier = Modifier.fillMaxWidth().height(84.dp)) {
                 Text(
                     text = if (hour == 0) "12 AM" else if (hour < 12) "$hour AM" else if (hour == 12) "12 PM" else "${hour-12} PM",
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.width(50.dp).padding(top = 8.dp)
+                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = 13.sp,
+                    modifier = Modifier.width(56.dp).padding(top = 8.dp)
                 )
                 Box(modifier = Modifier.weight(1f).fillMaxHeight().border(0.5.dp, Color.LightGray.copy(alpha = 0.3f))) {
                     val hourAppts = appointments.filter { appt ->
@@ -488,15 +535,15 @@ fun DayView(
                     val hourTasks = tasks.filter { task ->
                         task.startDate != null && isSameDay(task.startDate, selectedDate) && timestampToHour(task.startDate) == hour
                     }
-                    
-                    Column(modifier = Modifier.fillMaxSize().padding(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+
+                    Column(modifier = Modifier.fillMaxSize().padding(3.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         hourAppts.forEach { appt ->
                             Surface(
                                 color = Color(parseColor(appt.color)),
                                 shape = RoundedCornerShape(4.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(appt.title, modifier = Modifier.padding(4.dp), color = Color.White, fontSize = 12.sp)
+                                Text(appt.title, modifier = Modifier.padding(6.dp), color = Color.White, fontSize = 14.sp)
                             }
                         }
                         hourTasks.forEach { task ->
@@ -505,7 +552,7 @@ fun DayView(
                                 shape = RoundedCornerShape(4.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(task.title, modifier = Modifier.padding(4.dp), color = Color.White, fontSize = 12.sp)
+                                Text(task.title, modifier = Modifier.padding(6.dp), color = Color.White, fontSize = 14.sp)
                             }
                         }
                     }
