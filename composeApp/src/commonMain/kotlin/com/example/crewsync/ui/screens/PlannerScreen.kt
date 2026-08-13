@@ -257,6 +257,7 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
     if (selectedTask != null) {
         TaskDetailsDialog(
             task = selectedTask!!,
+            projectId = projectId,
             members = projectMembers,
             userMap = userMap,
             allBuckets = projectBuckets,
@@ -796,6 +797,7 @@ fun ManageBucketsDialog(
 @Composable
 fun TaskDetailsDialog(
     task: Task,
+    projectId: String,
     members: List<String>,
     userMap: Map<String, String>,
     allBuckets: List<String>,
@@ -812,7 +814,31 @@ fun TaskDetailsDialog(
     var newGroupTitle by remember { mutableStateOf("") }
     val newItemTextByGroup = remember { mutableStateMapOf<String, String>() }
     var attachments by remember { mutableStateOf(task.attachments) }
-    var newPhotoName by remember { mutableStateOf("") }
+    var isUploadingPhoto by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    fun uploadAttachment(pickedFile: PickedFile) {
+        scope.launch {
+            isUploadingPhoto = true
+            try {
+                val path = "task_attachments/$projectId/${task.id}/${Clock.System.now().toEpochMilliseconds()}_${pickedFile.name}"
+                val downloadUrl = uploadFile(path, pickedFile.platformFile)
+                attachments = attachments + ProjectFile(
+                    id = "att_" + Clock.System.now().toEpochMilliseconds(),
+                    name = pickedFile.name,
+                    url = downloadUrl,
+                    uploadedBy = Firebase.auth.currentUser?.email ?: "Unknown",
+                    uploadedAt = Clock.System.now().toEpochMilliseconds()
+                )
+            } catch (_: Exception) {
+            } finally {
+                isUploadingPhoto = false
+            }
+        }
+    }
+
+    val filePickerLauncher = rememberFilePickerLauncher { uploadAttachment(it) }
+    val cameraLauncher = rememberCameraLauncher { uploadAttachment(it) }
 
     var startDate by remember { mutableStateOf(task.startDate) }
     var dueDate by remember { mutableStateOf(task.dueDate) }
@@ -1034,34 +1060,28 @@ fun TaskDetailsDialog(
                 // Site Photos & Attachments
                 HorizontalDivider()
                 Text("Project Site Photos (${attachments.size}):", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = newPhotoName,
-                        onValueChange = { newPhotoName = it },
-                        label = { Text("Photo Title / Description") },
-                        placeholder = { Text("e.g. Rough framing inspection photo") },
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(6.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
-                        onClick = {
-                            val titleStr = newPhotoName.ifBlank { "Site Photo ${attachments.size + 1}" }
-                            val newAtt = ProjectFile(
-                                id = "att_" + Clock.System.now().toEpochMilliseconds(),
-                                name = "$titleStr.jpg",
-                                url = "",
-                                uploadedBy = "Crew Member",
-                                uploadedAt = Clock.System.now().toEpochMilliseconds()
-                            )
-                            attachments = attachments + newAtt
-                            newPhotoName = ""
-                        },
+                        onClick = { cameraLauncher() },
+                        enabled = !isUploadingPhoto,
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                    ) {
+                        Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Camera")
+                    }
+                    Button(
+                        onClick = { filePickerLauncher() },
+                        enabled = !isUploadingPhoto,
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Attach Photo")
+                        Text("Gallery / Browse")
+                    }
+                    if (isUploadingPhoto) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                     }
                 }
 

@@ -149,7 +149,7 @@ fun com.example.crewsync.data.model.Task.toFirestoreMap(): Map<String, Any?> {
     // at save time. Leaving the old field alone means any task that still has intact legacy
     // data sitting untouched in Firestore keeps being recovered by legacyChecklistAsGroup()
     // on every load, indefinitely, instead of being one save away from destroying it.
-    map["attachments"] = attachments.map { mapOf("id" to it.id, "name" to it.name, "url" to it.url, "uploadedBy" to it.uploadedBy, "uploadedAt" to it.uploadedAt) }
+    map["attachments"] = attachments.map { it.toFirestoreMap() }
     return map
 }
 

@@ -11,15 +11,3 @@ actual fun rememberBiometricAuthenticator(onAuthenticated: () -> Unit, onError: 
 actual fun rememberContactPickerLauncher(onContactPicked: (PickedContact) -> Unit): () -> Unit {
     return { /* Not supported in browser */ }
 }
-
-@Composable
-actual fun rememberFilePickerLauncher(onFilePicked: (PickedFile) -> Unit): () -> Unit {
-    return { /* Web file picker logic placeholder */ }
-}
-
-@Composable
-actual fun rememberCameraLauncher(onFilePicked: (PickedFile) -> Unit): () -> Unit {
-    return { /* Web camera logic placeholder */ }
-}
-
-actual suspend fun uploadFile(path: String, platformFile: Any): String = ""

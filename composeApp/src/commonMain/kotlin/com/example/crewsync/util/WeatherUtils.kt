@@ -10,11 +10,12 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/** Current conditions for a project's job-site address, built from two free/keyless
- * APIs: the OpenStreetMap Nominatim geocoder (address -> lat/lon) and the National
- * Weather Service (lat/lon -> forecast). NWS only covers US locations.
- * Nominatim is used instead of the Census Bureau geocoder because Census does not
- * send CORS headers, which silently fails every request from the web target. */
+/** Current conditions for a project's job-site address, built from our own "geocode"
+ * Cloud Function (address -> lat/lon, proxying the Census Bureau geocoder server-side
+ * for its superior US/rural address coverage - Census itself never sends CORS headers,
+ * so browsers can't call it directly, and OpenStreetMap/Nominatim's community-mapped
+ * coverage is too sparse for many rural job sites) and the National Weather Service
+ * (lat/lon -> forecast). NWS only covers US locations. */
 data class LocalWeather(
     val currentTempF: Int,
     val shortForecast: String,
@@ -32,9 +33,8 @@ private val weatherHttpClient = HttpClient {
 // this is how they ask requesters to self-identify instead. See https://www.weather.gov/documentation/services-web-api
 private const val NWS_USER_AGENT = "(Crewsync construction app, crewsync.support@example.com)"
 
-// Nominatim's usage policy also asks for a self-identifying User-Agent. See
-// https://operations.osmfoundation.org/policies/nominatim/
-private const val NOMINATIM_USER_AGENT = "Crewsync construction app (crewsync.support@example.com)"
+private const val GEOCODE_FUNCTION_URL =
+    "https://us-central1-gen-lang-client-0438127279.cloudfunctions.net/geocode"
 
 suspend fun fetchLocalWeather(address: String): LocalWeather? {
     if (address.isBlank()) return null
@@ -51,18 +51,16 @@ suspend fun fetchLocalWeather(address: String): LocalWeather? {
 private data class Coordinates(val latitude: Double, val longitude: Double)
 
 @Serializable
-private data class NominatimMatch(val lat: String, val lon: String)
+private data class GeocodeFunctionResponse(val lat: Double? = null, val lon: Double? = null)
 
 private suspend fun geocodeAddress(address: String): Coordinates? {
-    val matches: List<NominatimMatch> = weatherHttpClient
-        .get("https://nominatim.openstreetmap.org/search") {
-            parameter("q", address)
-            parameter("format", "json")
-            parameter("limit", "1")
-            header("User-Agent", NOMINATIM_USER_AGENT)
+    val response: GeocodeFunctionResponse = weatherHttpClient
+        .get(GEOCODE_FUNCTION_URL) {
+            parameter("address", address)
         }.body()
-    val match = matches.firstOrNull() ?: return null
-    return Coordinates(latitude = match.lat.toDouble(), longitude = match.lon.toDouble())
+    val lat = response.lat ?: return null
+    val lon = response.lon ?: return null
+    return Coordinates(latitude = lat, longitude = lon)
 }
 
 @Serializable
