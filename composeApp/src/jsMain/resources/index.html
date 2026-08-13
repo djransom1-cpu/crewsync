@@ -105,6 +105,10 @@
         }
     </style>
     <script type="text/javascript" src="skiko.js"></script>
+    <!-- pdf.js: renders blueprint/drawing PDFs to a canvas so Markup Studio can annotate them,
+         the same way the Android build renders PDF pages to a bitmap. Loaded as a plain global
+         (window.pdfjsLib) rather than an npm/webpack dependency to keep the JS interop simple. -->
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
 </head>
 <body>
     <script type="text/javascript" src="composeApp.js"></script>

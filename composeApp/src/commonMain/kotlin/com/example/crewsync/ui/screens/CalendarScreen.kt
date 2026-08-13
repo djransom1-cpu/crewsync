@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,7 +50,7 @@ fun CalendarScreen(
     val firestore = Firebase.firestore
     val scope = rememberCoroutineScope()
     
-    var viewMode by remember { mutableStateOf("Month") } 
+    var viewMode by rememberSaveable { mutableStateOf("Month") }
     var currentMonth by remember { mutableStateOf(Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date) }
     var selectedDate by remember { mutableStateOf(currentMonth) }
     
@@ -235,54 +236,67 @@ private fun ScheduleForDayPanel(
 
 @Composable
 fun CalendarHeader(
-    currentMonth: LocalDate, 
+    currentMonth: LocalDate,
     viewMode: String,
     onViewModeChange: (String) -> Unit,
     onMonthChange: (LocalDate) -> Unit
 ) {
-    Column(modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "${currentMonth.month.name} ${currentMonth.year}",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { 
-                    val prev = if (currentMonth.monthNumber == 1) {
-                        LocalDate(currentMonth.year - 1, 12, 1)
-                    } else {
-                        LocalDate(currentMonth.year, currentMonth.monthNumber - 1, 1)
-                    }
-                    onMonthChange(prev)
-                }) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous")
+    var showViewMenu by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "${currentMonth.month.name} ${currentMonth.year}",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+        )
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = {
+                val prev = if (currentMonth.monthNumber == 1) {
+                    LocalDate(currentMonth.year - 1, 12, 1)
+                } else {
+                    LocalDate(currentMonth.year, currentMonth.monthNumber - 1, 1)
                 }
-                IconButton(onClick = { 
-                    val next = if (currentMonth.monthNumber == 12) {
-                        LocalDate(currentMonth.year + 1, 1, 1)
-                    } else {
-                        LocalDate(currentMonth.year, currentMonth.monthNumber + 1, 1)
-                    }
-                    onMonthChange(next)
-                }) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next")
-                }
+                onMonthChange(prev)
+            }) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous")
             }
-        }
-        
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-            listOf("Day", "Week", "Month").forEachIndexed { index, label ->
-                SegmentedButton(
-                    selected = viewMode == label,
-                    onClick = { onViewModeChange(label) },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = 3)
-                ) {
-                    Text(label)
+            IconButton(onClick = {
+                val next = if (currentMonth.monthNumber == 12) {
+                    LocalDate(currentMonth.year + 1, 1, 1)
+                } else {
+                    LocalDate(currentMonth.year, currentMonth.monthNumber + 1, 1)
+                }
+                onMonthChange(next)
+            }) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next")
+            }
+
+            Box {
+                TextButton(onClick = { showViewMenu = true }) {
+                    Text(viewMode)
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = "Change view")
+                }
+                DropdownMenu(expanded = showViewMenu, onDismissRequest = { showViewMenu = false }) {
+                    listOf("Day", "Week", "Month").forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option) },
+                            onClick = {
+                                onViewModeChange(option)
+                                showViewMenu = false
+                            }
+                        )
+                    }
                 }
             }
         }

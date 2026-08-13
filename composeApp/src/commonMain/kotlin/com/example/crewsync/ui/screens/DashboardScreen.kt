@@ -372,12 +372,13 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
         if (showAddDialog) {
             AddProjectDialog(
                 onDismiss = { showAddDialog = false },
-                onConfirm = { name, desc ->
+                onConfirm = { name, desc, location ->
                     scope.launch {
                         try {
                             val newProject = Project(
                                 name = name,
                                 description = desc,
+                                location = location,
                                 teamLeaderId = auth.currentUser?.uid ?: "",
                                 createdAt = Clock.System.now().toEpochMilliseconds()
                             )
@@ -475,9 +476,10 @@ fun ProjectListItem(project: Project, isFirst: Boolean, isLast: Boolean, onClick
 }
 
 @Composable
-fun AddProjectDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
+fun AddProjectDialog(onDismiss: () -> Unit, onConfirm: (String, String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    var location by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -496,11 +498,18 @@ fun AddProjectDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit)
                     label = { Text("Description") },
                     modifier = Modifier.fillMaxWidth()
                 )
+                TextField(
+                    value = location,
+                    onValueChange = { location = it },
+                    label = { Text("Job Site Address") },
+                    placeholder = { Text("e.g. 123 Main St, Nashville, TN 37201") },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(name, description) },
+                onClick = { onConfirm(name, description, location) },
                 enabled = name.isNotBlank()
             ) {
                 Text("Add")

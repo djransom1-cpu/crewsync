@@ -32,10 +32,15 @@ class CrewsyncMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
-        
+
         val title = message.notification?.title ?: message.data["title"] ?: "Crewsync"
         val body = message.notification?.body ?: message.data["body"] ?: ""
-        
-        showInAppNotification(applicationContext, title, body)
+
+        if (message.data["type"] == "chat") {
+            val projectId = message.data["projectId"] ?: ""
+            showChatNotification(applicationContext, projectId, title, body)
+        } else {
+            showInAppNotification(applicationContext, title, body)
+        }
     }
 }

@@ -3,6 +3,8 @@ package com.example.crewsync.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -16,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,6 +61,7 @@ fun ProjectDetailsScreen(
     var project by remember { mutableStateOf<Project?>(null) }
     var showAddMemberDialog by remember { mutableStateOf(false) }
     var showProjectAlertDialog by remember { mutableStateOf(false) }
+    var showEditProjectDialog by remember { mutableStateOf(false) }
     var isUploading by remember { mutableStateOf(false) }
     var currentFolderId by remember { mutableStateOf<String?>(null) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
@@ -134,7 +138,11 @@ fun ProjectDetailsScreen(
     }
     val messages by messagesFlow.collectAsState(initial = emptyList())
 
-    var selectedTab by remember { mutableStateOf(0) }
+    // rememberSaveable, not remember - the Activity gets torn down and recreated on rotation
+    // (no configChanges override in the manifest), and a plain remember would silently reset
+    // this back to tab 0 (Dashboard), kicking users off whatever tab - Calendar, Files, etc. -
+    // they were actually on.
+    var selectedTab by rememberSaveable { mutableStateOf(0) }
     val tabs = listOf(
         "Home" to Icons.Default.Home,
         "Team" to Icons.Default.Person,
@@ -243,6 +251,9 @@ fun ProjectDetailsScreen(
                     },
                     actions = {
                         if (isAdmin && selectedTab == 0) {
+                            IconButton(onClick = { showEditProjectDialog = true }) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit Project")
+                            }
                             IconButton(onClick = { showProjectAlertDialog = true }) {
                                 Icon(Icons.Default.Warning, contentDescription = "Send Alert", tint = MaterialTheme.colorScheme.error)
                             }
@@ -407,6 +418,25 @@ fun ProjectDetailsScreen(
                     }
                 )
             }
+
+            if (showEditProjectDialog && project != null) {
+                EditProjectDialog(
+                    project = project!!,
+                    onDismiss = { showEditProjectDialog = false },
+                    onConfirm = { edits ->
+                        scope.launch {
+                            val doc = firestore.collection("projects").document(projectId)
+                            doc.update("name" to edits.name)
+                            doc.update("description" to edits.description)
+                            doc.update("location" to edits.location)
+                            doc.update("ownerName" to edits.ownerName)
+                            doc.update("ownerPhone" to edits.ownerPhone)
+                            doc.update("ownerEmail" to edits.ownerEmail)
+                            showEditProjectDialog = false
+                        }
+                    }
+                )
+            }
         }
     }
 }
@@ -428,6 +458,68 @@ fun SendProjectAlertDialog(onDismiss: () -> Unit, onConfirm: (String, String) ->
         confirmButton = {
             Button(onClick = { onConfirm(title, message) }, enabled = title.isNotBlank() && message.isNotBlank()) {
                 Text("Send Alert")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+data class ProjectEdits(
+    val name: String,
+    val description: String,
+    val location: String,
+    val ownerName: String,
+    val ownerPhone: String,
+    val ownerEmail: String
+)
+
+@Composable
+fun EditProjectDialog(project: Project, onDismiss: () -> Unit, onConfirm: (ProjectEdits) -> Unit) {
+    var name by remember(project.id) { mutableStateOf(project.name) }
+    var description by remember(project.id) { mutableStateOf(project.description) }
+    var location by remember(project.id) { mutableStateOf(project.location) }
+    var ownerName by remember(project.id) { mutableStateOf(project.ownerName) }
+    var ownerPhone by remember(project.id) { mutableStateOf(project.ownerPhone) }
+    var ownerEmail by remember(project.id) { mutableStateOf(project.ownerEmail) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Project") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
+                TextField(value = name, onValueChange = { name = it }, label = { Text("Project Name") }, modifier = Modifier.fillMaxWidth())
+                TextField(value = description, onValueChange = { description = it }, label = { Text("Description") }, modifier = Modifier.fillMaxWidth())
+                TextField(
+                    value = location,
+                    onValueChange = { location = it },
+                    label = { Text("Job Site Address") },
+                    placeholder = { Text("e.g. 123 Main St, Nashville, TN 37201") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "A full street address gets the most accurate local weather on the dashboard.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                Text("Property Owner", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                TextField(value = ownerName, onValueChange = { ownerName = it }, label = { Text("Owner Name") }, modifier = Modifier.fillMaxWidth())
+                TextField(value = ownerPhone, onValueChange = { ownerPhone = it }, label = { Text("Owner Phone") }, modifier = Modifier.fillMaxWidth())
+                TextField(value = ownerEmail, onValueChange = { ownerEmail = it }, label = { Text("Owner Email") }, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(ProjectEdits(name, description, location, ownerName, ownerPhone, ownerEmail)) },
+                enabled = name.isNotBlank()
+            ) {
+                Text("Save")
             }
         },
         dismissButton = {

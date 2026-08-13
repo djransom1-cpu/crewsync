@@ -57,10 +57,22 @@ fun ProjectHomeScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Project Dashboard • ${project.location}",
+                    text = if (project.location.isNotBlank()) "Project Dashboard • ${project.location}" else "Project Dashboard",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                val ownerLine = listOfNotNull(
+                    project.ownerName.takeIf { it.isNotBlank() },
+                    project.ownerPhone.takeIf { it.isNotBlank() },
+                    project.ownerEmail.takeIf { it.isNotBlank() }
+                ).joinToString(" • ")
+                if (ownerLine.isNotBlank()) {
+                    Text(
+                        text = "Owner: $ownerLine",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
 
@@ -164,18 +176,50 @@ fun HomeCardWrapper(
 
 @Composable
 fun WeatherCard(location: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text("78°F", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("Partly Cloudy", style = MaterialTheme.typography.bodyMedium)
-            Text("High: 82° Low: 65°", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+    var weather by remember(location) { mutableStateOf<LocalWeather?>(null) }
+    var isLoading by remember(location) { mutableStateOf(true) }
+    var failed by remember(location) { mutableStateOf(false) }
+
+    LaunchedEffect(location) {
+        isLoading = true
+        failed = false
+        weather = fetchLocalWeather(location)
+        failed = weather == null
+        isLoading = false
+    }
+
+    when {
+        location.isBlank() -> {
+            Text("No project address set.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
         }
-        Icon(
-            Icons.Default.Star, 
-            contentDescription = null, 
-            modifier = Modifier.size(48.dp), 
-            tint = Color(0xFFFFD600)
-        )
+        isLoading -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(12.dp))
+                Text("Loading weather…", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            }
+        }
+        failed || weather == null -> {
+            Text("Weather unavailable for this address.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+        }
+        else -> {
+            val w = weather!!
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("${w.currentTempF}°F", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text(w.shortForecast, style = MaterialTheme.typography.bodyMedium)
+                    if (w.highF != null && w.lowF != null) {
+                        Text("High: ${w.highF}° Low: ${w.lowF}°", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    }
+                }
+                Icon(
+                    Icons.Default.Star,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = Color(0xFFFFD600)
+                )
+            }
+        }
     }
 }
 

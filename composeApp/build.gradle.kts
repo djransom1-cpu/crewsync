@@ -62,6 +62,11 @@ kotlin {
             // Serialization
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
             implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.0")
+
+            // Ktor (weather lookups)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.content.negotiation)
+            implementation(libs.ktor.serialization.kotlinx.json)
         }
         androidMain.dependencies {
             implementation(project.dependencies.platform(libs.firebase.bom))
@@ -76,6 +81,7 @@ kotlin {
             implementation(libs.androidx.biometric)
             implementation(libs.androidx.datastore)
             implementation(libs.androidx.browser)
+            implementation(libs.ktor.client.okhttp)
         }
         commonTest.dependencies {
             implementation(libs.junit)
@@ -92,11 +98,18 @@ kotlin {
             }
         }
         iosMain.dependencies {
+            implementation(libs.ktor.client.darwin)
         }
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.coil.network.okhttp) // Use okhttp for desktop too
+                implementation(libs.ktor.client.okhttp)
+            }
+        }
+        val jsMain by getting {
+            dependencies {
+                implementation(libs.ktor.client.js)
             }
         }
     }
