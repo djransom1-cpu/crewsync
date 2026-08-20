@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.screens
+package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,15 +29,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.crewsync.data.model.ChecklistGroup
-import com.example.crewsync.data.model.ChecklistItem
-import com.example.crewsync.data.model.DEFAULT_TASK_TEMPLATES
-import com.example.crewsync.data.model.ProjectFile
-import com.example.crewsync.data.model.Task
-import com.example.crewsync.data.model.TaskTemplate
-import com.example.crewsync.data.model.User
-import com.example.crewsync.ui.components.ReorderableColumn
-import com.example.crewsync.util.*
+import com.djransom.crewsync.data.model.ChecklistGroup
+import com.djransom.crewsync.data.model.ChecklistItem
+import com.djransom.crewsync.data.model.DEFAULT_TASK_TEMPLATES
+import com.djransom.crewsync.data.model.ProjectFile
+import com.djransom.crewsync.data.model.Task
+import com.djransom.crewsync.data.model.TaskTemplate
+import com.djransom.crewsync.data.model.User
+import com.djransom.crewsync.ui.components.ReorderableColumn
+import com.djransom.crewsync.util.*
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
@@ -1004,7 +1004,8 @@ fun TaskDetailsDialog(
                                             checklistGroups = checklistGroups.map { if (it.id == group.id) it.copy(items = updatedItems) else it }
                                         },
                                         modifier = Modifier.weight(1f),
-                                        singleLine = true
+                                        singleLine = false,
+                                        maxLines = 5
                                     )
                                     IconButton(onClick = {
                                         val updatedItems = group.items.filter { it.id != item.id }
@@ -1021,7 +1022,8 @@ fun TaskDetailsDialog(
                                     onValueChange = { newItemTextByGroup[group.id] = it },
                                     label = { Text("Add Step") },
                                     modifier = Modifier.weight(1f),
-                                    singleLine = true
+                                    singleLine = false,
+                                    maxLines = 5
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Button(onClick = {

@@ -1,0 +1,78 @@
+name: Android Release Build (AAB)
+
+# Builds a signed Android App Bundle (.aab) for upload to the Google Play Console.
+#
+# Trigger it either:
+#   - manually, from the Actions tab ("Run workflow"), or
+#   - by pushing a version tag like v1.4 (git tag v1.4 && git push origin v1.4)
+#
+# Required repo secrets (Settings > Secrets and variables > Actions), none of which
+# are ever committed to the repo (keystore/ and google-services.json stay gitignored):
+#   ANDROID_KEYSTORE_BASE64        - base64 of keystore/crewsync-release.jks
+#                                     (generate with: base64 -w0 keystore/crewsync-release.jks)
+#   ANDROID_KEYSTORE_STORE_PASSWORD - the .jks store password
+#   ANDROID_KEYSTORE_KEY_ALIAS      - the key alias inside the .jks
+#   ANDROID_KEYSTORE_KEY_PASSWORD   - the key password (often same as store password)
+#   GOOGLE_SERVICES_JSON_BASE64     - base64 of composeApp/google-services.json
+#                                     (generate with: base64 -w0 composeApp/google-services.json)
+#
+# The signing config in composeApp/build.gradle.kts reads from keystore/keystore.properties
+# (storeFile/storePassword/keyAlias/keyPassword) — this workflow recreates that file plus the
+# .jks and google-services.json from secrets right before the build, and they're never written
+# to disk outside the ephemeral GitHub-hosted runner.
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-aab:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Recreate google-services.json from secret
+        run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 -d > composeApp/google-services.json
+
+      - name: Recreate release keystore from secret
+        run: |
+          mkdir -p keystore
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > keystore/crewsync-release.jks
+          cat > keystore/keystore.properties <<EOF
+          storeFile=crewsync-release.jks
+          storePassword=${{ secrets.ANDROID_KEYSTORE_STORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEYSTORE_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEYSTORE_KEY_PASSWORD }}
+          EOF
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build release AAB
+        run: ./gradlew :composeApp:bundleRelease --no-daemon
+
+      - name: Clean up secret files
+        if: always()
+        run: rm -rf keystore/crewsync-release.jks keystore/keystore.properties composeApp/google-services.json
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crewsync-release-aab
+          path: composeApp/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
