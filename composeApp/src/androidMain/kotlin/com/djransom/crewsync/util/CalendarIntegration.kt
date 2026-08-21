@@ -1,8 +1,8 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import android.content.Intent
 import android.provider.CalendarContract
-import com.example.crewsync.data.model.Appointment
+import com.djransom.crewsync.data.model.Appointment
 
 actual fun addToExternalCalendar(appointment: Appointment) {
     val context = ContextHolder.context ?: return

@@ -1,4 +1,4 @@
-package com.example.crewsync
+package com.djransom.crewsync
 
 import org.junit.Test
 

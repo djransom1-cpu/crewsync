@@ -1,3 +1,3 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 expect fun getAppVersion(): String

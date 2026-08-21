@@ -1,6 +1,6 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
-import com.example.crewsync.data.model.Appointment
+import com.djransom.crewsync.data.model.Appointment
 
 actual fun addToExternalCalendar(appointment: Appointment) {
     // Open Google Calendar web URL as fallback for Desktop

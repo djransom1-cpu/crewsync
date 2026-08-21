@@ -1,4 +1,4 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
@@ -14,7 +14,7 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 
-class AndroidPdfRenderer(private val file: File) : com.example.crewsync.util.PdfRenderer {
+class AndroidPdfRenderer(private val file: File) : com.djransom.crewsync.util.PdfRenderer {
     private val pfd: ParcelFileDescriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
     private val renderer: PdfRenderer = PdfRenderer(pfd)
     private var lastBitmap: Bitmap? = null
@@ -51,7 +51,7 @@ class AndroidPdfRenderer(private val file: File) : com.example.crewsync.util.Pdf
 }
 
 @Composable
-actual fun rememberPdfRenderer(url: String): com.example.crewsync.util.PdfRenderer? {
+actual fun rememberPdfRenderer(url: String): com.djransom.crewsync.util.PdfRenderer? {
     val context = LocalContext.current
     var renderer by remember { mutableStateOf<AndroidPdfRenderer?>(null) }
 

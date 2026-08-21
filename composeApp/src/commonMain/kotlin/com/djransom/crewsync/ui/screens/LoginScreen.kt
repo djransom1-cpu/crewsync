@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.screens
+package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -7,9 +7,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.example.crewsync.data.model.User
-import com.example.crewsync.util.rememberBiometricAuthenticator
-import com.example.crewsync.util.rememberSettings
+import com.djransom.crewsync.data.model.User
+import com.djransom.crewsync.util.rememberBiometricAuthenticator
+import com.djransom.crewsync.util.rememberSettings
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore

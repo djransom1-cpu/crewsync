@@ -1,6 +1,6 @@
 @file:JvmName("BusinessCardScannerAndroid")
 
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import android.net.Uri
 import com.google.mlkit.vision.common.InputImage

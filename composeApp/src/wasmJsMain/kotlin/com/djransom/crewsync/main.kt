@@ -1,8 +1,8 @@
-package com.example.crewsync
+package com.djransom.crewsync
 
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.window.ComposeViewport
-import com.example.crewsync.util.initializeFirebase
+import com.djransom.crewsync.util.initializeFirebase
 import kotlinx.browser.document
 
 @OptIn(ExperimentalComposeUiApi::class)

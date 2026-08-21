@@ -1,4 +1,4 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import androidx.compose.runtime.Composable
 
@@ -8,7 +8,7 @@ actual fun rememberSettings(): Settings {
 }
 
 class DesktopSettings : Settings {
-    private val prefs = java.util.prefs.Preferences.userRoot().node("com.example.crewsync")
+    private val prefs = java.util.prefs.Preferences.userRoot().node("com.djransom.crewsync")
     
     override fun putString(key: String, value: String) {
         prefs.put(key, value)

@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.screens
+package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -22,14 +22,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import com.example.crewsync.data.model.Contact
-import com.example.crewsync.data.model.User
-import com.example.crewsync.util.makePhoneCall
-import com.example.crewsync.util.sendEmail
-import com.example.crewsync.util.rememberContactPickerLauncher
-import com.example.crewsync.util.rememberCameraLauncher
-import com.example.crewsync.util.recognizeTextInImage
-import com.example.crewsync.util.parseBusinessCardText
+import com.djransom.crewsync.data.model.Contact
+import com.djransom.crewsync.data.model.User
+import com.djransom.crewsync.util.makePhoneCall
+import com.djransom.crewsync.util.sendEmail
+import com.djransom.crewsync.util.rememberContactPickerLauncher
+import com.djransom.crewsync.util.rememberCameraLauncher
+import com.djransom.crewsync.util.recognizeTextInImage
+import com.djransom.crewsync.util.parseBusinessCardText
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore

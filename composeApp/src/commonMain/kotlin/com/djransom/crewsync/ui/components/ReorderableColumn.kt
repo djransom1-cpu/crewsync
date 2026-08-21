@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.components
+package com.djransom.crewsync.ui.components
 
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box

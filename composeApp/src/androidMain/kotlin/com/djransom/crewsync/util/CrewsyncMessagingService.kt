@@ -1,4 +1,4 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import android.util.Log
 import com.google.firebase.messaging.FirebaseMessagingService

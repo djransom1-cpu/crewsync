@@ -1,4 +1,4 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt

@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.screens
+package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -39,8 +39,8 @@ import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import coil3.request.crossfade
-import com.example.crewsync.data.model.ProjectFile
-import com.example.crewsync.util.*
+import com.djransom.crewsync.data.model.ProjectFile
+import com.djransom.crewsync.util.*
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore

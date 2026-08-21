@@ -1,4 +1,4 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 /** Runs on-device/in-browser text recognition on a photo (no network round-trip, no per-scan
  * cost) and returns the raw recognized text, one line per line of text found in the image. */

@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.screens
+package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,9 +28,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.crewsync.data.model.Appointment
-import com.example.crewsync.data.model.Task
-import com.example.crewsync.util.*
+import com.djransom.crewsync.data.model.Appointment
+import com.djransom.crewsync.data.model.Task
+import com.djransom.crewsync.util.*
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.flow.map

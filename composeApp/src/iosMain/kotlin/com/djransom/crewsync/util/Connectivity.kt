@@ -1,4 +1,4 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import androidx.compose.runtime.*
 import platform.Network.nw_path_get_status

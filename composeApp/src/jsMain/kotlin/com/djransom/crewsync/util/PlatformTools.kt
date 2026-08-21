@@ -1,9 +1,9 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import androidx.compose.runtime.*
 import kotlinx.browser.window
 
-import com.example.crewsync.data.model.Appointment
+import com.djransom.crewsync.data.model.Appointment
 
 actual fun openUrl(url: String) {
     window.open(url, "_blank")

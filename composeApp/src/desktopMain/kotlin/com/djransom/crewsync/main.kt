@@ -1,8 +1,8 @@
-package com.example.crewsync
+package com.djransom.crewsync
 
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
-import com.example.crewsync.util.initializeFirebase
+import com.djransom.crewsync.util.initializeFirebase
 
 fun main() {
     // 1. Force the handshake before the window even starts

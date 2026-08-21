@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.screens
+package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -15,9 +15,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.crewsync.data.model.Feedback
-import com.example.crewsync.data.model.User
-import com.example.crewsync.util.getAppVersion
+import com.djransom.crewsync.data.model.Feedback
+import com.djransom.crewsync.data.model.User
+import com.djransom.crewsync.util.getAppVersion
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore

@@ -1,4 +1,4 @@
-package com.example.crewsync
+package com.djransom.crewsync
 
 import android.os.Bundle
 import android.os.Build
@@ -9,7 +9,7 @@ import com.google.firebase.FirebaseOptions
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import com.example.crewsync.util.ContextHolder
+import com.djransom.crewsync.util.ContextHolder
 import com.google.firebase.appdistribution.FirebaseAppDistribution
 import com.google.firebase.messaging.FirebaseMessaging
 import dev.gitlive.firebase.Firebase

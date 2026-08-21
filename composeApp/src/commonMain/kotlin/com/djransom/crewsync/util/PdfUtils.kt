@@ -1,4 +1,4 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.ImageBitmap

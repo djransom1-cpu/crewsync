@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.screens
+package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,10 +18,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import com.example.crewsync.data.model.User
-import com.example.crewsync.util.rememberFilePickerLauncher
-import com.example.crewsync.util.uploadFile
-import com.example.crewsync.util.toFirestoreMap
+import com.djransom.crewsync.data.model.User
+import com.djransom.crewsync.util.rememberFilePickerLauncher
+import com.djransom.crewsync.util.uploadFile
+import com.djransom.crewsync.util.toFirestoreMap
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore

@@ -1,4 +1,4 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import android.content.Context
 import android.net.ConnectivityManager

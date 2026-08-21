@@ -1,4 +1,4 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body

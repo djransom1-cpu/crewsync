@@ -1,4 +1,4 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 actual fun notifyTaskUpdate(title: String, message: String) {
     ContextHolder.context?.let { ctx ->

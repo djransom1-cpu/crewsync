@@ -1,4 +1,4 @@
-package com.example.crewsync.data.model
+package com.djransom.crewsync.data.model
 
 import kotlinx.serialization.Serializable
 

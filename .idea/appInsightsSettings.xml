@@ -23,8 +23,8 @@
             <InsightsFilterSettings>
               <option name="connection">
                 <ConnectionSetting>
-                  <option name="appId" value="com.example.crewsync" />
-                  <option name="mobileSdkAppId" value="1:516480819680:android:221b188f2a1a12a2b14b85" />
+                  <option name="appId" value="com.djransom.crewsync" />
+                  <option name="mobileSdkAppId" value="1:516480819680:android:ccc28c0f90400818b14b85" />
                   <option name="projectId" value="gen-lang-client-0438127279" />
                   <option name="projectNumber" value="516480819680" />
                 </ConnectionSetting>

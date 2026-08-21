@@ -1,4 +1,4 @@
-package com.example.crewsync.di
+package com.djransom.crewsync.di
 
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth

@@ -1,6 +1,6 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
-import com.example.crewsync.data.model.*
+import com.djransom.crewsync.data.model.*
 import dev.gitlive.firebase.firestore.DocumentSnapshot
 
 fun DocumentSnapshot.toProjectSafe(): Project {
@@ -64,9 +64,9 @@ fun DocumentSnapshot.toUserSafe(fallbackEmail: String = ""): User {
     }
 }
 
-fun DocumentSnapshot.toTaskSafe(): com.example.crewsync.data.model.Task {
+fun DocumentSnapshot.toTaskSafe(): com.djransom.crewsync.data.model.Task {
     val task = try {
-        this.data<com.example.crewsync.data.model.Task>().copy(id = this.id)
+        this.data<com.djransom.crewsync.data.model.Task>().copy(id = this.id)
     } catch (_: Exception) {
         try {
             val projId: String = try { this.get("projectId") } catch (_: Exception) { "" }
@@ -79,7 +79,7 @@ fun DocumentSnapshot.toTaskSafe(): com.example.crewsync.data.model.Task {
             val start: Long? = try { this.get("startDate") } catch (_: Exception) { null }
             val due: Long? = try { this.get("dueDate") } catch (_: Exception) { null }
 
-            com.example.crewsync.data.model.Task(
+            com.djransom.crewsync.data.model.Task(
                 id = this.id,
                 projectId = projId,
                 title = titleStr,
@@ -92,7 +92,7 @@ fun DocumentSnapshot.toTaskSafe(): com.example.crewsync.data.model.Task {
                 dueDate = due
             )
         } catch (_: Exception) {
-            com.example.crewsync.data.model.Task(id = this.id, title = "Task ${this.id.take(4)}")
+            com.djransom.crewsync.data.model.Task(id = this.id, title = "Task ${this.id.take(4)}")
         }
     }
     // Tasks written before checklists were grouped only have a flat "checklist" array on the
@@ -105,25 +105,25 @@ fun DocumentSnapshot.toTaskSafe(): com.example.crewsync.data.model.Task {
     } else task
 }
 
-private fun DocumentSnapshot.legacyChecklistAsGroup(): com.example.crewsync.data.model.ChecklistGroup? {
+private fun DocumentSnapshot.legacyChecklistAsGroup(): com.djransom.crewsync.data.model.ChecklistGroup? {
     return try {
         val raw: List<Map<String, Any?>> = this.get("checklist")
         if (raw.isEmpty()) return null
         val items = raw.mapIndexedNotNull { idx, m ->
             val text = m["text"] as? String ?: return@mapIndexedNotNull null
-            com.example.crewsync.data.model.ChecklistItem(
+            com.djransom.crewsync.data.model.ChecklistItem(
                 id = (m["id"] as? String) ?: "chk_legacy_$idx",
                 text = text,
                 isDone = (m["isDone"] as? Boolean) ?: false
             )
         }
-        if (items.isEmpty()) null else com.example.crewsync.data.model.ChecklistGroup(id = "chk_grp_legacy", title = "Checklist", items = items)
+        if (items.isEmpty()) null else com.djransom.crewsync.data.model.ChecklistGroup(id = "chk_grp_legacy", title = "Checklist", items = items)
     } catch (_: Exception) {
         null
     }
 }
 
-fun com.example.crewsync.data.model.Task.toFirestoreMap(): Map<String, Any?> {
+fun com.djransom.crewsync.data.model.Task.toFirestoreMap(): Map<String, Any?> {
     val map = mutableMapOf<String, Any?>()
     if (id.isNotEmpty()) map["id"] = id
     map["projectId"] = projectId
@@ -177,7 +177,7 @@ fun TaskTemplate.toFirestoreMap(): Map<String, Any> {
     )
 }
 
-fun com.example.crewsync.data.model.Project.toFirestoreMap(): Map<String, Any?> {
+fun com.djransom.crewsync.data.model.Project.toFirestoreMap(): Map<String, Any?> {
     val map = mutableMapOf<String, Any?>()
     if (id.isNotEmpty()) map["id"] = id
     map["name"] = name

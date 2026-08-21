@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.screens
+package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,8 +21,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import com.example.crewsync.data.model.*
-import com.example.crewsync.util.*
+import com.djransom.crewsync.data.model.*
+import com.djransom.crewsync.util.*
 import kotlinx.datetime.*
 
 @Composable

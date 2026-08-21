@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.screens
+package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -6,10 +6,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import com.example.crewsync.data.model.ChatMessage
-import com.example.crewsync.ui.components.ChatTab
-import com.example.crewsync.util.uploadFile
-import com.example.crewsync.util.toFirestoreMap
+import com.djransom.crewsync.data.model.ChatMessage
+import com.djransom.crewsync.ui.components.ChatTab
+import com.djransom.crewsync.util.uploadFile
+import com.djransom.crewsync.util.toFirestoreMap
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore

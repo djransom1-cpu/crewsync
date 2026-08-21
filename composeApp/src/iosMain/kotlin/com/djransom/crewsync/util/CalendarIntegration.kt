@@ -1,6 +1,6 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
-import com.example.crewsync.data.model.Appointment
+import com.djransom.crewsync.data.model.Appointment
 import kotlinx.cinterop.ExperimentalForeignApi
 import platform.EventKit.EKEvent
 import platform.EventKit.EKEventStore

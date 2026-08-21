@@ -1,4 +1,4 @@
-package com.example.crewsync
+package com.djransom.crewsync
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -18,14 +18,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.example.crewsync.di.appModule
-import com.example.crewsync.ui.screens.*
-import com.example.crewsync.data.model.Broadcast
-import com.example.crewsync.data.model.ChatMessage
-import com.example.crewsync.data.model.Project
-import com.example.crewsync.util.initializeFirebase
-import com.example.crewsync.util.notifyChatMessage
-import com.example.crewsync.util.notifyTaskUpdate
+import com.djransom.crewsync.di.appModule
+import com.djransom.crewsync.ui.screens.*
+import com.djransom.crewsync.data.model.Broadcast
+import com.djransom.crewsync.data.model.ChatMessage
+import com.djransom.crewsync.data.model.Project
+import com.djransom.crewsync.util.initializeFirebase
+import com.djransom.crewsync.util.notifyChatMessage
+import com.djransom.crewsync.util.notifyTaskUpdate
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
@@ -34,7 +34,7 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.SupervisorJob
-import com.example.crewsync.util.toProjectSafe
+import com.djransom.crewsync.util.toProjectSafe
 import org.koin.core.context.GlobalContext
 import org.koin.core.context.startKoin
 

@@ -1,4 +1,4 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import java.awt.Image
 import java.awt.SystemTray

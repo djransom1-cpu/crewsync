@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.components
+package com.djransom.crewsync.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,10 +20,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import com.example.crewsync.data.model.ChatMessage
-import com.example.crewsync.util.PickedFile
-import com.example.crewsync.util.rememberFilePickerLauncher
-import com.example.crewsync.util.openUrl
+import com.djransom.crewsync.data.model.ChatMessage
+import com.djransom.crewsync.util.PickedFile
+import com.djransom.crewsync.util.rememberFilePickerLauncher
+import com.djransom.crewsync.util.openUrl
 
 @Composable
 fun ChatTab(

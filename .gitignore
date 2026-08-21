@@ -26,3 +26,9 @@ functions/.env.*
 
 .kotlin
 *.logcat
+
+# Signing
+keystore/
+*.jks
+*.keystore
+keystore.properties

@@ -1,4 +1,4 @@
-package com.example.crewsync.util
+package com.djransom.crewsync.util
 
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.w3c.files.File

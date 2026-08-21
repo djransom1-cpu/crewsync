@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.screens
+package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,20 +28,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.example.crewsync.data.model.*
-import com.example.crewsync.ui.components.ChatTab
-import com.example.crewsync.util.rememberFilePickerLauncher
-import com.example.crewsync.util.uploadFile
-import com.example.crewsync.util.openUrl
+import com.djransom.crewsync.data.model.*
+import com.djransom.crewsync.ui.components.ChatTab
+import com.djransom.crewsync.util.rememberFilePickerLauncher
+import com.djransom.crewsync.util.uploadFile
+import com.djransom.crewsync.util.openUrl
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
-import com.example.crewsync.util.toProjectSafe
-import com.example.crewsync.util.toTaskSafe
-import com.example.crewsync.util.toFirestoreMap
+import com.djransom.crewsync.util.toProjectSafe
+import com.djransom.crewsync.util.toTaskSafe
+import com.djransom.crewsync.util.toFirestoreMap
 import coil3.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -130,7 +130,7 @@ fun ProjectDetailsScreen(
             if (list.isNotEmpty()) {
                 val last = list.last()
                 if (last.senderEmail != auth.currentUser?.email && last.timestamp > Clock.System.now().toEpochMilliseconds() - 5000) {
-                    com.example.crewsync.util.notifyChatMessage(projectId, last.senderEmail, last.text)
+                    com.djransom.crewsync.util.notifyChatMessage(projectId, last.senderEmail, last.text)
                 }
             }
             list
@@ -177,7 +177,7 @@ fun ProjectDetailsScreen(
         }
     }
 
-    val cameraLauncher = com.example.crewsync.util.rememberCameraLauncher { pickedFile ->
+    val cameraLauncher = com.djransom.crewsync.util.rememberCameraLauncher { pickedFile ->
         scope.launch {
             isUploading = true
             try {

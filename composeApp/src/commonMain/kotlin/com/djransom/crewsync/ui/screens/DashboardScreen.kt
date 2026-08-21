@@ -1,4 +1,4 @@
-package com.example.crewsync.ui.screens
+package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,8 +20,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import com.example.crewsync.data.model.Project
-import com.example.crewsync.data.model.User
+import com.djransom.crewsync.data.model.Project
+import com.djransom.crewsync.data.model.User
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
@@ -29,9 +29,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 
-import com.example.crewsync.util.toProjectSafe
-import com.example.crewsync.util.toUserSafe
-import com.example.crewsync.util.toFirestoreMap
+import com.djransom.crewsync.util.toProjectSafe
+import com.djransom.crewsync.util.toUserSafe
+import com.djransom.crewsync.util.toFirestoreMap
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -137,7 +137,7 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
     val rawProjectsCount by rawProjectsCountFlow.collectAsState(0)
 
     // Offline Status
-    val isOnline by com.example.crewsync.util.rememberConnectivityState()
+    val isOnline by com.djransom.crewsync.util.rememberConnectivityState()
 
     // Check for Desktop Updates
     val latestVersionInfoFlow = remember {
@@ -152,7 +152,7 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
     }
     val latestVersionInfo by latestVersionInfoFlow.collectAsState(initial = null)
 
-    val currentVersion = com.example.crewsync.util.getAppVersion()
+    val currentVersion = com.djransom.crewsync.util.getAppVersion()
     val needsUpdate = remember(latestVersionInfo) {
         val latest = latestVersionInfo?.get("version") ?: ""
         latest.isNotEmpty() && latest != currentVersion
@@ -212,7 +212,7 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                     modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
                     onClick = { 
-                        latestVersionInfo?.get("url")?.let { com.example.crewsync.util.openUrl(it) }
+                        latestVersionInfo?.get("url")?.let { com.djransom.crewsync.util.openUrl(it) }
                     }
                 ) {
                     Row(

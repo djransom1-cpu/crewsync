@@ -2,6 +2,12 @@ import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackConfig
+import java.util.Properties
+
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore/keystore.properties")
+    if (file.exists()) load(file.inputStream())
+}
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -118,11 +124,11 @@ kotlin {
 
 compose.desktop {
     application {
-        mainClass = "com.example.crewsync.MainKt"
+        mainClass = "com.djransom.crewsync.MainKt"
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "Crewsync" // Changed from com.example.crewsync
+            packageName = "Crewsync" // Changed from com.djransom.crewsync
             packageVersion = "1.0.0"
             description = "Construction Crew Management"
             copyright = "© 2026 Crewsync Team"
@@ -138,15 +144,15 @@ compose.desktop {
 }
 
 android {
-    namespace = "com.example.crewsync"
+    namespace = "com.djransom.crewsync"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.example.crewsync"
+        applicationId = "com.djransom.crewsync"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 6
+        versionName = "1.5"
     }
     externalNativeBuild {
         cmake {
@@ -159,6 +165,16 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+    signingConfigs {
+        create("release") {
+            if (keystoreProperties.containsKey("storeFile")) {
+                storeFile = rootProject.file("keystore/" + keystoreProperties.getProperty("storeFile").substringAfterLast("/"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
     buildTypes {
         getByName("debug") {
             firebaseAppDistribution {
@@ -168,6 +184,7 @@ android {
         }
         getByName("release") {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
