@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +26,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -687,7 +691,7 @@ fun FilesTab(
                             verticalArrangement = Arrangement.Center,
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(Icons.Default.Folder, null, modifier = Modifier.size(48.dp), tint = folderColor)
+                            FolderIcon(tint = folderColor, modifier = Modifier.size(48.dp))
                             Text(folder.name, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
                         }
                     }
@@ -740,7 +744,7 @@ fun FilesTab(
                     val folderColor = folder.color?.let { Color(parseColor(it)) } ?: MaterialTheme.colorScheme.primary
                     ListItem(
                         headlineContent = { Text(folder.name, fontWeight = FontWeight.Bold) },
-                        leadingContent = { Icon(Icons.Default.Folder, contentDescription = null, tint = folderColor) },
+                        leadingContent = { FolderIcon(tint = folderColor, modifier = Modifier.size(24.dp)) },
                         modifier = Modifier.combinedClickable(
                             onClick = { onFolderClick(folder.id) },
                             onLongClick = { folderToRecolor = folder }
@@ -813,6 +817,33 @@ fun FilesTab(
                 onMarkupClick(fullScreenImage!!.url, fullScreenImage!!.name, fullScreenImage!!.id)
                 fullScreenImage = null
             }
+        )
+    }
+}
+
+// Custom-drawn instead of Icons.Default.Folder: pulling in material-icons-extended
+// (needed for a "Folder" icon - it isn't in the core set) crashes the Kotlin/JS
+// compiler backend (JsIntrinsics.getInternalFunction: "List has more than one
+// element"), breaking the web build. A couple of drawRoundRect calls avoids the
+// dependency entirely and works identically on every target.
+@Composable
+fun FolderIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val tabHeight = h * 0.22f
+        val corner = w * 0.08f
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(0f, 0f),
+            size = Size(w * 0.45f, tabHeight * 1.8f),
+            cornerRadius = CornerRadius(corner, corner)
+        )
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(0f, tabHeight),
+            size = Size(w, h - tabHeight),
+            cornerRadius = CornerRadius(corner, corner)
         )
     }
 }
