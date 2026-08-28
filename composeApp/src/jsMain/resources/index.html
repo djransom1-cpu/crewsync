@@ -7,6 +7,11 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" href="favicon.png">
+    <!-- GitHub Pages can't set the Cross-Origin-Opener-Policy/Cross-Origin-Embedder-Policy
+         headers Compose's threaded WASM needs for SharedArrayBuffer. This service worker
+         patches them in client-side (github.com/gzuidhof/coi-serviceworker) and reloads
+         the page once - without it, Skiko silently hangs (no error, canvas never appears). -->
+    <script src="coi-serviceworker.js"></script>
     <script type="text/javascript">
         (function() {
             var tmpFn = function() { return '/tmp'; };
@@ -104,7 +109,6 @@
             touch-action: none;
         }
     </style>
-    <script type="text/javascript" src="skiko.js"></script>
     <!-- pdf.js: renders blueprint/drawing PDFs to a canvas so Markup Studio can annotate them,
          the same way the Android build renders PDF pages to a bitmap. Loaded as a plain global
          (window.pdfjsLib) rather than an npm/webpack dependency to keep the JS interop simple. -->
