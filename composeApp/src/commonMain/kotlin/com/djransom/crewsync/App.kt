@@ -31,10 +31,11 @@ import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.SupervisorJob
 import com.djransom.crewsync.util.toProjectSafe
+import androidx.savedstate.read
 import org.koin.core.context.GlobalContext
 import org.koin.core.context.startKoin
 
@@ -296,7 +297,7 @@ fun AppMainContent() {
                                 )
                             }
                         composable("projectDetails/{projectId}") { backStackEntry ->
-                            val projectId = backStackEntry.arguments?.getString("projectId") ?: ""
+                            val projectId = backStackEntry.arguments?.read { getStringOrNull("projectId") } ?: ""
                             ProjectDetailsScreen(
                                 projectId = projectId,
                                 onBack = { navController.popBackStack() },
@@ -309,8 +310,8 @@ fun AppMainContent() {
                             )
                         }
                         composable("markup/{projectId}/{fileId}") { backStackEntry ->
-                            val projectId = backStackEntry.arguments?.getString("projectId") ?: ""
-                            val fileId = backStackEntry.arguments?.getString("fileId") ?: ""
+                            val projectId = backStackEntry.arguments?.read { getStringOrNull("projectId") } ?: ""
+                            val fileId = backStackEntry.arguments?.read { getStringOrNull("fileId") } ?: ""
                             MarkupScreen(
                                 projectId = projectId,
                                 fileId = fileId,
@@ -319,7 +320,7 @@ fun AppMainContent() {
                             )
                         }
                         composable("directChat/{userEmail}") { backStackEntry ->
-                            val userEmail = backStackEntry.arguments?.getString("userEmail") ?: ""
+                            val userEmail = backStackEntry.arguments?.read { getStringOrNull("userEmail") } ?: ""
                             DirectChatScreen(
                                 otherUserEmail = userEmail,
                                 onBack = { navController.popBackStack() }

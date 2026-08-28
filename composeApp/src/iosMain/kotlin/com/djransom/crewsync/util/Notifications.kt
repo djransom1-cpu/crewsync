@@ -1,7 +1,7 @@
 package com.djransom.crewsync.util
 
 import platform.UserNotifications.*
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 
 actual fun notifyTaskUpdate(title: String, message: String) {
     val content = UNMutableNotificationContent().apply {

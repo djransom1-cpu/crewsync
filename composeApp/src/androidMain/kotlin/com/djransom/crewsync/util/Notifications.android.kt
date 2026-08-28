@@ -16,7 +16,7 @@ import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 
 private const val ALERT_CHANNEL_ID = "crewsync_alerts"
 private const val CHAT_CHANNEL_ID = "crewsync_chat"

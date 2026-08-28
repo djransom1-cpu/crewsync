@@ -27,7 +27,7 @@ import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 
 import com.djransom.crewsync.util.toProjectSafe
 import com.djransom.crewsync.util.toUserSafe
