@@ -1,10 +1,13 @@
 package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -33,6 +36,8 @@ import com.djransom.crewsync.ui.components.ChatTab
 import com.djransom.crewsync.util.rememberFilePickerLauncher
 import com.djransom.crewsync.util.uploadFile
 import com.djransom.crewsync.util.openUrl
+import com.djransom.crewsync.util.shareFile
+import com.djransom.crewsync.util.downloadFile
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
@@ -42,6 +47,7 @@ import kotlinx.datetime.Clock
 import com.djransom.crewsync.util.toProjectSafe
 import com.djransom.crewsync.util.toTaskSafe
 import com.djransom.crewsync.util.toFirestoreMap
+import com.djransom.crewsync.util.parseColor
 import coil3.compose.AsyncImage
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -322,6 +328,11 @@ fun ProjectDetailsScreen(
                             onTakeCamera = { cameraLauncher() },
                             onAddFolder = { showAddFolderDialog = true },
                             onFolderClick = { currentFolderId = it },
+                            onRecolorFolder = { folder, hex ->
+                                scope.launch {
+                                    firestore.collection("projects").document(projectId).collection("folders").document(folder.id).update("color" to hex)
+                                }
+                            },
                             onMarkupClick = onMarkupClick,
                             onDeleteClick = { file ->
                                 scope.launch {
@@ -575,17 +586,19 @@ fun TeamTab(projectId: String, members: List<String>, userMap: Map<String, Strin
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun FilesTab(
-    files: List<ProjectFile>, 
+    files: List<ProjectFile>,
     folders: List<ProjectFolder>,
     currentFolderId: String?,
-    isUploading: Boolean, 
-    isLeader: Boolean, 
-    onUpload: () -> Unit, 
+    isUploading: Boolean,
+    isLeader: Boolean,
+    onUpload: () -> Unit,
     onTakeCamera: () -> Unit,
     onAddFolder: () -> Unit,
     onFolderClick: (String?) -> Unit,
+    onRecolorFolder: (ProjectFolder, String) -> Unit,
     onMarkupClick: (String, String, String) -> Unit,
     onDeleteClick: (ProjectFile) -> Unit
 ) {
@@ -593,6 +606,17 @@ fun FilesTab(
     val currentFiles = files.filter { it.folderId == currentFolderId }
     var isGalleryView by remember { mutableStateOf(false) }
     var fullScreenImage by remember { mutableStateOf<ProjectFile?>(null) }
+    var folderToRecolor by remember { mutableStateOf<ProjectFolder?>(null) }
+
+    folderToRecolor?.let { folder ->
+        FolderColorPickerDialog(
+            onDismiss = { folderToRecolor = null },
+            onColorSelected = { hex ->
+                onRecolorFolder(folder, hex)
+                folderToRecolor = null
+            }
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -650,22 +674,25 @@ fun FilesTab(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(currentFolders) { folder ->
+                items(currentFolders, key = { it.id }) { folder ->
+                    val folderColor = folder.color?.let { Color(parseColor(it)) } ?: MaterialTheme.colorScheme.primary
                     Card(
-                        modifier = Modifier.aspectRatio(1f),
-                        onClick = { onFolderClick(folder.id) }
+                        modifier = Modifier.aspectRatio(1f).combinedClickable(
+                            onClick = { onFolderClick(folder.id) },
+                            onLongClick = { folderToRecolor = folder }
+                        )
                     ) {
                         Column(
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.Center,
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(Icons.Default.Build, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Folder, null, modifier = Modifier.size(48.dp), tint = folderColor)
                             Text(folder.name, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
                         }
                     }
                 }
-                items(currentFiles) { file ->
+                items(currentFiles, key = { it.id }) { file ->
                     val isImage = file.name.lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".png") }
                     Card(
                         modifier = Modifier.aspectRatio(1f),
@@ -709,18 +736,22 @@ fun FilesTab(
             }
         } else {
             LazyColumn {
-                items(currentFolders) { folder ->
+                items(currentFolders, key = { it.id }) { folder ->
+                    val folderColor = folder.color?.let { Color(parseColor(it)) } ?: MaterialTheme.colorScheme.primary
                     ListItem(
                         headlineContent = { Text(folder.name, fontWeight = FontWeight.Bold) },
-                        leadingContent = { Icon(Icons.Default.Build, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                        modifier = Modifier.clickable { onFolderClick(folder.id) }
+                        leadingContent = { Icon(Icons.Default.Folder, contentDescription = null, tint = folderColor) },
+                        modifier = Modifier.combinedClickable(
+                            onClick = { onFolderClick(folder.id) },
+                            onLongClick = { folderToRecolor = folder }
+                        )
                     )
                 }
                 
                 if (currentFiles.isEmpty() && currentFolders.isEmpty()) {
                     item { Text("No items in this folder.", modifier = Modifier.padding(16.dp)) }
                 } else {
-                    items(currentFiles) { file ->
+                    items(currentFiles, key = { it.id }) { file ->
                         ListItem(
                             headlineContent = { Text(file.name) },
                             supportingContent = { Text("By ${file.uploadedBy}") },
@@ -742,12 +773,18 @@ fun FilesTab(
                                     TextButton(onClick = { onMarkupClick(file.url, file.name, file.id) }) {
                                         Text("Markup")
                                     }
-                                    TextButton(onClick = { 
+                                    TextButton(onClick = {
                                         val isImage = file.name.lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".png") }
                                         if (isImage) fullScreenImage = file
                                         else openUrl(file.url)
                                     }) {
                                         Text("Open")
+                                    }
+                                    TextButton(onClick = { downloadFile(file.url, file.name) }) {
+                                        Text("Download")
+                                    }
+                                    IconButton(onClick = { shareFile(file.url, file.name) }) {
+                                        Icon(Icons.Default.Send, contentDescription = "Share \"${file.name}\"", modifier = Modifier.size(20.dp))
                                     }
                                     if (isLeader) {
                                         IconButton(onClick = { onDeleteClick(file) }) {
@@ -778,6 +815,36 @@ fun FilesTab(
             }
         )
     }
+}
+
+@Composable
+fun FolderColorPickerDialog(onDismiss: () -> Unit, onColorSelected: (String) -> Unit) {
+    val colors = listOf("#FFFFFF", "#FFCDD2", "#C8E6C9", "#BBDEFB", "#FFF9C4", "#E1BEE7", "#F5F5F5", "#212121", "#38BDF8", "#EF4444", "#F59E0B", "#10B981")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Folder Color") },
+        text = {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                colors.forEach { hex ->
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color(parseColor(hex)))
+                            .border(width = 1.dp, color = Color.LightGray, shape = CircleShape)
+                            .clickable { onColorSelected(hex) }
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable

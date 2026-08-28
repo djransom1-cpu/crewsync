@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "gen-lang-client-0438127279"
-  }
+  },
+  "targets": {
+    "gen-lang-client-0438127279": {
+      "storage": {
+        "crewsync-default": [
+          "gen-lang-client-0438127279.firebasestorage.app"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

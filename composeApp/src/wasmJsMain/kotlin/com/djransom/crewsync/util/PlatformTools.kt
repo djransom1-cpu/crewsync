@@ -17,6 +17,15 @@ actual fun sendEmail(address: String, subject: String, body: String) {
     window.location.href = mailto
 }
 
+actual fun shareFile(url: String, name: String) {
+    val mailto = "mailto:?subject=${name.replace(" ", "%20")}&body=${"Here's the file: $url".replace(" ", "%20")}"
+    window.location.href = mailto
+}
+
+actual fun downloadFile(url: String, suggestedName: String) {
+    window.open(url, "_blank")
+}
+
 @Composable
 actual fun rememberConnectivityState(): State<Boolean> {
     return remember { mutableStateOf(true) }

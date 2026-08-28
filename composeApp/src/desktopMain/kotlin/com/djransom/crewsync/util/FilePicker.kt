@@ -1,6 +1,9 @@
 package com.djransom.crewsync.util
 
 import androidx.compose.runtime.Composable
+import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.storage.Data
+import dev.gitlive.firebase.storage.storage
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
@@ -25,9 +28,10 @@ actual fun rememberCameraLauncher(onFilePicked: (PickedFile) -> Unit): () -> Uni
 }
 
 actual suspend fun uploadFile(path: String, platformFile: Any): String {
-    // This would require reading the File and using Firebase Storage JVM
-    // Note: gitlive-firebase usually works on JVM but might need specific setup
-    return ""
+    val storageRef = Firebase.storage.reference(path)
+    val file = platformFile as File
+    storageRef.putData(Data(file.readBytes()))
+    return storageRef.getDownloadUrl()
 }
 
 actual suspend fun recognizeTextInImage(platformFile: Any): String = ""

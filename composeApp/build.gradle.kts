@@ -52,6 +52,7 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
+            implementation(compose.materialIconsExtended)
             implementation(compose.ui)
             implementation(compose.components.resources)
             implementation(compose.components.uiToolingPreview)
@@ -112,6 +113,13 @@ kotlin {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.coil.network.okhttp) // Use okhttp for desktop too
                 implementation(libs.ktor.client.okhttp)
+                // Provides Dispatchers.Main on the JVM (backed by the Swing EDT) - without
+                // it, any coroutine that hops to Dispatchers.Main (e.g. Firebase Auth's
+                // addAuthStateListener) crashes with "Module with the Main dispatcher is
+                // missing" the moment it runs, since there's no Android main-thread dispatcher
+                // to fall back on outside of Android.
+                implementation(libs.kotlinx.coroutines.swing)
+                implementation(libs.pdfbox)
             }
         }
         val jsMain by getting {
@@ -127,9 +135,18 @@ compose.desktop {
         mainClass = "com.djransom.crewsync.MainKt"
 
         nativeDistributions {
+            // jlink's module auto-detection (jdeps) misses modules only
+            // touched via reflection/JNI in transitive deps - it already bit
+            // us once with jdk.unsupported (see FirebaseManager.kt), and now
+            // java.sql (pulled in by sqlite-jdbc for Firestore's local cache)
+            // is missing the same way, crashing every Firestore call in the
+            // packaged build with NoClassDefFoundError. Bundle the full JDK
+            // instead of trying to enumerate every module a dependency might
+            // reflectively need.
+            includeAllModules = true
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Crewsync" // Changed from com.djransom.crewsync
-            packageVersion = "1.0.0"
+            packageVersion = "1.0.1"
             description = "Construction Crew Management"
             copyright = "© 2026 Crewsync Team"
             vendor = "Crewsync"

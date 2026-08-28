@@ -15,6 +15,29 @@ import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.launch
 
+// Firebase's JVM/desktop Auth client surfaces raw REST error bodies (full HTTP response JSON)
+// as the exception message, rather than a clean error code the way the native Android/iOS SDKs
+// do - shown as-is, it looks like a crash rather than "wrong password". This maps the known
+// error codes (still present as a substring within that raw body) to plain text instead.
+private fun friendlyAuthError(e: Exception, isRegistering: Boolean): String {
+    val raw = e.message ?: ""
+    return when {
+        raw.contains("INVALID_LOGIN_CREDENTIALS") || raw.contains("INVALID_PASSWORD") || raw.contains("EMAIL_NOT_FOUND") ->
+            "Incorrect email or password. If you don't have an account yet, use \"Don't have an account? Sign Up\" below."
+        raw.contains("EMAIL_EXISTS") ->
+            "An account with this email already exists - try logging in instead."
+        raw.contains("WEAK_PASSWORD") ->
+            "That password is too weak - please use at least 6 characters."
+        raw.contains("INVALID_EMAIL") ->
+            "That doesn't look like a valid email address."
+        raw.contains("USER_DISABLED") ->
+            "This account has been disabled. Contact an admin for help."
+        raw.contains("TOO_MANY_ATTEMPTS_TRY_LATER") ->
+            "Too many failed attempts. Please wait a bit and try again."
+        else -> if (isRegistering) "Registration failed. Please try again." else "Login failed. Please try again."
+    }
+}
+
 @Composable
 fun LoginScreen(onLoginSuccess: () -> Unit) {
     val settings = rememberSettings()
@@ -165,7 +188,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                         
                         onLoginSuccess()
                     } catch (e: Exception) {
-                        errorMessage = e.message ?: if (isRegistering) "Registration failed" else "Login failed"
+                        errorMessage = friendlyAuthError(e, isRegistering)
                     } finally {
                         isLoading = false
                     }
@@ -252,7 +275,10 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                                 successMessage = "Check your inbox! Reset link sent to $resetEmail"
                                 showForgotPasswordDialog = false
                             } catch (e: Exception) {
-                                dialogError = e.message ?: "Failed to send reset email"
+                                dialogError = if (e.message?.contains("EMAIL_NOT_FOUND") == true)
+                                    "No account found for that email address."
+                                else
+                                    "Failed to send reset email. Please try again."
                             } finally {
                                 isSending = false
                             }

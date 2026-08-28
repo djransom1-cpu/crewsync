@@ -13,3 +13,5 @@ actual class PdfRendererActual actual constructor(url: String) {
 actual fun rememberPdfRenderer(url: String): PdfRendererActual? {
     return null
 }
+
+actual suspend fun exportMarkedUpPdf(storagePath: String, pages: List<ImageBitmap>): String? = null

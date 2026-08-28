@@ -9,3 +9,13 @@ actual fun openUrl(url: String) {
         UIApplication.sharedApplication.openURL(nsUrl)
     }
 }
+
+// TODO: wire up UIActivityViewController for a native share sheet - falls back to opening the
+// link for now.
+actual fun shareFile(url: String, name: String) {
+    openUrl(url)
+}
+
+actual fun downloadFile(url: String, suggestedName: String) {
+    openUrl(url)
+}

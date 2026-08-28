@@ -1,5 +1,12 @@
 {
   "functions": {
     "source": "functions"
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "target": "crewsync-default",
+    "rules": "storage.rules"
   }
 }

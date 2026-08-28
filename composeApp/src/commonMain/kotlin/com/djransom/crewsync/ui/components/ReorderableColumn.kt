@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,11 +23,14 @@ import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 
 /**
- * A plain (non-lazy) column of drag-reorderable rows. Every row is given the same fixed
- * [rowHeight] so the dragged row's position can be converted to a target index with simple
- * arithmetic instead of measuring each row - there's no LazyColumn here (these lists live
- * inside a single scrollable dialog Column, where a nested LazyColumn would need its own
- * bounded height), so this keeps the reorder math self-contained and dependency-free.
+ * A plain (non-lazy) column of drag-reorderable rows. [rowHeight] is only a *minimum* row
+ * height - rows grow taller to fit their content (e.g. a checklist item's text wrapping to
+ * multiple lines) - and it doubles as the fixed step size the drag gesture uses to convert
+ * dragged distance into a target index, instead of measuring each row - there's no LazyColumn
+ * here (these lists live inside a single scrollable dialog Column, where a nested LazyColumn
+ * would need its own bounded height), so this keeps the reorder math self-contained and
+ * dependency-free. Because that step size doesn't account for taller wrapped rows, dragging past
+ * one is approximate rather than exact.
  *
  * [itemContent] receives a `dragHandleModifier` to attach to whichever part of the row (e.g. a
  * drag-handle icon) should start the drag on long-press - the rest of the row stays free for
@@ -58,7 +62,7 @@ fun <T> ReorderableColumn(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(rowHeight)
+                    .heightIn(min = rowHeight)
                     .zIndex(if (isDragging) 1f else 0f)
                     .then(
                         if (isDragging) {

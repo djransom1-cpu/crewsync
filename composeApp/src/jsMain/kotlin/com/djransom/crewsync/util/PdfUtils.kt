@@ -89,3 +89,5 @@ actual fun rememberPdfRenderer(url: String): PdfRenderer? {
 
     return renderer
 }
+
+actual suspend fun exportMarkedUpPdf(storagePath: String, pages: List<ImageBitmap>): String? = null

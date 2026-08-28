@@ -1,0 +1,133 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && myRole() in ['Admin', 'SuperAdmin'];
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && myRole() == 'SuperAdmin';
+    }
+
+    // Pre-signup invite placeholders are keyed by lowercased email instead of
+    // a uid (see LoginScreen/ProfileScreen "claim by email" flow) - anyone
+    // signed in may create/claim/delete those, but never a real uid doc.
+    function isEmailKey(userId) {
+      return userId.matches('.*@.*');
+    }
+
+    function roleUnchanged() {
+      return request.resource.data.role == resource.data.role;
+    }
+
+    function canGrantRole(role) {
+      return role == 'SuperAdmin' ? isSuperAdmin() : isAdmin();
+    }
+
+    // ---------------- users ----------------
+    match /users/{userId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() && (userId == request.auth.uid || isEmailKey(userId));
+
+      // Anyone can edit their own profile fields, but not their own role.
+      // Only an admin (SuperAdmin for granting SuperAdmin) may change someone
+      // else's role.
+      allow update: if isSignedIn() && (
+        (userId == request.auth.uid && roleUnchanged()) ||
+        (userId != request.auth.uid && !roleUnchanged()
+          && canGrantRole(request.resource.data.role) && canGrantRole(resource.data.role))
+      );
+
+      allow delete: if isSignedIn() && (isEmailKey(userId) || isAdmin());
+    }
+
+    // ---------------- projects ----------------
+    match /projects/{projectId} {
+      allow read, create, update: if isSignedIn();
+      allow delete: if isSuperAdmin(); // not exposed in the app UI today
+
+      match /messages/{messageId} {
+        allow read, create: if isSignedIn();
+      }
+
+      match /folders/{folderId} {
+        allow read, create: if isSignedIn();
+      }
+
+      match /appointments/{appointmentId} {
+        allow read, create, update, delete: if isSignedIn();
+      }
+
+      match /files/{fileId} {
+        allow read, create, delete: if isSignedIn();
+
+        match /markups/{markupId} {
+          allow read, create, update, delete: if isSignedIn();
+        }
+      }
+    }
+
+    // ---------------- tasks / planner ----------------
+    match /tasks/{taskId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+
+    match /task_templates/{templateId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+
+    // ---------------- contacts (org-wide directory) ----------------
+    match /contacts/{contactId} {
+      allow read, create, update: if isSignedIn();
+      allow delete: if isAdmin(); // matches ContactsScreen's admin-only delete UI
+    }
+
+    // ---------------- direct messages ----------------
+    // NOTE: chatId is derived client-side from the two participants' emails
+    // with no participants[] field stored, so rules can't verify membership
+    // without an app change. Scoped to "signed-in crew member" for now like
+    // the rest of the app; tighten later by writing a participants array on
+    // chat creation and checking request.auth.token.email in it.
+    match /direct_messages/{chatId} {
+      allow read, create: if isSignedIn();
+
+      match /messages/{messageId} {
+        allow read, create: if isSignedIn();
+      }
+    }
+
+    // ---------------- broadcasts ----------------
+    match /broadcasts/{broadcastId} {
+      allow read, create: if isSignedIn();
+    }
+
+    // ---------------- feedback / bug reports ----------------
+    match /feedback/{feedbackId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    // ---------------- app config ----------------
+    // Read-only from the client; no write path exists in the app - manage
+    // via the console or the Admin SDK.
+    match /app_config/{configId} {
+      allow read: if isSignedIn();
+    }
+  }
+}

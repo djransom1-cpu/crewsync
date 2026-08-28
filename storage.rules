@@ -1,0 +1,46 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Generous cap since job-site photos/PDFs run large; guards against
+    // abuse, not a real-world limit for this app's file sizes.
+    function underSizeLimit() {
+      return request.resource.size < 50 * 1024 * 1024;
+    }
+
+    match /profile_pictures/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == uid && underSizeLimit();
+    }
+
+    match /projects/{projectId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && underSizeLimit();
+    }
+
+    match /chat_attachments/{projectId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && underSizeLimit();
+    }
+
+    match /task_attachments/{projectId}/{taskId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && underSizeLimit();
+    }
+
+    // Same participants-not-enforced caveat as direct_messages in firestore.rules.
+    match /direct_chat_attachments/{chatId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && underSizeLimit();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

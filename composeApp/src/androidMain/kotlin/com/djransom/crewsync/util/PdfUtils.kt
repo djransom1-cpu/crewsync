@@ -1,16 +1,22 @@
 package com.djransom.crewsync.util
 
 import android.graphics.Bitmap
+import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.storage.Data
+import dev.gitlive.firebase.storage.storage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 
@@ -64,7 +70,11 @@ actual fun rememberPdfRenderer(url: String): com.djransom.crewsync.util.PdfRende
                 val response = client.newCall(request).execute()
                 
                 if (response.isSuccessful) {
-                    val tempFile = File(context.cacheDir, "temp_blueprint.pdf")
+                    // Keyed by the URL itself (every file's download URL is unique) rather than
+                    // a fixed name - a shared filename meant opening a second file while the
+                    // first's download/open was still in flight could overwrite the bytes out
+                    // from under it, silently showing the wrong sheet's content.
+                    val tempFile = File(context.cacheDir, "blueprint_${url.hashCode()}.pdf")
                     response.body?.byteStream()?.use { input ->
                         FileOutputStream(tempFile).use { output ->
                             input.copyTo(output)
@@ -89,4 +99,27 @@ actual fun rememberPdfRenderer(url: String): com.djransom.crewsync.util.PdfRende
     }
 
     return renderer
+}
+
+actual suspend fun exportMarkedUpPdf(storagePath: String, pages: List<ImageBitmap>): String? {
+    if (pages.isEmpty()) return null
+    return withContext(Dispatchers.IO) {
+        val pdfDocument = PdfDocument()
+        try {
+            pages.forEachIndexed { index, bitmap ->
+                val androidBitmap = bitmap.asAndroidBitmap()
+                val pageInfo = PdfDocument.PageInfo.Builder(androidBitmap.width, androidBitmap.height, index + 1).create()
+                val page = pdfDocument.startPage(pageInfo)
+                page.canvas.drawBitmap(androidBitmap, 0f, 0f, null)
+                pdfDocument.finishPage(page)
+            }
+            val bytes = ByteArrayOutputStream().use { out -> pdfDocument.writeTo(out); out.toByteArray() }
+
+            val storageRef = Firebase.storage.reference(storagePath)
+            storageRef.putData(Data(bytes))
+            storageRef.getDownloadUrl()
+        } finally {
+            pdfDocument.close()
+        }
+    }
 }
