@@ -36,6 +36,7 @@ import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.datetime.*
+import kotlin.time.Clock
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,7 +52,7 @@ fun CalendarScreen(
     val scope = rememberCoroutineScope()
     
     var viewMode by rememberSaveable { mutableStateOf("Month") }
-    var currentMonth by remember { mutableStateOf(Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date) }
+    var currentMonth by remember { mutableStateOf(Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds()).toLocalDateTime(TimeZone.currentSystemDefault()).date) }
     var selectedDate by remember { mutableStateOf(currentMonth) }
     
     var appointmentToEdit by remember { mutableStateOf<Appointment?>(null) }

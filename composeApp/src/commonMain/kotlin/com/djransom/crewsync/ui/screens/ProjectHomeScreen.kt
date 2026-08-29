@@ -24,6 +24,7 @@ import coil3.compose.AsyncImage
 import com.djransom.crewsync.data.model.*
 import com.djransom.crewsync.util.*
 import kotlinx.datetime.*
+import kotlin.time.Clock
 
 @Composable
 fun ProjectHomeScreen(
