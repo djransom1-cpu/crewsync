@@ -33,6 +33,18 @@ private val weatherHttpClient = HttpClient {
 // this is how they ask requesters to self-identify instead. See https://www.weather.gov/documentation/services-web-api
 private const val NWS_USER_AGENT = "(Crewsync construction app, crewsync.support@example.com)"
 
+// Browsers forbid scripts from setting the User-Agent header at all - Ktor's JS engine
+// throws when asked to, instead of silently dropping it the way a raw fetch() call would.
+// NWS doesn't actually hard-require the header (confirmed: requests without it still
+// succeed), so on web this just degrades gracefully rather than aborting the whole
+// weather fetch with an exception that fetchLocalWeather's catch-all then swallows.
+private fun io.ktor.client.request.HttpRequestBuilder.trySetNwsUserAgent() {
+    try {
+        header("User-Agent", NWS_USER_AGENT)
+    } catch (_: Throwable) {
+    }
+}
+
 private const val GEOCODE_FUNCTION_URL =
     "https://us-central1-gen-lang-client-0438127279.cloudfunctions.net/geocode"
 
@@ -75,7 +87,7 @@ private suspend fun fetchNwsForecastUrl(coordinates: Coordinates): String? {
     val lon = (kotlin.math.round(coordinates.longitude * 10000) / 10000)
     val response: NwsPointsResponse = weatherHttpClient
         .get("https://api.weather.gov/points/$lat,$lon") {
-            header("User-Agent", NWS_USER_AGENT)
+            trySetNwsUserAgent()
         }.body()
     return response.properties.forecast
 }
@@ -96,7 +108,7 @@ private data class NwsPeriod(
 private suspend fun fetchNwsForecastPeriods(forecastUrl: String): List<NwsPeriod> {
     val response: NwsForecastResponse = weatherHttpClient
         .get(forecastUrl) {
-            header("User-Agent", NWS_USER_AGENT)
+            trySetNwsUserAgent()
         }.body()
     return response.properties.periods
 }
