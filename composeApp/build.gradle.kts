@@ -159,17 +159,6 @@ compose.desktop {
     }
 }
 
-// Compose Material3 1.9.0 transitively pulls plain kotlinx-datetime 0.7.1, which wins
-// Gradle's default conflict resolution over the "-0.6.x-compat" coordinate declared in
-// the catalog (0.7.1 > 0.7.0 numerically, suffix aside). Force it: GitLive Firebase's JS
-// artifact still calls the old kotlinx.datetime.Clock.System at runtime - without the
-// compat build providing that class, Firestore init crashes on web with "No class found
-// for symbol 'kotlinx.datetime/Clock.System'". Our own source already migrated to
-// kotlin.time.Clock, so this only needs to satisfy the dependency, not our code.
-configurations.all {
-    resolutionStrategy.force("org.jetbrains.kotlinx:kotlinx-datetime:${libs.versions.kotlinx.datetime.get()}")
-}
-
 android {
     namespace = "com.djransom.crewsync"
     compileSdk = 37
