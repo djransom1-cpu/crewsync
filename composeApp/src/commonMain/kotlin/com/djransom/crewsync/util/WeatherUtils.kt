@@ -55,7 +55,9 @@ suspend fun fetchLocalWeather(address: String): LocalWeather? {
         val forecastUrl = fetchNwsForecastUrl(coordinates) ?: return null
         val periods = fetchNwsForecastPeriods(forecastUrl)
         periodsToWeather(periods)
-    } catch (_: Exception) {
+    } catch (e: Exception) {
+        println("WEATHER DEBUG: ${e::class.simpleName}: ${e.message}")
+        e.printStackTrace()
         null
     }
 }
