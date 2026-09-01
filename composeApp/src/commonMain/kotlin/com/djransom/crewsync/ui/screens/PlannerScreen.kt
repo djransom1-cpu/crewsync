@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -902,13 +903,33 @@ fun ManageBucketsDialog(
                 }
 
                 LazyColumn {
-                    items(buckets) { bucket ->
+                    itemsIndexed(buckets) { index, bucket ->
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(bucket)
+                            Text(bucket, modifier = Modifier.weight(1f))
+                            IconButton(
+                                onClick = {
+                                    buckets = buckets.toMutableList().apply {
+                                        add(index - 1, removeAt(index))
+                                    }
+                                },
+                                enabled = index > 0
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up")
+                            }
+                            IconButton(
+                                onClick = {
+                                    buckets = buckets.toMutableList().apply {
+                                        add(index + 1, removeAt(index))
+                                    }
+                                },
+                                enabled = index < buckets.size - 1
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down")
+                            }
                             if (buckets.size > 1) {
                                 IconButton(onClick = { buckets = buckets.filter { it != bucket }.toMutableList() }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Delete")
