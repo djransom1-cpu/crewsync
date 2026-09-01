@@ -63,6 +63,7 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
     var showManageBucketsDialog by remember { mutableStateOf(false) }
     var showManageTemplatesDialog by remember { mutableStateOf(false) }
     var showSummaryDialog by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     var selectedTask by remember { mutableStateOf<Task?>(null) }
     var pendingTaskId by remember { mutableStateOf<String?>(null) }
     var pendingSaveTask by remember { mutableStateOf<Task?>(null) }
@@ -115,12 +116,35 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
         merged
     }
 
+    val visibleTasks = remember(tasks, searchQuery) {
+        if (searchQuery.isBlank()) tasks
+        else tasks.filter {
+            it.title.contains(searchQuery, ignoreCase = true) || it.description.contains(searchQuery, ignoreCase = true)
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search cards...", fontSize = 13.sp) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear search", modifier = Modifier.size(16.dp))
+                        }
+                    }
+                },
+                singleLine = true,
+                textStyle = LocalTextStyle.current.copy(fontSize = 13.sp),
+                modifier = Modifier.weight(1f).height(52.dp)
+            )
+            Spacer(Modifier.width(8.dp))
             TextButton(onClick = { showSummaryDialog = true }) {
                 Icon(Icons.AutoMirrored.Filled.List, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
@@ -149,7 +173,7 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 items(projectBuckets) { bucketName ->
-                    val columnTasks = tasks.filter { it.status == bucketName }
+                    val columnTasks = visibleTasks.filter { it.status == bucketName }
                     PlannerColumn(
                         title = bucketName,
                         tasks = columnTasks,
