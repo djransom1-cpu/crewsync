@@ -255,8 +255,8 @@ fun CalendarSummaryCard(appointments: List<Appointment>, tasks: List<Task>) {
 @Composable
 fun TasksSummaryCard(tasks: List<Task>) {
     val total = tasks.size
-    val done = tasks.count { it.status == "Done" }
-    
+    val done = tasks.count { it.status.trim().lowercase() in setOf("done", "completed", "complete", "finished", "closed") }
+
     Column {
         val progress = if (total > 0) done.toFloat() / total.toFloat() else 0f
         LinearProgressIndicator(
@@ -265,7 +265,7 @@ fun TasksSummaryCard(tasks: List<Task>) {
         )
         Spacer(Modifier.height(8.dp))
         Text("$done / $total Tasks Done", style = MaterialTheme.typography.bodySmall)
-        
+
         Spacer(Modifier.height(8.dp))
         tasks.filter { it.status != "Done" }.take(2).forEach { task ->
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {

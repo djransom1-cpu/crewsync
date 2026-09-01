@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,6 +28,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.djransom.crewsync.data.model.ChecklistGroup
@@ -58,7 +61,11 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var showManageBucketsDialog by remember { mutableStateOf(false) }
     var showManageTemplatesDialog by remember { mutableStateOf(false) }
+    var showSummaryDialog by remember { mutableStateOf(false) }
     var selectedTask by remember { mutableStateOf<Task?>(null) }
+    var pendingTaskId by remember { mutableStateOf<String?>(null) }
+    var pendingSaveTask by remember { mutableStateOf<Task?>(null) }
+    var pendingDeleteTaskId by remember { mutableStateOf<String?>(null) }
     
     val tasksFlow = remember(projectId) {
         firestore.collection("tasks")
@@ -113,6 +120,12 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            TextButton(onClick = { showSummaryDialog = true }) {
+                Icon(Icons.AutoMirrored.Filled.List, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Project Summary", fontSize = 12.sp)
+            }
+            Spacer(Modifier.width(8.dp))
             TextButton(onClick = { showManageTemplatesDialog = true }) {
                 Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
@@ -254,6 +267,50 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
         )
     }
 
+    if (showSummaryDialog) {
+        ProjectSummaryDialog(
+            tasks = tasks,
+            onDismiss = { showSummaryDialog = false },
+            onTaskClick = { task ->
+                pendingTaskId = task.id
+                showSummaryDialog = false
+            }
+        )
+    }
+
+    // The summary dialog must fully unmount before the details dialog mounts - closing one
+    // Dialog and opening another in the same click handler (same recomposition frame) left the
+    // web target's canvas in an unresponsive state (every click after silently no-opped). This
+    // effect only opens the details dialog once showSummaryDialog has actually gone false and
+    // that recomposition has committed, one frame later.
+    LaunchedEffect(pendingTaskId, showSummaryDialog) {
+        if (pendingTaskId != null && !showSummaryDialog) {
+            selectedTask = tasks.find { it.id == pendingTaskId }
+            pendingTaskId = null
+        }
+    }
+
+    // Same fix as above, applied to Save/Delete: closing this dialog cancels a burst of its
+    // own child coroutines (ripple/animation/text-field state) in the same frame that used to
+    // also launch a brand-new Firestore-write coroutine on the parent scope. That collision -
+    // a pile of children completing/cancelling at once while a new one starts - is exactly the
+    // shape of thing that was landing inside kotlinx-coroutines' own JobSupport.tryMakeCompleting/
+    // finalizeFinishingState and throwing "RangeError: Invalid array length" there, wedging the
+    // whole recomposition loop. Deferring the write to the next frame, after the dialog has
+    // actually finished tearing down, avoids the collision.
+    LaunchedEffect(pendingSaveTask) {
+        pendingSaveTask?.let { updatedTask ->
+            firestore.collection("tasks").document(updatedTask.id).set(updatedTask.toFirestoreMap())
+            pendingSaveTask = null
+        }
+    }
+    LaunchedEffect(pendingDeleteTaskId) {
+        pendingDeleteTaskId?.let { taskId ->
+            firestore.collection("tasks").document(taskId).delete()
+            pendingDeleteTaskId = null
+        }
+    }
+
     if (selectedTask != null) {
         TaskDetailsDialog(
             task = selectedTask!!,
@@ -264,15 +321,11 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
             onDismiss = { selectedTask = null },
             onSave = { updatedTask ->
                 selectedTask = null
-                scope.launch {
-                    firestore.collection("tasks").document(updatedTask.id).set(updatedTask.toFirestoreMap())
-                }
+                pendingSaveTask = updatedTask
             },
             onDelete = { taskId ->
                 selectedTask = null
-                scope.launch {
-                    firestore.collection("tasks").document(taskId).delete()
-                }
+                pendingDeleteTaskId = taskId
             }
         )
     }
@@ -447,6 +500,88 @@ fun TaskCard(
             }
         }
     }
+}
+
+// A single pull-up view of every task card on the board, sorted so due-dated cards
+// lead (earliest due date first) and undated cards follow alphabetically, with
+// Done cards pushed to the bottom of the list regardless of due date - a clean
+// read on overall project progress without hunting across bucket columns.
+private val doneStatusSynonyms = setOf("done", "completed", "complete", "finished", "closed")
+private fun isDoneStatus(status: String) = status.trim().lowercase() in doneStatusSynonyms
+
+@Composable
+fun ProjectSummaryDialog(tasks: List<Task>, onDismiss: () -> Unit, onTaskClick: (Task) -> Unit) {
+    val now = remember { Clock.System.now().toEpochMilliseconds() }
+    val total = tasks.size
+    val done = tasks.count { isDoneStatus(it.status) }
+
+    val sortedTasks = remember(tasks) {
+        fun sortByDueDateThenTitle(list: List<Task>): List<Task> {
+            val (dated, undated) = list.partition { it.dueDate != null }
+            return dated.sortedBy { it.dueDate } + undated.sortedBy { it.title.lowercase() }
+        }
+        val (doneTasks, activeTasks) = tasks.partition { isDoneStatus(it.status) }
+        sortByDueDateThenTitle(activeTasks) + sortByDueDateThenTitle(doneTasks)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Project Summary", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 480.dp)) {
+                val progress = if (total > 0) done.toFloat() / total.toFloat() else 0f
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50))
+                )
+                Spacer(Modifier.height(4.dp))
+                Text("$done / $total task cards done", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                Spacer(Modifier.height(8.dp))
+
+                if (sortedTasks.isEmpty()) {
+                    Text("No task cards yet.", color = Color.Gray)
+                } else {
+                    LazyColumn {
+                        items(sortedTasks, key = { it.id }) { task ->
+                            val isDone = isDoneStatus(task.status)
+                            val isOverdue = !isDone && task.dueDate != null && task.dueDate < now
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onTaskClick(task) }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(parseColor(task.color))))
+                                Spacer(Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = task.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        textDecoration = if (isDone) TextDecoration.LineThrough else null,
+                                        color = if (isDone) Color.Gray else MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(task.status, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                }
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = task.dueDate?.let { formatDate(it) } ?: "No due date",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isOverdue) MaterialTheme.colorScheme.error else Color.Gray
+                                )
+                            }
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
