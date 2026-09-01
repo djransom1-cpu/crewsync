@@ -65,6 +65,13 @@ kotlin {
             implementation(libs.firebase.firestore)
             implementation(libs.firebase.storage)
 
+            // Explicit direct dependency, not just transitive: the web target was throwing
+            // "RangeError: Invalid array length" from inside JobSupport.tryMakeCompleting/
+            // finalizeFinishingState (the library's own multi-child job-completion exception
+            // aggregation) on every Firestore write. Pin it forward past whatever transitive
+            // version(s) Ktor/Compose/Firebase pull in, in case this is a fixed upstream bug.
+            implementation(libs.kotlinx.coroutines.core)
+
             // Serialization
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
             implementation(libs.kotlinx.datetime)

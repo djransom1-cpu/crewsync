@@ -7,7 +7,7 @@ firebase-bom = "33.8.0"
 google-services = "4.5.0"
 kotlinx-serialization = "1.11.0"
 kotlinx-datetime = "0.7.1"
-kotlinx-coroutines = "1.10.2"
+kotlinx-coroutines = "1.11.0"
 coreKtx = "1.19.0"
 junit = "4.13.2"
 junitVersion = "1.3.0"
@@ -21,7 +21,7 @@ biometric = "1.2.0-alpha05"
 datastore = "1.1.1"
 koin = "4.0.0"
 coil = "3.0.0-rc01"
-ktor = "3.2.0"
+ktor = "3.5.0"
 pdfbox = "2.0.31"
 
 [libraries]
@@ -39,6 +39,7 @@ navigation-compose = { module = "org.jetbrains.androidx.navigation:navigation-co
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 
 # Firebase
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebase-bom" }
