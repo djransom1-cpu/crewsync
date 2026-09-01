@@ -140,6 +140,20 @@ compose.desktop {
     application {
         mainClass = "com.djransom.crewsync.MainKt"
 
+        buildTypes {
+            release {
+                // ProGuard's shrinking fails outright on this dependency graph (10k+
+                // unresolved references from grpc/protobuf/ktor's reflective access
+                // patterns) rather than just warning. Shrinking was never load-bearing
+                // here anyway - includeAllModules below already bundles the full JDK
+                // instead of trying to trim it, for the same "don't fight the dependency
+                // tree" reason.
+                proguard {
+                    isEnabled.set(false)
+                }
+            }
+        }
+
         nativeDistributions {
             // jlink's module auto-detection (jdeps) misses modules only
             // touched via reflection/JNI in transitive deps - it already bit
@@ -152,7 +166,7 @@ compose.desktop {
             includeAllModules = true
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Crewsync" // Changed from com.djransom.crewsync
-            packageVersion = "1.0.2"
+            packageVersion = "1.0.3"
             description = "Construction Crew Management"
             copyright = "© 2026 Crewsync Team"
             vendor = "Crewsync"
