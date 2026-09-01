@@ -27,6 +27,17 @@ if (typeof window === 'undefined') {
             return;
         }
 
+        // Only same-origin requests (the app bundle/wasm) actually need COOP/COEP headers
+        // injected - that's the only reason this worker exists. Rewriting cross-origin API
+        // responses (Firestore's realtime Listen channel, Storage, weather lookups) breaks
+        // their normal CORS validation under COEP: the reconstructed Response fails the
+        // browser's Cross-Origin-Resource-Policy check even though the header was added,
+        // which kills Firestore's long-polling channel whenever it recycles and leaves the
+        // app's live listeners silently dead. Let cross-origin requests pass through untouched.
+        if (new URL(r.url, self.location.href).origin !== self.location.origin) {
+            return;
+        }
+
         const request = (coepCredentialless && r.mode === "no-cors")
             ? new Request(r, {
                 credentials: "omit",
@@ -54,7 +65,16 @@ if (typeof window === 'undefined') {
                         headers: newHeaders,
                     });
                 })
-                .catch((e) => console.error(e))
+                // A transient network failure here (flaky dev server, brief connectivity
+                // blip) used to log-and-swallow: the catch handler returned undefined,
+                // event.respondWith() got a non-Response value, and the whole request died
+                // with "Failed to convert value to 'Response'" - taking down composeApp.js
+                // or skiko.wasm load with it and leaving Skia's renderer stuck drawing with
+                // no shader program (the "frozen" canvas). Retry once, then fall back to an
+                // unmodified fetch (no header rewrite, but the page keeps loading) instead
+                // of failing the request outright.
+                .catch(() => fetch(request))
+                .catch(() => fetch(r))
         );
     });
 
