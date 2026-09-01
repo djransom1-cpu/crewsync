@@ -131,17 +131,18 @@ fun com.djransom.crewsync.data.model.Task.toFirestoreMap(): Map<String, Any?> {
     map["description"] = description
     map["status"] = status
     if (assignedTo != null) map["assignedTo"] = assignedTo
-    map["assignedMembers"] = assignedMembers
+    // GitLive's JS Firestore encoder computes an array-backed list's size as
+    // descriptor.elementsCount - 1 when it goes through the generic Any-typed encoding path
+    // (which every value in this Map<String, Any?> does, since there's no static type to
+    // dispatch on). For an empty list that's 0 - 1 = -1, and `Array<Any?>(-1)` throws
+    // "RangeError: Invalid array length" - crashing every task save on the web target, since
+    // most tasks have at least one empty list field. Omitting empty lists here avoids the
+    // encoder path entirely; a missing key decodes back to the class's emptyList() default,
+    // same as writing an empty list would have.
+    if (assignedMembers.isNotEmpty()) map["assignedMembers"] = assignedMembers
     map["color"] = color
     if (startDate != null) map["startDate"] = startDate.toDouble()
     if (dueDate != null) map["dueDate"] = dueDate.toDouble()
-    map["checklistGroups"] = checklistGroups.map { g ->
-        mapOf(
-            "id" to g.id,
-            "title" to g.title,
-            "items" to g.items.map { mapOf("id" to it.id, "text" to it.text, "isDone" to it.isDone) }
-        )
-    }
     // Deliberately NOT writing the legacy flat "checklist" field here. It used to be mirrored
     // on every save as a compatibility shim, but that meant any save - even one that never
     // touched checklists - overwrote it with whatever checklistGroups held at that moment,
@@ -149,7 +150,8 @@ fun com.djransom.crewsync.data.model.Task.toFirestoreMap(): Map<String, Any?> {
     // at save time. Leaving the old field alone means any task that still has intact legacy
     // data sitting untouched in Firestore keeps being recovered by legacyChecklistAsGroup()
     // on every load, indefinitely, instead of being one save away from destroying it.
-    map["attachments"] = attachments.map { it.toFirestoreMap() }
+    if (checklistGroups.isNotEmpty()) map["checklistGroups"] = checklistGroups
+    if (attachments.isNotEmpty()) map["attachments"] = attachments
     return map
 }
 
@@ -183,10 +185,13 @@ fun com.djransom.crewsync.data.model.Project.toFirestoreMap(): Map<String, Any?>
     map["name"] = name
     map["description"] = description
     map["teamLeaderId"] = teamLeaderId
-    map["members"] = members
+    // See the note in Task.toFirestoreMap() below: an empty list hitting GitLive's JS Any-typed
+    // encoder throws "Invalid array length". A brand-new project with no members yet, or one
+    // whose card order was cleared, would crash on save without this guard.
+    if (members.isNotEmpty()) map["members"] = members
     map["location"] = location
     map["createdAt"] = createdAt.toDouble()
-    map["cardOrder"] = cardOrder
+    if (cardOrder.isNotEmpty()) map["cardOrder"] = cardOrder
     map["cardSizes"] = cardSizes
     return map
 }
@@ -252,7 +257,7 @@ fun User.toFirestoreMap(): Map<String, Any?> {
     map["role"] = role
     if (profilePictureUrl != null) map["profilePictureUrl"] = profilePictureUrl
     if (fcmToken != null) map["fcmToken"] = fcmToken
-    map["projectOrder"] = projectOrder
+    if (projectOrder.isNotEmpty()) map["projectOrder"] = projectOrder
     map["dashboardViewMode"] = dashboardViewMode
     map["firstDayOfWeek"] = firstDayOfWeek
     return map
