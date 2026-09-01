@@ -170,10 +170,23 @@ fun AppMainContent() {
         // Listener 2: Project Chat Messages Across User Projects
         launch {
             try {
+                // Each snapshot spawns one messages-listener coroutine per project below. Without
+                // tracking and cancelling the previous batch first, every single "projects" update
+                // (a card reorder, a member add, any project field edit - anything, from any
+                // screen) stacked a brand new set of per-project Firestore listeners on top of the
+                // old ones, forever, for the entire session. That's a real, unbounded listener leak:
+                // steadily growing background WebChannel subscriptions that made the app
+                // progressively laggier the longer a session ran, eventually looking like a freeze
+                // on an unrelated action (e.g. saving a task) that happened to land while dozens of
+                // stale listeners were competing for the main thread.
+                val messageListenerJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
                 fStore.collection("projects").snapshots.collect { snapshot ->
                     val projectIds = snapshot.documents.map { it.id }
-                    projectIds.forEach { projId ->
-                        launch {
+                    messageListenerJobs.keys.filter { it !in projectIds }.forEach { staleId ->
+                        messageListenerJobs.remove(staleId)?.cancel()
+                    }
+                    projectIds.filter { it !in messageListenerJobs }.forEach { projId ->
+                        messageListenerJobs[projId] = launch {
                             try {
                                 fStore.collection("projects").document(projId).collection("messages").snapshots.collect { msgSnap ->
                                     val msgs = msgSnap.documents.mapNotNull { doc ->
