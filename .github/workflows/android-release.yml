@@ -43,6 +43,15 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      # composeApp has an externalNativeBuild.cmake step (built from src/androidMain/cpp) that
+      # setup-android doesn't provision by default - without this, "Build release AAB" fails
+      # trying to configure CMake for every ABI. Versions pinned to match what's already
+      # installed via Android Studio locally (where the same build succeeds).
+      - name: Install NDK & CMake
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager --install "ndk;28.2.13676358" "cmake;3.22.1"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
