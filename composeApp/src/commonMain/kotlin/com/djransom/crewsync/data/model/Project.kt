@@ -14,7 +14,7 @@ data class Project(
     val ownerPhone: String = "",
     val ownerEmail: String = "",
     val buckets: List<String> = listOf("Not Started", "In Progress", "Paused", "Done"),
-    val cardOrder: List<String> = listOf("Weather", "Calendar", "Tasks", "Chat", "Team", "Files"),
+    val cardOrder: List<String> = listOf("Weather", "Calendar", "Tasks", "Chat", "Team", "Files", "Notes"),
     val cardSizes: Map<String, String> = emptyMap(), // cardId to "Small" or "Large"
     val createdAt: Long = 0L
 )

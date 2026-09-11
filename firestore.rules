@@ -80,6 +80,14 @@ service cloud.firestore {
           allow read, create, update, delete: if isSignedIn();
         }
       }
+
+      match /notes/{noteId} {
+        allow read, create, update, delete: if isSignedIn();
+
+        match /actions/{actionId} {
+          allow read, create, update, delete: if isSignedIn();
+        }
+      }
     }
 
     // ---------------- tasks / planner ----------------

@@ -134,6 +134,13 @@ fun ProjectDetailsScreen(
     }
     val files by filesFlow.collectAsState(initial = emptyList())
 
+    val notesFlow = remember(projectId) {
+        firestore.collection("projects").document(projectId).collection("notes").snapshots.map { snap ->
+            snap.documents.mapNotNull { try { it.data<Note>().copy(id = it.id) } catch (e: Exception) { null } }
+        }
+    }
+    val notes by notesFlow.collectAsState(initial = emptyList())
+
     val messagesFlow = remember(projectId) {
         firestore.collection("projects").document(projectId).collection("messages").snapshots.map { snap ->
             val list = snap.documents.mapNotNull { try { it.data<ChatMessage>().copy(id = it.id) } catch (e: Exception) { null } }.sortedBy { it.timestamp }
@@ -159,7 +166,8 @@ fun ProjectDetailsScreen(
         "Files" to Icons.Default.Build,
         "Chat" to Icons.Default.Email,
         "Planner" to Icons.AutoMirrored.Filled.List,
-        "Calendar" to Icons.Default.DateRange
+        "Calendar" to Icons.Default.DateRange,
+        "Notes" to Icons.Default.Edit
     )
 
     val isSuperAdmin = userProfile?.role == "SuperAdmin" || userProfile?.role == "Admin"
@@ -298,6 +306,7 @@ fun ProjectDetailsScreen(
                             appointments = appointments,
                             messages = messages,
                             files = files,
+                            notes = notes,
                             userMap = userMap,
                             userPicMap = userPicMap,
                             onMoveCard = { cardId, direction ->
@@ -380,6 +389,7 @@ fun ProjectDetailsScreen(
                             canEdit = isLeader,
                             firstDayOfWeek = userProfile?.firstDayOfWeek ?: "Sunday"
                         )
+                        6 -> NotesTab(projectId = projectId, notes = notes, currentUserEmail = auth.currentUser?.email ?: "")
                     }
                 }
             }

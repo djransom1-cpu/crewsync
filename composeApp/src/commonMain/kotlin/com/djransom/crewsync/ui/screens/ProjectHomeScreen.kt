@@ -33,13 +33,17 @@ fun ProjectHomeScreen(
     appointments: List<Appointment>,
     messages: List<ChatMessage>,
     files: List<ProjectFile>,
+    notes: List<Note>,
     userMap: Map<String, String>,
     userPicMap: Map<String, String?>,
     onMoveCard: (String, Int) -> Unit,
     onResizeCard: (String, String) -> Unit,
     onNavigateToTab: (Int) -> Unit
 ) {
-    val cardOrder = project.cardOrder
+    // Falls back to appending "Notes" for projects created before that card existed, since
+    // their stored cardOrder won't include it - new projects already get it via Project's
+    // default cardOrder.
+    val cardOrder = if ("Notes" in project.cardOrder) project.cardOrder else project.cardOrder + "Notes"
     val cardSizes = project.cardSizes
 
     LazyVerticalGrid(
@@ -96,6 +100,7 @@ fun ProjectHomeScreen(
                         "Chat" -> 3
                         "Team" -> 1
                         "Files" -> 2
+                        "Notes" -> 6
                         else -> 0
                     }
                     onNavigateToTab(index)
@@ -108,6 +113,7 @@ fun ProjectHomeScreen(
                     "Chat" -> ChatSummaryCard(messages, userMap, userPicMap)
                     "Team" -> TeamSummaryCard(project.members, userPicMap)
                     "Files" -> FilesSummaryCard(files)
+                    "Notes" -> NotesSummaryCard(notes)
                 }
             }
         }
@@ -335,6 +341,25 @@ fun FilesSummaryCard(files: List<ProjectFile>) {
                     Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color.Gray)
                     Spacer(Modifier.width(4.dp))
                     Text(file.name, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NotesSummaryCard(notes: List<Note>) {
+    if (notes.isEmpty()) {
+        Text("No notes yet.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+    } else {
+        val latest = notes.maxByOrNull { it.updatedAt }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("${notes.size} note${if (notes.size == 1) "" else "s"}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+            if (latest != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color.Gray)
+                    Spacer(Modifier.width(4.dp))
+                    Text(latest.title.ifBlank { "Untitled Note" }, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                 }
             }
         }
