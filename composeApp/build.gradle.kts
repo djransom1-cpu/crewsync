@@ -166,7 +166,7 @@ compose.desktop {
             includeAllModules = true
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Crewsync" // Changed from com.djransom.crewsync
-            packageVersion = "1.0.4"
+            packageVersion = "1.0.5"
             description = "Construction Crew Management"
             copyright = "© 2026 Crewsync Team"
             vendor = "Crewsync"
@@ -188,8 +188,8 @@ android {
         applicationId = "com.djransom.crewsync"
         minSdk = 24
         targetSdk = 35
-        versionCode = 7
-        versionName = "1.6"
+        versionCode = 8
+        versionName = "1.7"
     }
     externalNativeBuild {
         cmake {
