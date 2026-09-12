@@ -187,9 +187,9 @@ android {
     defaultConfig {
         applicationId = "com.djransom.crewsync"
         minSdk = 24
-        targetSdk = 35
-        versionCode = 9
-        versionName = "1.8"
+        targetSdk = 36
+        versionCode = 10
+        versionName = "1.8.1"
     }
     externalNativeBuild {
         cmake {
