@@ -14,5 +14,7 @@ data class User(
     val fcmToken: String? = null,
     val projectOrder: List<String> = emptyList(),
     val dashboardViewMode: String = "Cards", // "Cards" or "List"
-    val firstDayOfWeek: String = "Sunday" // "Sunday", "Monday", or "Saturday"
+    val firstDayOfWeek: String = "Sunday", // "Sunday", "Monday", or "Saturday"
+    val environmentIds: List<String> = emptyList(), // every Environment (workspace) this user belongs to
+    val activeEnvironmentId: String = "" // which one is currently selected - scopes projects/tasks/contacts
 )

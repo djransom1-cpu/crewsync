@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Project(
     val id: String = "",
+    val environmentId: String = "", // which workspace this project belongs to - see Environment.kt
     val name: String = "",
     val description: String = "",
     val teamLeaderId: String = "",

@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Broadcast(
     val id: String = "",
+    val environmentId: String = "", // which workspace this alert belongs to - see Environment.kt
     val projectId: String = "", // Added for per-project alerts
     val senderName: String = "",
     val title: String = "",

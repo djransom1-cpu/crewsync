@@ -18,7 +18,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.djransom.crewsync.data.model.Environment
 import com.djransom.crewsync.data.model.User
+import kotlin.time.Clock
 import com.djransom.crewsync.util.rememberFilePickerLauncher
 import com.djransom.crewsync.util.uploadFile
 import com.djransom.crewsync.util.toFirestoreMap
@@ -41,8 +43,17 @@ fun ProfileScreen() {
     var email by remember { mutableStateOf(auth.currentUser?.email ?: "") }
     var role by remember { mutableStateOf("Member") }
     var profilePictureUrl by remember { mutableStateOf<String?>(null) }
+    var environmentIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    var activeEnvironmentId by remember { mutableStateOf("") }
+    // Preserved as-is (not editable on this screen) so saving a profile edit doesn't silently
+    // reset these back to their defaults, wiping push notifications/project ordering/preferences.
+    var fcmToken by remember { mutableStateOf<String?>(null) }
+    var projectOrder by remember { mutableStateOf<List<String>>(emptyList()) }
+    var dashboardViewMode by remember { mutableStateOf("Cards") }
+    var firstDayOfWeek by remember { mutableStateOf("Sunday") }
     var isLoading by remember { mutableStateOf(true) }
     var isUploading by remember { mutableStateOf(false) }
+    var showEnvironmentSwitcher by remember { mutableStateOf(false) }
 
     var newPassword by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
@@ -89,9 +100,15 @@ fun ProfileScreen() {
             }
         }
 
-        // 3. Last Resort: Create a basic profile if still nothing exists
+        // 3. Last Resort: Create a basic profile if still nothing exists - including its own new
+        // environment, same as a fresh LoginScreen signup would, so this fallback never leaves
+        // someone with no workspace to land in.
         if (!snapshot.exists) {
-            val newUser = User(uid = uid, email = userEmail.lowercase(), name = "", role = "Member")
+            val newEnvId = generateInviteCode()
+            firestore.collection("environments").document(newEnvId).set(
+                Environment(id = newEnvId, name = "${userEmail.substringBefore("@")}'s Environment", ownerId = uid, createdAt = Clock.System.now().toEpochMilliseconds())
+            )
+            val newUser = User(uid = uid, email = userEmail.lowercase(), name = "", role = "Admin", environmentIds = listOf(newEnvId), activeEnvironmentId = newEnvId)
             firestore.collection("users").document(uid).set(newUser)
             snapshot = firestore.collection("users").document(uid).get()
         }
@@ -105,6 +122,12 @@ fun ProfileScreen() {
                 email = user.email.ifEmpty { userEmail }
                 role = user.role
                 profilePictureUrl = user.profilePictureUrl
+                environmentIds = user.environmentIds
+                activeEnvironmentId = user.activeEnvironmentId
+                fcmToken = user.fcmToken
+                projectOrder = user.projectOrder
+                dashboardViewMode = user.dashboardViewMode
+                firstDayOfWeek = user.firstDayOfWeek
             } catch (e: Exception) {}
         }
         isLoading = false
@@ -126,7 +149,13 @@ fun ProfileScreen() {
                         phone = phone,
                         trade = trade,
                         role = role,
-                        profilePictureUrl = profilePictureUrl
+                        profilePictureUrl = profilePictureUrl,
+                        environmentIds = environmentIds,
+                        activeEnvironmentId = activeEnvironmentId,
+                        fcmToken = fcmToken,
+                        projectOrder = projectOrder,
+                        dashboardViewMode = dashboardViewMode,
+                        firstDayOfWeek = firstDayOfWeek
                     )
                     firestore.collection("users").document(uid).set(updatedUser.toFirestoreMap())
                     snackbarHostState.showSnackbar("Profile updated successfully!")
@@ -204,7 +233,47 @@ fun ProfileScreen() {
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.secondary
                 )
-                
+
+                val userForSwitcher = User(
+                    uid = auth.currentUser?.uid ?: "", email = email, name = name, phone = phone, trade = trade,
+                    role = role, profilePictureUrl = profilePictureUrl, environmentIds = environmentIds,
+                    activeEnvironmentId = activeEnvironmentId, fcmToken = fcmToken, projectOrder = projectOrder,
+                    dashboardViewMode = dashboardViewMode, firstDayOfWeek = firstDayOfWeek
+                )
+                val myEnvironments = rememberMyEnvironments(userForSwitcher)
+                val currentEnvironment = myEnvironments.find { it.id == activeEnvironmentId }
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable { showEnvironmentSwitcher = true },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("Environment", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(currentEnvironment?.name?.ifBlank { "Unnamed Environment" } ?: "Loading…", style = MaterialTheme.typography.titleSmall)
+                        if (currentEnvironment != null) {
+                            Text("Invite code: ${currentEnvironment.id}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Text("Tap to switch, create, or join another", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
+                if (showEnvironmentSwitcher) {
+                    EnvironmentSwitcherDialog(
+                        userProfile = userForSwitcher,
+                        environments = myEnvironments,
+                        onDismiss = { showEnvironmentSwitcher = false },
+                        onSwitch = { envId ->
+                            scope.launch {
+                                val uid = auth.currentUser?.uid ?: return@launch
+                                firestore.collection("users").document(uid).update("activeEnvironmentId" to envId)
+                                activeEnvironmentId = envId
+                                showEnvironmentSwitcher = false
+                            }
+                        },
+                        onCreated = { newId -> activeEnvironmentId = newId; environmentIds = environmentIds + newId; showEnvironmentSwitcher = false },
+                        onJoined = { joinedId -> activeEnvironmentId = joinedId; if (joinedId !in environmentIds) environmentIds = environmentIds + joinedId; showEnvironmentSwitcher = false }
+                    )
+                }
+
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
                 TextField(

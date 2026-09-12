@@ -146,11 +146,21 @@ fun AppMainContent() {
     LaunchedEffect(currentUser?.uid, currentUser?.email) {
         val userEmail = currentUser?.email?.lowercase() ?: return@LaunchedEffect
         val fStore = firestore ?: return@LaunchedEffect
-        
+        val uid = currentUser?.uid ?: return@LaunchedEffect
+
+        // Both listeners below need the active environment to scope their queries (Firestore's
+        // rules require the query itself to filter by environmentId, not just permit reads after
+        // the fact) - fetched once here rather than kept live, so switching environments mid-session
+        // just means these two notification listeners pick up the new one on next app launch.
+        val activeEnvId = try {
+            fStore.collection("users").document(uid).get().data<com.djransom.crewsync.data.model.User>().activeEnvironmentId
+        } catch (_: Exception) { "" }
+        if (activeEnvId.isEmpty()) return@LaunchedEffect
+
         // Listener 1: Site Alerts (Broadcasts)
         launch {
             try {
-                fStore.collection("broadcasts").snapshots.collect { snapshot ->
+                fStore.collection("broadcasts").where { "environmentId" equalTo activeEnvId }.snapshots.collect { snapshot ->
                     snapshot.documents.mapNotNull { doc ->
                         try { doc.data<Broadcast>() } catch (_: Exception) { null }
                     }.forEach { broadcast ->
@@ -180,7 +190,7 @@ fun AppMainContent() {
                 // on an unrelated action (e.g. saving a task) that happened to land while dozens of
                 // stale listeners were competing for the main thread.
                 val messageListenerJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
-                fStore.collection("projects").snapshots.collect { snapshot ->
+                fStore.collection("projects").where { "environmentId" equalTo activeEnvId }.snapshots.collect { snapshot ->
                     val projectIds = snapshot.documents.map { it.id }
                     messageListenerJobs.keys.filter { it !in projectIds }.forEach { staleId ->
                         messageListenerJobs.remove(staleId)?.cancel()

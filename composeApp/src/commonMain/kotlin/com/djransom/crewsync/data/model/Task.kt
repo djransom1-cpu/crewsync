@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Task(
     val id: String = "",
+    val environmentId: String = "", // which workspace this task belongs to - see Environment.kt
     val projectId: String = "",
     val title: String = "",
     val description: String = "",

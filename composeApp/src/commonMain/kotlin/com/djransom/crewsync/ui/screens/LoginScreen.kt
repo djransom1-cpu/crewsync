@@ -7,6 +7,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.djransom.crewsync.data.model.Environment
 import com.djransom.crewsync.data.model.User
 import com.djransom.crewsync.util.rememberBiometricAuthenticator
 import com.djransom.crewsync.util.rememberSettings
@@ -14,6 +15,7 @@ import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.launch
+import kotlin.time.Clock
 
 // Firebase's JVM/desktop Auth client surfaces raw REST error bodies (full HTTP response JSON)
 // as the exception message, rather than a clean error code the way the native Android/iOS SDKs
@@ -45,6 +47,8 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
     
     var email by remember { mutableStateOf(settings.getString("saved_email", "")) }
     var password by remember { mutableStateOf("") }
+    var environmentName by remember { mutableStateOf("") }
+    var inviteCode by remember { mutableStateOf("") }
     var rememberMe by remember { mutableStateOf(email.isNotEmpty()) }
     
     var isLoading by remember { mutableStateOf(false) }
@@ -112,6 +116,31 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(8.dp))
 
+        if (isRegistering) {
+            TextField(
+                value = inviteCode,
+                onValueChange = { inviteCode = it },
+                label = { Text("Invite Code (optional)") },
+                placeholder = { Text("Have one? Enter it to join that environment") },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading,
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            if (inviteCode.isBlank()) {
+                TextField(
+                    value = environmentName,
+                    onValueChange = { environmentName = it },
+                    label = { Text("Name Your Environment") },
+                    placeholder = { Text("e.g. your company or family name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isLoading,
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -156,25 +185,46 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                         if (isRegistering) {
                             val authResult = auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword)
                             val uid = authResult.user?.uid ?: ""
-                            
-                            // Check if a placeholder profile exists for this email
+
+                            // Check if an admin already pre-invited this email (see AddUserDialog/
+                            // AddMemberDialog) - a placeholder users/{email} doc with environmentIds
+                            // already stamped on it means this signup should land directly in that
+                            // environment instead of getting a brand new one of their own.
                             val inviteSnap = firestore.collection("users").document(cleanEmail).get()
-                            if (inviteSnap.exists) {
-                                try {
-                                    val invitedUser = inviteSnap.data<User>()
-                                    // Move invitation data to UID-based doc
-                                    firestore.collection("users").document(uid).set(invitedUser.copy(uid = uid))
-                                    // Delete the email-based doc
-                                    firestore.collection("users").document(cleanEmail).delete()
-                                } catch (e: Exception) {
-                                    // Fallback if data format is old
-                                    firestore.collection("users").document(uid).set(User(uid = uid, email = cleanEmail))
-                                }
+                            val invitedUser = if (inviteSnap.exists) {
+                                try { inviteSnap.data<User>() } catch (_: Exception) { null }
+                            } else null
+
+                            if (invitedUser != null && invitedUser.environmentIds.isNotEmpty()) {
+                                firestore.collection("users").document(uid).set(invitedUser.copy(uid = uid, email = cleanEmail))
+                                firestore.collection("users").document(cleanEmail).delete()
                             } else {
-                                // determine role for new user
-                                val usersSnap = firestore.collection("users").get()
-                                val role = if (usersSnap.documents.isEmpty()) "Admin" else "Member"
-                                firestore.collection("users").document(uid).set(User(uid = uid, email = cleanEmail, role = role))
+                                val cleanCode = inviteCode.trim().uppercase()
+                                val joinedEnvId = if (cleanCode.isNotEmpty()) {
+                                    val envSnap = try { firestore.collection("environments").document(cleanCode).get() } catch (_: Exception) { null }
+                                    if (envSnap?.exists == true) cleanCode else null
+                                } else null
+
+                                if (joinedEnvId != null) {
+                                    // Joining an existing environment by code - not its creator, so a
+                                    // plain Member until someone there promotes them.
+                                    firestore.collection("users").document(uid).set(
+                                        User(uid = uid, email = cleanEmail, role = "Member", environmentIds = listOf(joinedEnvId), activeEnvironmentId = joinedEnvId)
+                                    )
+                                } else {
+                                    // No valid invite - land in a brand new environment of their own,
+                                    // named either what they typed or a sensible default.
+                                    val newEnvId = generateInviteCode()
+                                    val newEnvName = environmentName.trim().ifEmpty { "${cleanEmail.substringBefore("@")}'s Environment" }
+                                    val newEnv = Environment(id = newEnvId, name = newEnvName, ownerId = uid, createdAt = Clock.System.now().toEpochMilliseconds())
+                                    firestore.collection("environments").document(newEnvId).set(newEnv)
+                                    firestore.collection("users").document(uid).set(
+                                        User(uid = uid, email = cleanEmail, role = "Admin", environmentIds = listOf(newEnvId), activeEnvironmentId = newEnvId)
+                                    )
+                                    if (cleanCode.isNotEmpty()) {
+                                        errorMessage = "That invite code wasn't found, so we set you up with your own new environment instead."
+                                    }
+                                }
                             }
                         } else {
                             auth.signInWithEmailAndPassword(cleanEmail, cleanPassword)

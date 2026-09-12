@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Contact(
     val id: String = "",
+    val environmentId: String = "", // which workspace this contact belongs to - see Environment.kt
     val name: String = "",
     val jobTitle: String = "",
     val company: String = "",

@@ -38,9 +38,59 @@ service cloud.firestore {
       return role == 'SuperAdmin' ? isSuperAdmin() : isAdmin();
     }
 
+    // ---------------- environment (workspace) membership ----------------
+    // Every environment-scoped document below carries an environmentId field, and every
+    // user carries the list of environments they belong to - this is the boundary that
+    // keeps one company/family/crew's data invisible to everyone else's. isSuperAdmin()
+    // (the app owner, not a per-environment admin) can still see across all of them for
+    // support purposes.
+    function myEnvironmentIds() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.environmentIds
+        : [];
+    }
+
+    function inMyEnvironments(environmentId) {
+      return isSignedIn() && environmentId in myEnvironmentIds();
+    }
+
+    function canAccessEnvironment(environmentId) {
+      return inMyEnvironments(environmentId) || isSuperAdmin();
+    }
+
+    function projectEnvironmentId(projectId) {
+      return get(/databases/$(database)/documents/projects/$(projectId)).data.environmentId;
+    }
+
+    function canAccessProject(projectId) {
+      return canAccessEnvironment(projectEnvironmentId(projectId));
+    }
+
+    // ---------------- environments ----------------
+    match /environments/{environmentId} {
+      // The document id IS the invite code (see Environment.kt) - fetching one by its exact
+      // id is how joining works, so any signed-in user may `get` a single environment. But
+      // `list` (browsing/querying the whole collection) is always denied, so there's no way
+      // to discover an environment without already having its code from a member.
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create: if isSignedIn();
+      allow update: if canAccessEnvironment(environmentId);
+      // Only the owner may delete - used when changing an environment's invite code, which
+      // recreates it under a new document id and retires this one (see ChangeInviteCodeDialog).
+      allow delete: if canAccessEnvironment(environmentId) && resource.data.ownerId == request.auth.uid;
+    }
+
     // ---------------- users ----------------
     match /users/{userId} {
-      allow read: if isSignedIn();
+      // Your own doc, a pre-signup email placeholder, or someone who shares an environment
+      // with you (needed for team rosters, chat name/avatar lookups, admin management).
+      allow read: if isSignedIn() && (
+        userId == request.auth.uid ||
+        isEmailKey(userId) ||
+        isSuperAdmin() ||
+        (resource.data.environmentIds is list && resource.data.environmentIds.hasAny(myEnvironmentIds()))
+      );
 
       allow create: if isSignedIn() && (userId == request.auth.uid || isEmailKey(userId));
 
@@ -58,59 +108,64 @@ service cloud.firestore {
 
     // ---------------- projects ----------------
     match /projects/{projectId} {
-      allow read, create, update: if isSignedIn();
+      allow read, update: if canAccessEnvironment(resource.data.environmentId);
+      allow create: if inMyEnvironments(request.resource.data.environmentId);
       allow delete: if isSuperAdmin(); // not exposed in the app UI today
 
       match /messages/{messageId} {
-        allow read, create: if isSignedIn();
+        allow read, create: if canAccessProject(projectId);
       }
 
       match /folders/{folderId} {
-        allow read, create: if isSignedIn();
+        allow read, create: if canAccessProject(projectId);
       }
 
       match /appointments/{appointmentId} {
-        allow read, create, update, delete: if isSignedIn();
+        allow read, create, update, delete: if canAccessProject(projectId);
       }
 
       match /files/{fileId} {
-        allow read, create, delete: if isSignedIn();
+        allow read, create, delete: if canAccessProject(projectId);
 
         match /markups/{markupId} {
-          allow read, create, update, delete: if isSignedIn();
+          allow read, create, update, delete: if canAccessProject(projectId);
         }
       }
 
       match /notes/{noteId} {
-        allow read, create, update, delete: if isSignedIn();
+        allow read, create, update, delete: if canAccessProject(projectId);
 
         match /actions/{actionId} {
-          allow read, create, update, delete: if isSignedIn();
+          allow read, create, update, delete: if canAccessProject(projectId);
         }
       }
     }
 
     // ---------------- tasks / planner ----------------
     match /tasks/{taskId} {
-      allow read, create, update, delete: if isSignedIn();
+      allow read, update, delete: if canAccessEnvironment(resource.data.environmentId);
+      allow create: if inMyEnvironments(request.resource.data.environmentId);
     }
 
+    // Not yet scoped by environment on the client (shared "task templates" library) -
+    // tracked as a follow-up; low sensitivity since templates hold no project/contact data.
     match /task_templates/{templateId} {
       allow read, create, update, delete: if isSignedIn();
     }
 
-    // ---------------- contacts (org-wide directory) ----------------
+    // ---------------- contacts (per-environment directory) ----------------
     match /contacts/{contactId} {
-      allow read, create, update: if isSignedIn();
-      allow delete: if isAdmin(); // matches ContactsScreen's admin-only delete UI
+      allow read, update: if canAccessEnvironment(resource.data.environmentId);
+      allow create: if inMyEnvironments(request.resource.data.environmentId);
+      allow delete: if isAdmin() && canAccessEnvironment(resource.data.environmentId);
     }
 
     // ---------------- direct messages ----------------
     // NOTE: chatId is derived client-side from the two participants' emails
     // with no participants[] field stored, so rules can't verify membership
-    // without an app change. Scoped to "signed-in crew member" for now like
-    // the rest of the app; tighten later by writing a participants array on
-    // chat creation and checking request.auth.token.email in it.
+    // without an app change. Scoped to "signed-in" for now like before this
+    // pass; tighten later by writing a participants array on chat creation
+    // and checking request.auth.token.email in it.
     match /direct_messages/{chatId} {
       allow read, create: if isSignedIn();
 
@@ -121,14 +176,16 @@ service cloud.firestore {
 
     // ---------------- broadcasts ----------------
     match /broadcasts/{broadcastId} {
-      allow read, create: if isSignedIn();
+      allow read: if canAccessEnvironment(resource.data.environmentId);
+      allow create: if inMyEnvironments(request.resource.data.environmentId);
     }
 
     // ---------------- feedback / bug reports ----------------
+    // Platform-level (not per-environment) - only the app owner should see these.
     match /feedback/{feedbackId} {
-      allow read: if isSignedIn();
+      allow read: if isSuperAdmin();
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow delete: if isAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     // ---------------- app config ----------------

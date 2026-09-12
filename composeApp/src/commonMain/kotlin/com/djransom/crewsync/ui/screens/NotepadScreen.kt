@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.djransom.crewsync.util.openUrl
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.firestore.DocumentSnapshot
 import dev.gitlive.firebase.firestore.firestore
@@ -49,6 +50,7 @@ sealed class NotepadAction {
     data class Rectangle(val start: Offset, val end: Offset, val color: Color, val strokeWidth: Float) : NotepadAction()
     data class Ellipse(val start: Offset, val end: Offset, val color: Color, val strokeWidth: Float) : NotepadAction()
     data class TextNote(val text: String, val position: Offset, val color: Color, val size: Float, val transparent: Boolean = false) : NotepadAction()
+    data class LinkNote(val label: String, val url: String, val position: Offset, val color: Color) : NotepadAction()
 }
 
 private data class NotepadItem(val id: String, val action: NotepadAction)
@@ -78,6 +80,8 @@ fun NotepadScreen(projectId: String, noteId: String, noteTitle: String, onBack: 
 
     var showTextDialog by remember { mutableStateOf(false) }
     var tempTextPos by remember { mutableStateOf(Offset.Zero) }
+    var showLinkDialog by remember { mutableStateOf(false) }
+    var tempLinkPos by remember { mutableStateOf(Offset.Zero) }
     var showClearConfirm by remember { mutableStateOf(false) }
 
     var zoomScale by remember { mutableStateOf(1f) }
@@ -122,6 +126,7 @@ fun NotepadScreen(projectId: String, noteId: String, noteTitle: String, onBack: 
                 ToolChip("Rect", toolMode == "Rect", Icons.Default.Place) { toolMode = "Rect" }
                 ToolChip("Circle", toolMode == "Circle", Icons.Default.Info) { toolMode = "Circle" }
                 ToolChip("Text", toolMode == "Text", Icons.Default.Add) { toolMode = "Text" }
+                ToolChip("Link", toolMode == "Link", Icons.Default.Info) { toolMode = "Link" }
                 ToolChip("Pan", toolMode == "Pan", Icons.Default.Lock) { toolMode = "Pan" }
                 ToolChip("Eraser", toolMode == "Eraser", Icons.Default.Delete) { toolMode = "Eraser" }
 
@@ -193,6 +198,9 @@ fun NotepadScreen(projectId: String, noteId: String, noteTitle: String, onBack: 
                                         if (toolMode == "Text") {
                                             tempTextPos = offset
                                             showTextDialog = true
+                                        } else if (toolMode == "Link") {
+                                            tempLinkPos = offset
+                                            showLinkDialog = true
                                         } else if (toolMode in listOf("Line", "Rect", "Circle")) {
                                             startOffset = offset
                                             currentDragOffset = offset
@@ -337,6 +345,54 @@ fun NotepadScreen(projectId: String, noteId: String, noteTitle: String, onBack: 
                         }
                     }
                 }
+
+                // Draggable link chips - tap the chip to open the URL; drag the small handle in
+                // its corner to reposition (kept separate from the tap target so opening a link
+                // and moving it can't be mistaken for one another).
+                items.forEach { item ->
+                    val action = item.action
+                    if (action is NotepadAction.LinkNote) {
+                        val currentId = item.id
+                        var dragOffset by remember(currentId) { mutableStateOf(Offset.Zero) }
+                        val pos = action.position + dragOffset
+                        Box(
+                            modifier = Modifier
+                                .offset(x = with(density) { pos.x.toDp() }, y = with(density) { pos.y.toDp() })
+                                .background(Color.White.copy(alpha = 0.95f), RoundedCornerShape(16.dp))
+                                .border(2.dp, action.color, RoundedCornerShape(16.dp))
+                                .clickable { openUrl(action.url) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(14.dp), tint = action.color)
+                                Spacer(Modifier.width(4.dp))
+                                Text(action.label.ifBlank { action.url }, color = action.color, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 8.dp, y = (-8).dp)
+                                    .size(16.dp)
+                                    .clip(CircleShape)
+                                    .background(action.color)
+                                    .pointerInput(currentId) {
+                                        detectDragGestures(
+                                            onDrag = { change, amount -> change.consume(); dragOffset += amount },
+                                            onDragEnd = {
+                                                val newPos = action.position + dragOffset
+                                                scope.launch {
+                                                    notepadColl.document(currentId).update("startX" to newPos.x.toDouble())
+                                                    notepadColl.document(currentId).update("startY" to newPos.y.toDouble())
+                                                    touchNote()
+                                                }
+                                                dragOffset = Offset.Zero
+                                            }
+                                        )
+                                    }
+                            )
+                        }
+                    }
+                }
             }
 
             Row(
@@ -378,6 +434,20 @@ fun NotepadScreen(projectId: String, noteId: String, noteTitle: String, onBack: 
         )
     }
 
+    if (showLinkDialog) {
+        AddLinkDialog(
+            onDismiss = { showLinkDialog = false },
+            onConfirm = { label, url ->
+                if (url.isNotBlank()) {
+                    val normalizedUrl = if (url.contains("://")) url else "https://$url"
+                    val action = NotepadAction.LinkNote(label.ifBlank { normalizedUrl }, normalizedUrl, tempLinkPos, selectedColor)
+                    scope.launch { notepadColl.add(notepadActionToMap(action)); touchNote() }
+                }
+                showLinkDialog = false
+            }
+        )
+    }
+
     if (showClearConfirm) {
         AlertDialog(
             onDismissRequest = { showClearConfirm = false },
@@ -400,6 +470,28 @@ fun NotepadScreen(projectId: String, noteId: String, noteTitle: String, onBack: 
     }
 }
 
+@Composable
+fun AddLinkDialog(onDismiss: () -> Unit, onConfirm: (label: String, url: String) -> Unit) {
+    var label by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Link") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextField(value = url, onValueChange = { url = it }, label = { Text("URL") }, placeholder = { Text("e.g. airbnb.com/rooms/123") }, modifier = Modifier.fillMaxWidth())
+                TextField(value = label, onValueChange = { label = it }, label = { Text("Label (optional)") }, placeholder = { Text("e.g. Beach house listing") }, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(label, url) }, enabled = url.isNotBlank()) { Text("Add Link") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
 private fun DrawScope.renderNotepadAction(action: NotepadAction) {
     when (action) {
         is NotepadAction.Draw -> drawPath(action.path, action.color, style = Stroke(width = action.strokeWidth, cap = StrokeCap.Round, join = StrokeJoin.Round))
@@ -409,6 +501,7 @@ private fun DrawScope.renderNotepadAction(action: NotepadAction) {
         is NotepadAction.Rectangle -> drawRect(action.color, action.start, Size(action.end.x - action.start.x, action.end.y - action.start.y), style = Stroke(action.strokeWidth))
         is NotepadAction.Ellipse -> drawOval(action.color, action.start, Size(action.end.x - action.start.x, action.end.y - action.start.y), style = Stroke(action.strokeWidth))
         is NotepadAction.TextNote -> {} // rendered as a draggable Compose overlay, not a DrawScope call
+        is NotepadAction.LinkNote -> {} // rendered as a draggable Compose overlay, not a DrawScope call
     }
 }
 
@@ -472,6 +565,13 @@ private fun notepadActionToMap(action: NotepadAction): Map<String, Any?> {
             map["strokeWidth"] = action.size.toDouble()
             map["transparent"] = action.transparent
         }
+        is NotepadAction.LinkNote -> {
+            map["type"] = "LinkNote"
+            map["text"] = action.label
+            map["url"] = action.url
+            map["startX"] = action.position.x.toDouble(); map["startY"] = action.position.y.toDouble()
+            map["colorHex"] = colorHex(action.color)
+        }
     }
     return map
 }
@@ -494,6 +594,7 @@ private fun parseNotepadDoc(doc: DocumentSnapshot): Pair<Double, Pair<String, No
         val end = Offset(endX, endY)
 
         val text = try { doc.get<String>("text") } catch (_: Exception) { "" }
+        val url = try { doc.get<String>("url") } catch (_: Exception) { "" }
         val transparent = try { doc.get<Boolean>("transparent") } catch (_: Exception) { false }
         val pts = try { doc.get<List<Double>>("points").map { it.toFloat() } } catch (_: Exception) { emptyList() }
         val offsets = mutableListOf<Offset>()
@@ -507,6 +608,7 @@ private fun parseNotepadDoc(doc: DocumentSnapshot): Pair<Double, Pair<String, No
             "Rect" -> NotepadAction.Rectangle(start, end, color, strokeW)
             "Ellipse" -> NotepadAction.Ellipse(start, end, color, strokeW)
             "TextNote" -> NotepadAction.TextNote(text, start, color, strokeW, transparent)
+            "LinkNote" -> NotepadAction.LinkNote(text, url, start, color)
             else -> null
         } ?: return null
 

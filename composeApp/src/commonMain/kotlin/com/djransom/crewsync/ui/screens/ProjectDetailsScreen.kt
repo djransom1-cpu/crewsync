@@ -45,6 +45,7 @@ import com.djransom.crewsync.util.downloadFile
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
@@ -69,12 +70,14 @@ fun ProjectDetailsScreen(
     
     var userProfile by remember { mutableStateOf<User?>(null) }
     var project by remember { mutableStateOf<Project?>(null) }
+    val environmentId = project?.environmentId ?: ""
     var showAddMemberDialog by remember { mutableStateOf(false) }
     var showProjectAlertDialog by remember { mutableStateOf(false) }
     var showEditProjectDialog by remember { mutableStateOf(false) }
     var isUploading by remember { mutableStateOf(false) }
     var currentFolderId by remember { mutableStateOf<String?>(null) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
+    var showAddLinkDialog by remember { mutableStateOf(false) }
 
     val foldersFlow = remember(projectId) {
         firestore.collection("projects").document(projectId).collection("folders").snapshots.map { snap ->
@@ -95,8 +98,10 @@ fun ProjectDetailsScreen(
         }
     }
     
-    val allUsersFlow = remember {
+    val allUsersFlow = remember(environmentId) {
+        if (environmentId.isEmpty()) return@remember kotlinx.coroutines.flow.flowOf(emptyList())
         firestore.collection("users")
+            .where { "environmentIds" contains environmentId }
             .snapshots
             .map { snapshot ->
                 snapshot.documents.mapNotNull { doc ->
@@ -105,6 +110,7 @@ fun ProjectDetailsScreen(
                     } catch (e: Exception) { null }
                 }
             }
+            .catch { emit(emptyList()) }
     }
     val allUsers by allUsersFlow.collectAsState(initial = emptyList())
 
@@ -112,11 +118,12 @@ fun ProjectDetailsScreen(
     val userPicMap = remember(allUsers) { allUsers.associate { it.email to it.profilePictureUrl } }
 
     // Unified Data Fetching
-    val tasksFlow = remember(projectId) {
-        firestore.collection("tasks").snapshots.map { snap ->
+    val tasksFlow = remember(projectId, environmentId) {
+        if (environmentId.isEmpty()) return@remember kotlinx.coroutines.flow.flowOf(emptyList())
+        firestore.collection("tasks").where { "environmentId" equalTo environmentId }.snapshots.map { snap ->
             snap.documents.mapNotNull { try { it.toTaskSafe() } catch (e: Exception) { null } }
                 .filter { it.projectId == projectId }
-        }
+        }.catch { emit(emptyList()) }
     }
     val tasks by tasksFlow.collectAsState(initial = emptyList())
 
@@ -340,6 +347,7 @@ fun ProjectDetailsScreen(
                             onUpload = { filePickerLauncher() }, 
                             onTakeCamera = { cameraLauncher() },
                             onAddFolder = { showAddFolderDialog = true },
+                            onAddLink = { showAddLinkDialog = true },
                             onFolderClick = { currentFolderId = it },
                             onRecolorFolder = { folder, hex ->
                                 scope.launch {
@@ -381,7 +389,7 @@ fun ProjectDetailsScreen(
                                 }
                             }
                         )
-                        4 -> PlannerScreen(projectId = projectId, projectBuckets = project!!.buckets, projectMembers = project!!.members)
+                        4 -> PlannerScreen(projectId = projectId, environmentId = environmentId, projectBuckets = project!!.buckets, projectMembers = project!!.members)
                         5 -> CalendarScreen(
                             projectId = projectId,
                             tasks = tasks,
@@ -396,6 +404,7 @@ fun ProjectDetailsScreen(
 
             if (showAddMemberDialog) {
                 AddMemberDialog(
+                    environmentId = environmentId,
                     onDismiss = { showAddMemberDialog = false },
                     onConfirm = { email ->
                         scope.launch {
@@ -425,12 +434,33 @@ fun ProjectDetailsScreen(
                 )
             }
 
+            if (showAddLinkDialog) {
+                AddLinkFileDialog(
+                    onDismiss = { showAddLinkDialog = false },
+                    onConfirm = { name, url ->
+                        scope.launch {
+                            val normalizedUrl = if (url.contains("://")) url else "https://$url"
+                            val linkFile = ProjectFile(
+                                name = name.ifBlank { normalizedUrl },
+                                url = normalizedUrl,
+                                folderId = currentFolderId,
+                                uploadedBy = auth.currentUser?.email ?: "Unknown",
+                                uploadedAt = Clock.System.now().toEpochMilliseconds()
+                            )
+                            firestore.collection("projects").document(projectId).collection("files").add(linkFile.toFirestoreMap())
+                            showAddLinkDialog = false
+                        }
+                    }
+                )
+            }
+
             if (showProjectAlertDialog) {
                 SendProjectAlertDialog(
                     onDismiss = { showProjectAlertDialog = false },
                     onConfirm = { title, message ->
                         scope.launch {
                             val alert = Broadcast(
+                                environmentId = environmentId,
                                 projectId = projectId,
                                 senderName = userProfile?.name?.ifEmpty { auth.currentUser?.email } ?: "Admin",
                                 title = title,
@@ -611,6 +641,7 @@ fun FilesTab(
     onUpload: () -> Unit,
     onTakeCamera: () -> Unit,
     onAddFolder: () -> Unit,
+    onAddLink: () -> Unit,
     onFolderClick: (String?) -> Unit,
     onRecolorFolder: (ProjectFolder, String) -> Unit,
     onMarkupClick: (String, String, String) -> Unit,
@@ -668,6 +699,9 @@ fun FilesTab(
                     } else {
                         IconButton(onClick = onAddFolder) {
                             Icon(Icons.Default.Add, contentDescription = "New Folder")
+                        }
+                        IconButton(onClick = onAddLink) {
+                            Icon(Icons.Default.Star, contentDescription = "Add Link")
                         }
                         IconButton(onClick = onTakeCamera) {
                             Icon(Icons.Default.Info, contentDescription = "Camera")
@@ -946,19 +980,43 @@ fun AddFolderDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
 }
 
 @Composable
-fun AddMemberDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+fun AddLinkFileDialog(onDismiss: () -> Unit, onConfirm: (name: String, url: String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Link") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextField(value = url, onValueChange = { url = it }, label = { Text("URL") }, placeholder = { Text("e.g. airbnb.com/rooms/123") }, modifier = Modifier.fillMaxWidth())
+                TextField(value = name, onValueChange = { name = it }, label = { Text("Name (optional)") }, placeholder = { Text("e.g. Beach house listing") }, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(name, url) }, enabled = url.isNotBlank()) { Text("Add Link") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+fun AddMemberDialog(environmentId: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     val firestore = Firebase.firestore
     var email by remember { mutableStateOf("") }
-    
+
     val masterContacts by firestore.collection("contacts")
+        .where { "environmentId" equalTo environmentId }
         .snapshots
         .map { snapshot -> 
             snapshot.documents.mapNotNull { 
                 try {
                     it.data<Contact>() 
                 } catch (e: Exception) { null }
-            } 
+            }
         }
+        .catch { emit(emptyList()) }
         .collectAsState(initial = emptyList())
 
     AlertDialog(

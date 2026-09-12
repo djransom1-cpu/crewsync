@@ -14,8 +14,10 @@ fun DocumentSnapshot.toProjectSafe(): Project {
             val membersList: List<String> = try { this.get("members") } catch (_: Exception) { emptyList() }
             val locationStr: String = try { this.get("location") } catch (_: Exception) { "Nashville, TN" }
             val created: Long = try { this.get("createdAt") } catch (_: Exception) { 0L }
+            val envId: String = try { this.get("environmentId") } catch (_: Exception) { "" }
             Project(
                 id = this.id,
+                environmentId = envId,
                 name = name,
                 description = desc,
                 teamLeaderId = leader,
@@ -45,6 +47,8 @@ fun DocumentSnapshot.toUserSafe(fallbackEmail: String = ""): User {
             val orderList: List<String> = try { this.get("projectOrder") } catch (_: Exception) { emptyList() }
             val viewModeStr: String = try { this.get("dashboardViewMode") } catch (_: Exception) { "Cards" }
             val firstDayStr: String = try { this.get("firstDayOfWeek") } catch (_: Exception) { "Sunday" }
+            val envIds: List<String> = try { this.get("environmentIds") } catch (_: Exception) { emptyList() }
+            val activeEnvId: String = try { this.get("activeEnvironmentId") } catch (_: Exception) { "" }
             User(
                 uid = this.id,
                 email = emailStr,
@@ -56,7 +60,9 @@ fun DocumentSnapshot.toUserSafe(fallbackEmail: String = ""): User {
                 fcmToken = tokenStr,
                 projectOrder = orderList,
                 dashboardViewMode = viewModeStr,
-                firstDayOfWeek = firstDayStr
+                firstDayOfWeek = firstDayStr,
+                environmentIds = envIds,
+                activeEnvironmentId = activeEnvId
             )
         } catch (_: Exception) {
             User(uid = this.id, email = fallbackEmail)
@@ -78,9 +84,11 @@ fun DocumentSnapshot.toTaskSafe(): com.djransom.crewsync.data.model.Task {
             val colorStr: String = try { this.get("color") } catch (_: Exception) { "#FFFFFF" }
             val start: Long? = try { this.get("startDate") } catch (_: Exception) { null }
             val due: Long? = try { this.get("dueDate") } catch (_: Exception) { null }
+            val envId: String = try { this.get("environmentId") } catch (_: Exception) { "" }
 
             com.djransom.crewsync.data.model.Task(
                 id = this.id,
+                environmentId = envId,
                 projectId = projId,
                 title = titleStr,
                 description = descStr,
@@ -126,6 +134,7 @@ private fun DocumentSnapshot.legacyChecklistAsGroup(): com.djransom.crewsync.dat
 fun com.djransom.crewsync.data.model.Task.toFirestoreMap(): Map<String, Any?> {
     val map = mutableMapOf<String, Any?>()
     if (id.isNotEmpty()) map["id"] = id
+    map["environmentId"] = environmentId
     map["projectId"] = projectId
     map["title"] = title
     map["description"] = description
@@ -182,6 +191,7 @@ fun TaskTemplate.toFirestoreMap(): Map<String, Any> {
 fun com.djransom.crewsync.data.model.Project.toFirestoreMap(): Map<String, Any?> {
     val map = mutableMapOf<String, Any?>()
     if (id.isNotEmpty()) map["id"] = id
+    map["environmentId"] = environmentId
     map["name"] = name
     map["description"] = description
     map["teamLeaderId"] = teamLeaderId
@@ -211,6 +221,7 @@ fun ChatMessage.toFirestoreMap(): Map<String, Any?> {
 fun Broadcast.toFirestoreMap(): Map<String, Any?> {
     val map = mutableMapOf<String, Any?>()
     if (id.isNotEmpty()) map["id"] = id
+    map["environmentId"] = environmentId
     map["projectId"] = projectId
     map["senderName"] = senderName
     map["title"] = title
@@ -260,6 +271,8 @@ fun User.toFirestoreMap(): Map<String, Any?> {
     if (projectOrder.isNotEmpty()) map["projectOrder"] = projectOrder
     map["dashboardViewMode"] = dashboardViewMode
     map["firstDayOfWeek"] = firstDayOfWeek
+    if (environmentIds.isNotEmpty()) map["environmentIds"] = environmentIds
+    map["activeEnvironmentId"] = activeEnvironmentId
     return map
 }
 

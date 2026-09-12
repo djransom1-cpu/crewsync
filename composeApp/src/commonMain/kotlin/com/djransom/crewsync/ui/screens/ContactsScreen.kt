@@ -33,6 +33,7 @@ import com.djransom.crewsync.util.parseBusinessCardText
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -66,10 +67,12 @@ fun ContactsScreen() {
     
     val isSuperAdmin = userProfile?.role == "SuperAdmin"
     val isAdmin = userProfile?.role == "Admin" || isSuperAdmin
+    val activeEnvId = userProfile?.activeEnvironmentId ?: ""
 
     val contactPickerLauncher = rememberContactPickerLauncher { picked ->
         scope.launch {
             val newContact = Contact(
+                environmentId = activeEnvId,
                 name = picked.name,
                 email = picked.email,
                 phone = picked.phone,
@@ -86,6 +89,7 @@ fun ContactsScreen() {
                 val text = recognizeTextInImage(pickedFile.platformFile)
                 val parsed = parseBusinessCardText(text)
                 contactToEdit = Contact(
+                    environmentId = activeEnvId,
                     name = parsed.name,
                     jobTitle = parsed.jobTitle,
                     company = parsed.company,
@@ -101,29 +105,35 @@ fun ContactsScreen() {
         }
     }
 
-    val registeredUsersFlow = remember {
+    val registeredUsersFlow = remember(activeEnvId) {
+        if (activeEnvId.isEmpty()) return@remember kotlinx.coroutines.flow.flowOf(emptyList())
         firestore.collection("users")
+            .where { "environmentIds" contains activeEnvId }
             .snapshots
-            .map { snapshot -> 
-                snapshot.documents.mapNotNull { doc -> 
+            .map { snapshot ->
+                snapshot.documents.mapNotNull { doc ->
                     try {
                         doc.data<User>().let { if (it.uid.isEmpty()) it.copy(uid = doc.id) else it }
                     } catch (e: Exception) { null }
                 }
             }
+            .catch { emit(emptyList()) }
     }
     val registeredUsers by registeredUsersFlow.collectAsState(initial = emptyList())
 
-    val manualContactsFlow = remember {
+    val manualContactsFlow = remember(activeEnvId) {
+        if (activeEnvId.isEmpty()) return@remember kotlinx.coroutines.flow.flowOf(emptyList())
         firestore.collection("contacts")
+            .where { "environmentId" equalTo activeEnvId }
             .snapshots
-            .map { snapshot -> 
-                snapshot.documents.mapNotNull { doc -> 
+            .map { snapshot ->
+                snapshot.documents.mapNotNull { doc ->
                     try {
                         doc.data<Contact>().copy(id = doc.id)
                     } catch (e: Exception) { null }
                 }
             }
+            .catch { emit(emptyList()) }
     }
     val manualContacts by manualContactsFlow.collectAsState(initial = emptyList())
 
@@ -244,7 +254,10 @@ fun ContactsScreen() {
                 onDismiss = { showAddUserDialog = false },
                 onConfirm = { newUser ->
                     scope.launch {
-                        firestore.collection("users").document(newUser.email).set(newUser)
+                        // Pre-invite placeholder, keyed by email (see LoginScreen's claim-on-signup
+                        // flow) - stamping environmentIds now means whoever signs up with this
+                        // email lands directly in this environment instead of getting their own.
+                        firestore.collection("users").document(newUser.email).set(newUser.copy(environmentIds = listOf(activeEnvId)))
                         showAddUserDialog = false
                     }
                 }
@@ -269,6 +282,7 @@ fun ContactsScreen() {
         if (showAddContactDialog) {
             ContactDialog(
                 contact = contactToEdit,
+                activeEnvironmentId = activeEnvId,
                 defaultType = if (selectedTab == 1) "Company" else "Subcontractor",
                 onDismiss = { showAddContactDialog = false },
                 onConfirm = { updatedContact ->
@@ -534,7 +548,7 @@ fun ContactInfoRow(icon: androidx.compose.ui.graphics.vector.ImageVector, value:
 }
 
 @Composable
-fun ContactDialog(contact: Contact?, defaultType: String, onDismiss: () -> Unit, onConfirm: (Contact) -> Unit) {
+fun ContactDialog(contact: Contact?, activeEnvironmentId: String, defaultType: String, onDismiss: () -> Unit, onConfirm: (Contact) -> Unit) {
     var name by remember { mutableStateOf(contact?.name ?: "") }
     var jobTitle by remember { mutableStateOf(contact?.jobTitle ?: "") }
     var company by remember { mutableStateOf(contact?.company ?: "") }
@@ -636,7 +650,8 @@ fun ContactDialog(contact: Contact?, defaultType: String, onDismiss: () -> Unit,
             Button(onClick = { 
                 onConfirm(Contact(
                     id = contact?.id ?: "",
-                    name = name, 
+                    environmentId = contact?.environmentId?.ifEmpty { activeEnvironmentId } ?: activeEnvironmentId,
+                    name = name,
                     jobTitle = jobTitle,
                     company = company,
                     email = email, 

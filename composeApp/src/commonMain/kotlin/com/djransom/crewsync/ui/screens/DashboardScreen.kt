@@ -20,11 +20,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.djransom.crewsync.data.model.Environment
 import com.djransom.crewsync.data.model.Project
 import com.djransom.crewsync.data.model.User
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
@@ -50,7 +52,32 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
         if (currentUid != null || currentUserEmail.isNotEmpty()) {
             try {
                 val docId = currentUid ?: currentUserEmail
-                firestore.collection("users").document(docId).snapshots.collect { snap ->
+                val docRef = firestore.collection("users").document(docId)
+
+                // App.kt switches to this screen the instant Firebase Auth reports a signed-in
+                // user, independent of whether LoginScreen's own registration coroutine (which
+                // writes the new environment + profile docs) has finished yet - landing here
+                // before that write lands would otherwise mean no profile ever gets created if
+                // that coroutine dies partway (e.g. an unrelated crash). Give it a couple of
+                // seconds to land normally first, then bootstrap the same fallback profile
+                // ProfileScreen's "last resort" path creates, so this device isn't stuck with an
+                // auth account that has no environment to land in.
+                if (currentUid != null) {
+                    var snap = try { docRef.get() } catch (_: Exception) { null }
+                    if (snap == null || !snap.exists) {
+                        kotlinx.coroutines.delay(2000)
+                        snap = try { docRef.get() } catch (_: Exception) { null }
+                    }
+                    if (snap == null || !snap.exists) {
+                        val newEnvId = generateInviteCode()
+                        firestore.collection("environments").document(newEnvId).set(
+                            Environment(id = newEnvId, name = "${currentUserEmail.substringBefore("@")}'s Environment", ownerId = currentUid, createdAt = Clock.System.now().toEpochMilliseconds())
+                        )
+                        docRef.set(User(uid = currentUid, email = currentUserEmail, role = "Admin", environmentIds = listOf(newEnvId), activeEnvironmentId = newEnvId))
+                    }
+                }
+
+                docRef.snapshots.collect { snap ->
                     if (snap.exists) {
                         userProfile = snap.toUserSafe(currentUserEmail)
                     }
@@ -60,43 +87,42 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
     }
     
     val isSuperAdmin = userProfile?.role == "SuperAdmin"
-    val isAdmin = true // Enable full view & management access for authenticated web users
+    val isAdmin = userProfile?.role == "Admin" || isSuperAdmin
     val viewMode = userProfile?.dashboardViewMode ?: "Cards"
+    val activeEnvId = userProfile?.activeEnvironmentId ?: ""
 
-    // Real-time raw projects with one-shot initial fetch fallback
+    var showEnvironmentSwitcher by remember { mutableStateOf(false) }
+    val myEnvironments = rememberMyEnvironments(userProfile)
+    val currentEnvironment = myEnvironments.find { it.id == activeEnvId }
+
+    // Real-time raw projects with one-shot initial fetch fallback - both scoped to the active
+    // environment, so switching environments (or a brand new one with nothing in it yet) doesn't
+    // show projects that belong to someone else's workspace.
     var fetchedProjects by remember { mutableStateOf<List<Project>>(emptyList()) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(activeEnvId) {
+        if (activeEnvId.isEmpty()) {
+            fetchedProjects = emptyList()
+            return@LaunchedEffect
+        }
         try {
-            val snap = firestore.collection("projects").get()
+            val snap = firestore.collection("projects").where { "environmentId" equalTo activeEnvId }.get()
             val list = snap.documents.mapNotNull { doc ->
                 try { doc.toProjectSafe() } catch (_: Exception) { null }
             }
-            if (list.isEmpty()) {
-                // Seed Default Sample Project if empty
-                val sampleProject = Project(
-                    id = "sample_proj_1",
-                    name = "Commercial Build - Site 101",
-                    description = "Sample framing, drywall, and electrical project",
-                    members = listOf(currentUserEmail),
-                    buckets = listOf("Not Started", "In Progress", "Inspection", "Completed"),
-                    createdAt = Clock.System.now().toEpochMilliseconds()
-                )
-                firestore.collection("projects").document(sampleProject.id).set(sampleProject.toFirestoreMap())
-                fetchedProjects = listOf(sampleProject)
-            } else {
-                fetchedProjects = list
-            }
+            fetchedProjects = list
         } catch (e: Exception) {
             println("Error fetching projects fallback: ${e.message}")
         }
     }
 
-    val realTimeProjectsFlow = remember {
+    val realTimeProjectsFlow = remember(activeEnvId) {
+        if (activeEnvId.isEmpty()) return@remember kotlinx.coroutines.flow.flowOf(emptyList())
         firestore.collection("projects")
+            .where { "environmentId" equalTo activeEnvId }
             .snapshots
-            .map { snapshot -> 
-                snapshot.documents.mapNotNull { doc -> 
+            .map { snapshot ->
+                snapshot.documents.mapNotNull { doc ->
                     try {
                         doc.toProjectSafe()
                     } catch (e: Exception) {
@@ -105,6 +131,7 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                     }
                 }
             }
+            .catch { emit(emptyList()) }
     }
     val realTimeProjects by realTimeProjectsFlow.collectAsState(initial = emptyList())
 
@@ -122,19 +149,25 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
     // For SuperAdmin diagnostic info
     val allUsersCountFlow = remember(isSuperAdmin) {
         if (isSuperAdmin) {
-            firestore.collection("users").snapshots.map { 
-                try { it.documents.size } catch (_: Exception) { 0 }
-            }
+            firestore.collection("users").snapshots
+                .map { try { it.documents.size } catch (_: Exception) { 0 } }
+                .catch { emit(0) }
         } else null
     }
     val allUsersCount by (allUsersCountFlow?.collectAsState(0) ?: remember { mutableStateOf(0) })
     
-    val rawProjectsCountFlow = remember {
-        firestore.collection("projects").snapshots.map { 
-            try { it.documents.size } catch (_: Exception) { 0 }
-        }
+    // Unfiltered - only a SuperAdmin's rules bypass permits reading the whole collection like
+    // this. Firing it for anyone else gets rejected outright by Firestore (no per-doc partial
+    // result for a query with no matching environmentId filter), which crashed the app before
+    // this was gated the same way allUsersCountFlow already was.
+    val rawProjectsCountFlow = remember(isSuperAdmin) {
+        if (isSuperAdmin) {
+            firestore.collection("projects").snapshots
+                .map { try { it.documents.size } catch (_: Exception) { 0 } }
+                .catch { emit(0) }
+        } else null
     }
-    val rawProjectsCount by rawProjectsCountFlow.collectAsState(0)
+    val rawProjectsCount by (rawProjectsCountFlow?.collectAsState(0) ?: remember { mutableStateOf(0) })
 
     // Offline Status
     val isOnline by com.djransom.crewsync.util.rememberConnectivityState()
@@ -251,9 +284,11 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                         style = MaterialTheme.typography.headlineMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    EnvironmentSwitcherRow(currentEnvironment) { showEnvironmentSwitcher = true }
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
             
             Row(
@@ -376,6 +411,7 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                     scope.launch {
                         try {
                             val newProject = Project(
+                                environmentId = activeEnvId,
                                 name = name,
                                 description = desc,
                                 location = location,
@@ -387,6 +423,22 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                         } catch (e: Exception) {}
                     }
                 }
+            )
+        }
+
+        if (showEnvironmentSwitcher && userProfile != null) {
+            EnvironmentSwitcherDialog(
+                userProfile = userProfile!!,
+                environments = myEnvironments,
+                onDismiss = { showEnvironmentSwitcher = false },
+                onSwitch = { envId ->
+                    scope.launch {
+                        firestore.collection("users").document(userProfile!!.uid.ifEmpty { currentUid ?: "" }).update("activeEnvironmentId" to envId)
+                        showEnvironmentSwitcher = false
+                    }
+                },
+                onCreated = { showEnvironmentSwitcher = false },
+                onJoined = { showEnvironmentSwitcher = false }
             )
         }
     }

@@ -45,6 +45,7 @@ import com.djransom.crewsync.util.*
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
@@ -55,10 +56,10 @@ import kotlinx.datetime.toLocalDateTime
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMembers: List<String>) {
+fun PlannerScreen(projectId: String, environmentId: String, projectBuckets: List<String>, projectMembers: List<String>) {
     val firestore = Firebase.firestore
     val scope = rememberCoroutineScope()
-    
+
     var showAddTaskDialog by remember { mutableStateOf(false) }
     var showManageBucketsDialog by remember { mutableStateOf(false) }
     var showManageTemplatesDialog by remember { mutableStateOf(false) }
@@ -68,22 +69,27 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
     var pendingTaskId by remember { mutableStateOf<String?>(null) }
     var pendingSaveTask by remember { mutableStateOf<Task?>(null) }
     var pendingDeleteTaskId by remember { mutableStateOf<String?>(null) }
-    
-    val tasksFlow = remember(projectId) {
+
+    val tasksFlow = remember(projectId, environmentId) {
+        if (environmentId.isEmpty()) return@remember kotlinx.coroutines.flow.flowOf(emptyList())
         firestore.collection("tasks")
+            .where { "environmentId" equalTo environmentId }
             .snapshots
-            .map { snapshot -> 
-                snapshot.documents.mapNotNull { doc -> 
+            .map { snapshot ->
+                snapshot.documents.mapNotNull { doc ->
                     try {
                         doc.toTaskSafe()
                     } catch (e: Exception) { null }
                 }.filter { it.projectId == projectId }
             }
+            .catch { emit(emptyList()) }
     }
     val tasks by tasksFlow.collectAsState(initial = emptyList())
 
-    val allUsersFlow = remember {
+    val allUsersFlow = remember(environmentId) {
+        if (environmentId.isEmpty()) return@remember kotlinx.coroutines.flow.flowOf(emptyList())
         firestore.collection("users")
+            .where { "environmentIds" contains environmentId }
             .snapshots
             .map { snapshot ->
                 snapshot.documents.mapNotNull { doc ->
@@ -92,6 +98,7 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
                     } catch (e: Exception) { null }
                 }
             }
+            .catch { emit(emptyList()) }
     }
     val allUsers by allUsersFlow.collectAsState(initial = emptyList())
 
@@ -233,6 +240,7 @@ fun PlannerScreen(projectId: String, projectBuckets: List<String>, projectMember
                         )
                     }
                     val newTask = Task(
+                        environmentId = environmentId,
                         projectId = projectId,
                         title = title,
                         description = desc,
