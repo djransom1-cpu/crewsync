@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onRequest } = require("firebase-functions/v2/https");
 const { initializeApp } = require("firebase-admin/app");
@@ -44,6 +45,125 @@ exports.geocode = onRequest(async (req, res) => {
     res.status(502).json({ error: "Geocode lookup failed" });
   }
 });
+
+/**
+ * Public, tokenless-auth ICS feed for a project's appointments, so people who aren't Crewsync
+ * users (subs, owners) can subscribe to a project's calendar from their own calendar app
+ * (Google Calendar / Apple Calendar / Outlook). See Project.calendarShareEnabled /
+ * calendarShareToken and ShareUtils.kt on the client. Deliberately the only endpoint in this
+ * file with no Firebase Auth check - the token in the query string is the sole access control,
+ * so every check below (share enabled, token match) has to hold before any appointment data
+ * is returned.
+ */
+exports.calendarFeed = onRequest(async (req, res) => {
+  const projectId = req.query.projectId;
+  const token = req.query.token;
+
+  if (!projectId || typeof projectId !== "string" || !token || typeof token !== "string") {
+    res.status(400).send("Missing projectId or token");
+    return;
+  }
+
+  try {
+    const db = getFirestore();
+    const projectSnap = await db.collection("projects").doc(projectId).get();
+    const project = projectSnap.data();
+
+    if (!project || !project.calendarShareEnabled || !isTokenMatch(token, project.calendarShareToken)) {
+      res.status(403).send("Not found");
+      return;
+    }
+
+    const appointmentsSnap = await db.collection("projects").doc(projectId).collection("appointments").get();
+    const eventLines = appointmentsSnap.docs.flatMap((doc) => buildIcsEvent(doc.id, doc.data()));
+
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Crewsync//Calendar Feed//EN",
+      "CALSCALE:GREGORIAN",
+      `X-WR-CALNAME:${escapeIcsText(project.name || "Crewsync Project")}`,
+      ...eventLines,
+      "END:VCALENDAR",
+    ].join("\r\n");
+
+    // The token is the only auth on this endpoint - never let a CDN or browser cache a response
+    // keyed on a URL that could later be revoked/regenerated (see "Regenerate link" client-side).
+    res.set("Content-Type", "text/calendar; charset=utf-8");
+    res.set("Cache-Control", "no-store");
+    res.status(200).send(ics);
+  } catch (error) {
+    logger.error("Calendar feed failed", error);
+    res.status(500).send("Calendar feed failed");
+  }
+});
+
+// crypto.timingSafeEqual throws on mismatched buffer lengths rather than returning false, and
+// requires both inputs the same length up front - the length check below happens before it, so
+// this leaks the stored token's length on a mismatch, but not any of its content.
+function isTokenMatch(provided, actual) {
+  if (typeof actual !== "string" || actual.length === 0) return false;
+  const providedBuf = Buffer.from(provided);
+  const actualBuf = Buffer.from(actual);
+  if (providedBuf.length !== actualBuf.length) return false;
+  return crypto.timingSafeEqual(providedBuf, actualBuf);
+}
+
+function buildIcsEvent(id, appt) {
+  const isAllDay = !!appt.isAllDay;
+  const lines = ["BEGIN:VEVENT", `UID:${id}@crewsync.app`, `DTSTAMP:${formatIcsDateTimeUTC(Date.now())}`];
+
+  if (isAllDay) {
+    lines.push(`DTSTART;VALUE=DATE:${formatIcsDate(appt.startDate)}`);
+    // ICS all-day DTEND is exclusive - a single-day event's end date has to be the day after
+    // its start, or calendar apps render it as zero-length.
+    const endDate = new Date(appt.endDate || appt.startDate);
+    endDate.setUTCDate(endDate.getUTCDate() + 1);
+    lines.push(`DTEND;VALUE=DATE:${formatIcsDate(endDate.getTime())}`);
+  } else {
+    lines.push(`DTSTART:${formatIcsDateTimeUTC(appt.startDate)}`);
+    lines.push(`DTEND:${formatIcsDateTimeUTC(appt.endDate)}`);
+  }
+
+  lines.push(`SUMMARY:${escapeIcsText(appt.title || "")}`);
+  if (appt.description) lines.push(`DESCRIPTION:${escapeIcsText(appt.description)}`);
+  if (appt.location) lines.push(`LOCATION:${escapeIcsText(appt.location)}`);
+
+  const rrule = recurrenceToRRule(appt.recurrence);
+  if (rrule) lines.push(`RRULE:${rrule}`);
+
+  lines.push("END:VEVENT");
+  return lines;
+}
+
+function recurrenceToRRule(recurrence) {
+  switch (recurrence) {
+    case "Daily":
+      return "FREQ=DAILY";
+    case "Weekly":
+      return "FREQ=WEEKLY";
+    case "Monthly":
+      return "FREQ=MONTHLY";
+    default:
+      return null;
+  }
+}
+
+function formatIcsDateTimeUTC(timestampMs) {
+  return new Date(timestampMs).toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+}
+
+function formatIcsDate(timestampMs) {
+  return new Date(timestampMs).toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+function escapeIcsText(text) {
+  return String(text)
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\n/g, "\\n");
+}
 
 /**
  * Looks up the fcmToken for a set of user emails. Project membership is stored as emails

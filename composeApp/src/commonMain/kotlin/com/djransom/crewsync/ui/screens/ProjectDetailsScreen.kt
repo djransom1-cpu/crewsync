@@ -395,6 +395,8 @@ fun ProjectDetailsScreen(
                             tasks = tasks,
                             appointments = appointments,
                             canEdit = isLeader,
+                            calendarShareEnabled = project!!.calendarShareEnabled,
+                            calendarShareToken = project!!.calendarShareToken,
                             firstDayOfWeek = userProfile?.firstDayOfWeek ?: "Sunday"
                         )
                         6 -> NotesTab(projectId = projectId, notes = notes, currentUserEmail = auth.currentUser?.email ?: "")

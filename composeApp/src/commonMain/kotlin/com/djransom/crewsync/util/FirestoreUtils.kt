@@ -15,6 +15,8 @@ fun DocumentSnapshot.toProjectSafe(): Project {
             val locationStr: String = try { this.get("location") } catch (_: Exception) { "Nashville, TN" }
             val created: Long = try { this.get("createdAt") } catch (_: Exception) { 0L }
             val envId: String = try { this.get("environmentId") } catch (_: Exception) { "" }
+            val shareEnabled: Boolean = try { this.get("calendarShareEnabled") } catch (_: Exception) { false }
+            val shareToken: String = try { this.get("calendarShareToken") } catch (_: Exception) { "" }
             Project(
                 id = this.id,
                 environmentId = envId,
@@ -23,6 +25,8 @@ fun DocumentSnapshot.toProjectSafe(): Project {
                 teamLeaderId = leader,
                 members = membersList,
                 location = locationStr,
+                calendarShareEnabled = shareEnabled,
+                calendarShareToken = shareToken,
                 createdAt = created
             )
         } catch (_: Exception) {
@@ -203,6 +207,8 @@ fun com.djransom.crewsync.data.model.Project.toFirestoreMap(): Map<String, Any?>
     map["createdAt"] = createdAt.toDouble()
     if (cardOrder.isNotEmpty()) map["cardOrder"] = cardOrder
     map["cardSizes"] = cardSizes
+    map["calendarShareEnabled"] = calendarShareEnabled
+    map["calendarShareToken"] = calendarShareToken
     return map
 }
 

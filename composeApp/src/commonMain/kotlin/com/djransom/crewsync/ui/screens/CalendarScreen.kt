@@ -22,6 +22,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
@@ -45,6 +47,8 @@ fun CalendarScreen(
     tasks: List<Task>,
     appointments: List<Appointment>,
     canEdit: Boolean,
+    calendarShareEnabled: Boolean = false,
+    calendarShareToken: String = "",
     firstDayOfWeek: String = "Sunday"
 ) {
     val startDow = parseFirstDayOfWeek(firstDayOfWeek)
@@ -58,6 +62,7 @@ fun CalendarScreen(
     var appointmentToEdit by remember { mutableStateOf<Appointment?>(null) }
     var showAddAppointmentDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf<Appointment?>(null) }
+    var showShareDialog by remember { mutableStateOf(false) }
 
     val selectedDateItems = (tasks.filter { task ->
         task.dueDate?.let { isSameDay(it, selectedDate) } == true ||
@@ -128,7 +133,23 @@ fun CalendarScreen(
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Add Appointment")
             }
+
+            SmallFloatingActionButton(
+                onClick = { showShareDialog = true },
+                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+            ) {
+                Icon(Icons.Default.Send, contentDescription = "Share Calendar")
+            }
         }
+    }
+
+    if (showShareDialog) {
+        ShareCalendarDialog(
+            projectId = projectId,
+            calendarShareEnabled = calendarShareEnabled,
+            calendarShareToken = calendarShareToken,
+            onDismiss = { showShareDialog = false }
+        )
     }
 
     if (showAddAppointmentDialog || appointmentToEdit != null) {
@@ -828,6 +849,84 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+fun ShareCalendarDialog(
+    projectId: String,
+    calendarShareEnabled: Boolean,
+    calendarShareToken: String,
+    onDismiss: () -> Unit
+) {
+    val firestore = Firebase.firestore
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+
+    var enabled by remember { mutableStateOf(calendarShareEnabled) }
+    var token by remember { mutableStateOf(calendarShareToken) }
+
+    fun persist(newEnabled: Boolean, newToken: String) {
+        enabled = newEnabled
+        token = newToken
+        scope.launch {
+            firestore.collection("projects").document(projectId).update(
+                "calendarShareEnabled" to newEnabled,
+                "calendarShareToken" to newToken
+            )
+        }
+    }
+
+    val feedUrl = calendarFeedUrl(projectId, token)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Share Calendar") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Anyone with this link can subscribe to this project's appointments from their own calendar app (Google Calendar, Apple Calendar, Outlook) - no Crewsync login needed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Public link enabled", modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = { checked ->
+                            // A token is only ever generated once and then kept across toggles,
+                            // so turning sharing off and back on doesn't silently invalidate a
+                            // link someone already subscribed with.
+                            val nextToken = if (checked && token.isEmpty()) randomShareToken() else token
+                            persist(checked, nextToken)
+                        }
+                    )
+                }
+                if (enabled) {
+                    OutlinedTextField(
+                        value = feedUrl,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Feed link") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { clipboard.setText(AnnotatedString(feedUrl)) }) {
+                            Text("Copy")
+                        }
+                        OutlinedButton(onClick = { shareFile(feedUrl, "Calendar Feed") }) {
+                            Text("Share")
+                        }
+                    }
+                    TextButton(onClick = { persist(true, randomShareToken()) }) {
+                        Text("Regenerate link")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
         }
     )
 }

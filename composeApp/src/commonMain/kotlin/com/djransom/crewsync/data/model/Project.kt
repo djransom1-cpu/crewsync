@@ -17,5 +17,7 @@ data class Project(
     val buckets: List<String> = listOf("Not Started", "In Progress", "Paused", "Done"),
     val cardOrder: List<String> = listOf("Weather", "Calendar", "Tasks", "Chat", "Team", "Files", "Notes"),
     val cardSizes: Map<String, String> = emptyMap(), // cardId to "Small" or "Large"
+    val calendarShareEnabled: Boolean = false,
+    val calendarShareToken: String = "", // the calendarFeed Cloud Function's only access control - see ShareUtils.kt
     val createdAt: Long = 0L
 )
