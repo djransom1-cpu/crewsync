@@ -1,0 +1,75 @@
+name: Build Desktop Installer (Windows MSI)
+
+# Builds the Windows desktop installer (.msi, wrapped in a .zip to match the naming convention
+# already used in the shared installers Drive folder: Crewsync-<version>-installer.zip).
+#
+# Trigger it either:
+#   - manually, from the Actions tab ("Run workflow"), or
+#   - by pushing a version tag like v1.0.6 (git tag v1.0.6 && git push origin v1.0.6)
+#
+# Runs on a GitHub-hosted windows-latest runner specifically because it has normal outbound
+# internet access - unlike some sandboxed/restricted dev environments, it can resolve
+# dl.google.com for the Android Gradle Plugin (still applied to this module even though this
+# workflow only packages the desktop target - see composeApp/build.gradle.kts).
+#
+# Required repo secret (Settings > Secrets and variables > Actions), same one android-release.yml
+# already uses:
+#   GOOGLE_SERVICES_JSON_BASE64 - base64 of composeApp/google-services.json
+#                                 (generate with: base64 -w0 composeApp/google-services.json)
+# The google-services Gradle plugin is applied unconditionally on this module, so the file needs
+# to exist for project configuration to succeed even though desktop packaging doesn't use it.
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-msi:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Recreate google-services.json from secret
+        shell: pwsh
+        run: |
+          [System.Convert]::FromBase64String("${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}") | Set-Content -Path composeApp/google-services.json -Encoding Byte
+
+      - name: Build Windows installer (MSI)
+        run: .\gradlew.bat packageMsi --no-daemon
+
+      - name: Clean up secret file
+        if: always()
+        shell: pwsh
+        run: Remove-Item -Force -ErrorAction SilentlyContinue composeApp/google-services.json
+
+      - name: Zip installer to match Drive naming convention
+        id: zip
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path composeApp/build.gradle.kts -Pattern 'packageVersion = "(.*)"').Matches[0].Groups[1].Value
+          $msi = Get-ChildItem -Path "composeApp/build/compose/binaries/main/msi" -Filter *.msi -Recurse | Select-Object -First 1
+          $zipName = "Crewsync-$version-installer.zip"
+          Compress-Archive -Path $msi.FullName -DestinationPath $zipName
+          echo "zip_name=$zipName" >> $env:GITHUB_OUTPUT
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crewsync-desktop-installer
+          path: ${{ steps.zip.outputs.zip_name }}
+          if-no-files-found: error
