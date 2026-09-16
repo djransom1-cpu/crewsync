@@ -44,7 +44,8 @@ jobs:
       - name: Recreate google-services.json from secret
         shell: pwsh
         run: |
-          [System.Convert]::FromBase64String("${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}") | Set-Content -Path composeApp/google-services.json -Encoding Byte
+          $bytes = [System.Convert]::FromBase64String("${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}")
+          [System.IO.File]::WriteAllBytes("composeApp/google-services.json", $bytes)
 
       - name: Build Windows installer (MSI)
         run: .\gradlew.bat packageMsi --no-daemon
