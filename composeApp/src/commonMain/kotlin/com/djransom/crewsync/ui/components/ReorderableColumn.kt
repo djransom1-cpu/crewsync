@@ -1,6 +1,6 @@
 package com.djransom.crewsync.ui.components
 
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,9 +32,11 @@ import kotlin.math.roundToInt
  * dependency-free. Because that step size doesn't account for taller wrapped rows, dragging past
  * one is approximate rather than exact.
  *
- * [itemContent] receives a `dragHandleModifier` to attach to whichever part of the row (e.g. a
- * drag-handle icon) should start the drag on long-press - the rest of the row stays free for
- * normal taps (checkbox, text field, delete button) without fighting the drag gesture.
+ * [itemContent] receives a `dragHandleModifier` to attach wherever the row's drag surface should
+ * be - the whole row content, or just a dedicated handle icon if some part of the row needs a
+ * separate tap action that would otherwise compete with the drag. Drag starts immediately on
+ * pointer movement (no long-press gate): long-press detection was tried first but didn't
+ * reliably continue past the initial grab with desktop mouse input.
  */
 @Composable
 fun <T> ReorderableColumn(
@@ -73,8 +75,8 @@ fun <T> ReorderableColumn(
                     )
             ) {
                 val handleModifier = Modifier.pointerInput(item) {
-                    detectDragGesturesAfterLongPress(
-                        onDragStart = {
+                    detectDragGestures(
+                        onDragStart = { _ ->
                             draggingIndex = index
                             dragOffsetPx = 0f
                         },

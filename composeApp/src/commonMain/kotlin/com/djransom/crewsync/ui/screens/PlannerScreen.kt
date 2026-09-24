@@ -512,24 +512,16 @@ fun TaskCard(
     var showMenu by remember { mutableStateOf(false) }
     val assignedList = remember(task) { task.getAllAssignedEmails() }
 
-    // The drag handle sits as a sibling of the (still fully clickable) Card, not nested inside
-    // it - a custom drag-gesture detector nested under an ancestor's plain clickable{} gets its
-    // drag stuck after the initial grab (the ancestor's own tap/press handling wins the gesture
-    // arbitration), the same issue PlannerOutlineTaskRow hit in the List view.
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        Icon(
-            Icons.Default.Menu,
-            contentDescription = "Drag to reorder within ${task.status}",
-            modifier = dragHandleModifier.padding(top = 14.dp, end = 4.dp).size(18.dp),
-            tint = Color.Gray
-        )
-        Card(
-            modifier = Modifier
-                .weight(1f)
-                .clickable { onClick() },
-            colors = CardDefaults.cardColors(containerColor = Color(parseColor(task.color))),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-        ) {
+    // The whole card is the drag surface (dragHandleModifier) as well as staying fully
+    // clickable{} for onClick - no separate handle icon.
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(dragHandleModifier)
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(containerColor = Color(parseColor(task.color))),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -627,7 +619,6 @@ fun TaskCard(
                     )
                 }
             }
-        }
         }
     }
 }
@@ -762,77 +753,60 @@ fun PlannerOutlineTaskRow(
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // The drag handle is a sibling of the clickable-to-expand Row, not nested inside it -
-            // a custom drag-gesture detector nested under an ancestor's plain clickable{} gets
-            // its drag stuck right after the initial long-press grab (the ancestor's own tap
-            // handling wins the gesture arbitration), which is exactly the "it grabs it but won't
-            // go up or down" bug this fixes.
+            // The whole row is the drag surface (dragHandleModifier) - no separate handle icon.
+            // The chevron and title each keep their own small clickable{} for their specific
+            // taps (expand, open details); nested clickable{}s compose fine together. What
+            // doesn't work is a clickable{} ANCESTOR wrapping the drag gesture's own pointerInput
+            // - that's a different conflict, and not what this is.
             Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(dragHandleModifier)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    Icons.Default.Menu,
-                    contentDescription = "Drag to reorder within ${task.status}",
-                    modifier = dragHandleModifier.padding(start = 12.dp, end = 6.dp).size(18.dp),
-                    tint = Color.Gray
-                )
-
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { if (items.isNotEmpty()) expanded = !expanded }
-                        .padding(end = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (items.isNotEmpty()) {
-                        Icon(
-                            if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = if (expanded) "Collapse" else "Expand",
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                    } else {
-                        Spacer(Modifier.width(24.dp))
-                    }
-
-                    Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(parseColor(task.color))))
-                    Spacer(Modifier.width(8.dp))
-
-                    // Nested inside the expand-toggle Row above, but that's fine - two plain
-                    // clickable{} modifiers compose correctly (the inner one claims taps within
-                    // its own bounds, the outer handles the rest). It's only a clickable ancestor
-                    // wrapping the drag handle's custom gesture detector that breaks, which this
-                    // Column isn't.
-                    Column(modifier = Modifier.weight(1f).clickable { onTaskClick() }) {
-                        Text(
-                            text = task.title,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            textDecoration = if (isDoneStatus(task.status)) TextDecoration.LineThrough else null
-                        )
-                        val assignedList = task.getAllAssignedEmails()
-                        val subtitle = buildString {
-                            append(task.status)
-                            if (assignedList.isNotEmpty()) append("  -  " + assignedList.joinToString(", ") { userMap[it] ?: it })
-                        }
-                        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                    }
-
-                    if (items.isNotEmpty()) {
-                        Spacer(Modifier.width(8.dp))
-                        Text("$doneCount/${items.size}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    Text(
-                        "$percent%",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (percent >= 100) Color(0xFF10B981) else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.width(44.dp),
-                        textAlign = TextAlign.End
+                if (items.isNotEmpty()) {
+                    Icon(
+                        if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = if (expanded) "Collapse" else "Expand",
+                        modifier = Modifier.size(20.dp).clickable { expanded = !expanded }
                     )
+                    Spacer(Modifier.width(4.dp))
+                } else {
+                    Spacer(Modifier.width(24.dp))
                 }
+
+                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(parseColor(task.color))))
+                Spacer(Modifier.width(8.dp))
+
+                Column(modifier = Modifier.weight(1f).clickable { onTaskClick() }) {
+                    Text(
+                        text = task.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        textDecoration = if (isDoneStatus(task.status)) TextDecoration.LineThrough else null
+                    )
+                    val assignedList = task.getAllAssignedEmails()
+                    val subtitle = buildString {
+                        append(task.status)
+                        if (assignedList.isNotEmpty()) append("  -  " + assignedList.joinToString(", ") { userMap[it] ?: it })
+                    }
+                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                }
+
+                if (items.isNotEmpty()) {
+                    Spacer(Modifier.width(8.dp))
+                    Text("$doneCount/${items.size}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    "$percent%",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (percent >= 100) Color(0xFF10B981) else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.width(44.dp),
+                    textAlign = TextAlign.End
+                )
             }
 
             if (expanded) {
