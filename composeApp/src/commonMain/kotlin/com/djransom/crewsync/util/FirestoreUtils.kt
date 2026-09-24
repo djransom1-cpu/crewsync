@@ -89,6 +89,7 @@ fun DocumentSnapshot.toTaskSafe(): com.djransom.crewsync.data.model.Task {
             val start: Long? = try { this.get("startDate") } catch (_: Exception) { null }
             val due: Long? = try { this.get("dueDate") } catch (_: Exception) { null }
             val envId: String = try { this.get("environmentId") } catch (_: Exception) { "" }
+            val orderVal: Long = try { this.get("order") } catch (_: Exception) { 0L }
 
             com.djransom.crewsync.data.model.Task(
                 id = this.id,
@@ -101,7 +102,8 @@ fun DocumentSnapshot.toTaskSafe(): com.djransom.crewsync.data.model.Task {
                 assignedMembers = if (assignedList.isNotEmpty()) assignedList else (if (assigned != null) listOf(assigned) else emptyList()),
                 color = colorStr,
                 startDate = start,
-                dueDate = due
+                dueDate = due,
+                order = orderVal
             )
         } catch (_: Exception) {
             com.djransom.crewsync.data.model.Task(id = this.id, title = "Task ${this.id.take(4)}")
@@ -156,6 +158,7 @@ fun com.djransom.crewsync.data.model.Task.toFirestoreMap(): Map<String, Any?> {
     map["color"] = color
     if (startDate != null) map["startDate"] = startDate.toDouble()
     if (dueDate != null) map["dueDate"] = dueDate.toDouble()
+    map["order"] = order.toDouble()
     // Deliberately NOT writing the legacy flat "checklist" field here. It used to be mirrored
     // on every save as a compatibility shim, but that meant any save - even one that never
     // touched checklists - overwrote it with whatever checklistGroups held at that moment,

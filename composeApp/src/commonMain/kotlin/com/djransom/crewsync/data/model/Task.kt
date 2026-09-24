@@ -16,7 +16,8 @@ data class Task(
     val startDate: Long? = null,
     val dueDate: Long? = null,
     val checklistGroups: List<ChecklistGroup> = emptyList(),
-    val attachments: List<ProjectFile> = emptyList()
+    val attachments: List<ProjectFile> = emptyList(),
+    val order: Long = 0L // manual drag-to-reorder position within a status bucket - see PlannerListView
 ) {
     fun getAllAssignedEmails(): List<String> {
         val list = assignedMembers.toMutableList()

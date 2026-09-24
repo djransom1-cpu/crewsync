@@ -203,6 +203,17 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                             firestore.collection("tasks").document(task.id)
                                 .set(task.copy(checklistGroups = updatedGroups).toFirestoreMap())
                         }
+                    },
+                    onReorderTasks = { reorderedBucketTasks ->
+                        scope.launch {
+                            // Sequential index per bucket is enough - order only ever gets
+                            // compared within a single status bucket (sortedBy { it.order }
+                            // after filtering by status), so values overlapping across different
+                            // buckets is fine.
+                            reorderedBucketTasks.forEachIndexed { index, task ->
+                                firestore.collection("tasks").document(task.id).update("order" to index.toLong().toDouble())
+                            }
+                        }
                     }
                 )
                 else -> LazyRow(
@@ -213,7 +224,7 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(projectBuckets) { bucketName ->
-                        val columnTasks = visibleTasks.filter { it.status == bucketName }
+                        val columnTasks = visibleTasks.filter { it.status == bucketName }.sortedBy { it.order }
                         PlannerColumn(
                             title = bucketName,
                             tasks = columnTasks,
@@ -284,7 +295,8 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                         startDate = start,
                         dueDate = due,
                         color = color,
-                        checklistGroups = initialGroups
+                        checklistGroups = initialGroups,
+                        order = Clock.System.now().toEpochMilliseconds() // sorts new cards to the end of their bucket by default
                     )
                     firestore.collection("tasks").add(newTask.toFirestoreMap())
 
@@ -604,7 +616,8 @@ fun PlannerListView(
     tasks: List<Task>,
     userMap: Map<String, String>,
     onTaskClick: (Task) -> Unit,
-    onToggleChecklistItem: (task: Task, groupId: String, itemId: String, checked: Boolean) -> Unit
+    onToggleChecklistItem: (task: Task, groupId: String, itemId: String, checked: Boolean) -> Unit,
+    onReorderTasks: (List<Task>) -> Unit
 ) {
     val overallDone = tasks.count { isDoneStatus(it.status) }
     val overallTotal = tasks.size
@@ -646,7 +659,7 @@ fun PlannerListView(
         }
 
         buckets.forEach { bucket ->
-            val bucketTasks = tasks.filter { it.status == bucket }
+            val bucketTasks = tasks.filter { it.status == bucket }.sortedBy { it.order }
             if (bucketTasks.isNotEmpty()) {
                 item(key = "bucket_$bucket") {
                     Text(
@@ -656,13 +669,23 @@ fun PlannerListView(
                         modifier = Modifier.padding(vertical = 8.dp)
                     )
                 }
-                items(bucketTasks, key = { it.id }) { task ->
-                    PlannerOutlineTaskRow(
-                        task = task,
-                        userMap = userMap,
-                        onTaskClick = { onTaskClick(task) },
-                        onToggleChecklistItem = { groupId, itemId, checked -> onToggleChecklistItem(task, groupId, itemId, checked) }
-                    )
+                // A plain (non-lazy) ReorderableColumn nested in a single LazyColumn item slot -
+                // it manages its own drag state internally and only needs a bounded list, which
+                // "one bucket's tasks" is (see ReorderableColumn's own doc comment).
+                item(key = "bucket_body_$bucket") {
+                    ReorderableColumn(
+                        items = bucketTasks,
+                        onReorder = { reordered -> onReorderTasks(reordered) },
+                        rowHeight = 56.dp
+                    ) { task, dragHandleModifier ->
+                        PlannerOutlineTaskRow(
+                            task = task,
+                            userMap = userMap,
+                            onTaskClick = { onTaskClick(task) },
+                            onToggleChecklistItem = { groupId, itemId, checked -> onToggleChecklistItem(task, groupId, itemId, checked) },
+                            dragHandleModifier = dragHandleModifier
+                        )
+                    }
                 }
             }
         }
@@ -674,7 +697,8 @@ fun PlannerOutlineTaskRow(
     task: Task,
     userMap: Map<String, String>,
     onTaskClick: () -> Unit,
-    onToggleChecklistItem: (groupId: String, itemId: String, checked: Boolean) -> Unit
+    onToggleChecklistItem: (groupId: String, itemId: String, checked: Boolean) -> Unit,
+    dragHandleModifier: Modifier = Modifier
 ) {
     var expanded by remember(task.id) { mutableStateOf(false) }
     val items = remember(task) { task.allChecklistItems() }
@@ -694,6 +718,14 @@ fun PlannerOutlineTaskRow(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Icon(
+                    Icons.Default.Menu,
+                    contentDescription = "Drag to reorder within ${task.status}",
+                    modifier = dragHandleModifier.size(18.dp),
+                    tint = Color.Gray
+                )
+                Spacer(Modifier.width(6.dp))
+
                 if (items.isNotEmpty()) {
                     Icon(
                         if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
