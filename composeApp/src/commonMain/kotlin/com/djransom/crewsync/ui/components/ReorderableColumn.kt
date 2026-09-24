@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -60,56 +61,64 @@ fun <T> ReorderableColumn(
 
     Column(modifier = Modifier.fillMaxWidth()) {
         localItems.forEachIndexed { index, item ->
-            val isDragging = index == draggingIndex
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = rowHeight)
-                    .zIndex(if (isDragging) 1f else 0f)
-                    .then(
-                        if (isDragging) {
-                            Modifier.offset { IntOffset(0, dragOffsetPx.roundToInt()) }
-                        } else {
-                            Modifier
-                        }
-                    )
-            ) {
-                val handleModifier = Modifier.pointerInput(item) {
-                    detectDragGestures(
-                        onDragStart = { _ ->
-                            draggingIndex = index
-                            dragOffsetPx = 0f
-                        },
-                        onDrag = { change, delta ->
-                            change.consume()
-                            dragOffsetPx += delta.y
-                            val shift = (dragOffsetPx / rowHeightPx).roundToInt()
-                            if (shift != 0) {
-                                val from = draggingIndex
-                                val to = (from + shift).coerceIn(0, localItems.lastIndex)
-                                if (to != from) {
-                                    val mutable = localItems.toMutableList()
-                                    val moved = mutable.removeAt(from)
-                                    mutable.add(to, moved)
-                                    localItems = mutable
-                                    draggingIndex = to
-                                    dragOffsetPx -= shift * rowHeightPx
-                                }
+            // Keyed on the item itself, not the loop index - without this, a reorder mid-drag
+            // (localItems mutated in onDrag below) makes Compose reuse each positional slot for
+            // whatever item now lands at that index instead of moving the existing node with its
+            // data, tearing down and rebuilding the displaced rows' composables (losing their
+            // remembered state and any in-flight styling) instead of smoothly repositioning them
+            // - exactly the flicker/stutter on siblings seen during a drag.
+            key(item) {
+                val isDragging = index == draggingIndex
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = rowHeight)
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .then(
+                            if (isDragging) {
+                                Modifier.offset { IntOffset(0, dragOffsetPx.roundToInt()) }
+                            } else {
+                                Modifier
                             }
-                        },
-                        onDragEnd = {
-                            draggingIndex = -1
-                            dragOffsetPx = 0f
-                            onReorder(localItems)
-                        },
-                        onDragCancel = {
-                            draggingIndex = -1
-                            dragOffsetPx = 0f
-                            localItems = items
-                        }
-                    )
+                        )
+                ) {
+                    val handleModifier = Modifier.pointerInput(item) {
+                        detectDragGestures(
+                            onDragStart = { _ ->
+                                draggingIndex = index
+                                dragOffsetPx = 0f
+                            },
+                            onDrag = { change, delta ->
+                                change.consume()
+                                dragOffsetPx += delta.y
+                                val shift = (dragOffsetPx / rowHeightPx).roundToInt()
+                                if (shift != 0) {
+                                    val from = draggingIndex
+                                    val to = (from + shift).coerceIn(0, localItems.lastIndex)
+                                    if (to != from) {
+                                        val mutable = localItems.toMutableList()
+                                        val moved = mutable.removeAt(from)
+                                        mutable.add(to, moved)
+                                        localItems = mutable
+                                        draggingIndex = to
+                                        dragOffsetPx -= shift * rowHeightPx
+                                    }
+                                }
+                            },
+                            onDragEnd = {
+                                draggingIndex = -1
+                                dragOffsetPx = 0f
+                                onReorder(localItems)
+                            },
+                            onDragCancel = {
+                                draggingIndex = -1
+                                dragOffsetPx = 0f
+                                localItems = items
+                            }
+                        )
+                    }
+                    itemContent(item, handleModifier)
                 }
-                itemContent(item, handleModifier)
             }
         }
     }
