@@ -21,14 +21,18 @@ actual fun printPlannerOutline(projectName: String, buckets: List<String>, tasks
             file.deleteOnExit()
             renderPlannerPdf(projectName, buckets, tasks, file)
 
-            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.PRINT)) {
-                Desktop.getDesktop().print(file)
-            } else if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
-                // No direct "print" verb registered for PDFs on this machine (uncommon) - opening
-                // it at least gets the user to a viewer they can print from themselves.
+            // Desktop.Action.PRINT depends on a "print" verb being registered for .pdf in the
+            // OS shell, which isn't reliable across machines/PDF-handler configs and fails
+            // silently when it isn't there. Opening the PDF in the user's default viewer works
+            // everywhere a PDF viewer is installed at all, and they can print from there
+            // (Ctrl+P) - a preview step, not a regression.
+            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
                 Desktop.getDesktop().open(file)
+            } else {
+                println("printPlannerOutline: Desktop OPEN action not supported on this machine; generated PDF at ${file.absolutePath}")
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 }

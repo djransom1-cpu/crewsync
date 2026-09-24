@@ -3,10 +3,12 @@ package com.djransom.crewsync.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -29,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
@@ -137,6 +141,20 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
         }
     }
 
+    // Shared by both Board and List views' drag-to-reorder - sequential index per bucket is
+    // enough, since order only ever gets compared within a single status bucket (sortedBy
+    // { it.order } after filtering by status), so values overlapping across different buckets
+    // doesn't matter.
+    fun persistTaskOrder(reorderedBucketTasks: List<Task>) {
+        scope.launch {
+            reorderedBucketTasks.forEachIndexed { index, task ->
+                firestore.collection("tasks").document(task.id).update("order" to index.toLong().toDouble())
+            }
+        }
+    }
+
+    val boardScrollState = rememberLazyListState()
+
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -204,22 +222,32 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                                 .set(task.copy(checklistGroups = updatedGroups).toFirestoreMap())
                         }
                     },
-                    onReorderTasks = { reorderedBucketTasks ->
-                        scope.launch {
-                            // Sequential index per bucket is enough - order only ever gets
-                            // compared within a single status bucket (sortedBy { it.order }
-                            // after filtering by status), so values overlapping across different
-                            // buckets is fine.
-                            reorderedBucketTasks.forEachIndexed { index, task ->
-                                firestore.collection("tasks").document(task.id).update("order" to index.toLong().toDouble())
-                            }
-                        }
-                    }
+                    onReorderTasks = ::persistTaskOrder
                 )
                 else -> LazyRow(
+                    state = boardScrollState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                        // LazyRow only reacts to horizontal drag by default - a mouse wheel
+                        // (which reports a vertical delta) does nothing on it otherwise, which
+                        // reads as "I can't scroll to see the rest of the buckets" since a
+                        // click-drag gesture isn't an obvious thing to try on desktop.
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    if (event.type == PointerEventType.Scroll) {
+                                        val scrollChange = event.changes.firstOrNull() ?: continue
+                                        val delta = scrollChange.scrollDelta.let { if (it.x != 0f) it.x else it.y }
+                                        if (delta != 0f) {
+                                            scope.launch { boardScrollState.scrollBy(delta * 60f) }
+                                            scrollChange.consume()
+                                        }
+                                    }
+                                }
+                            }
+                        },
                     contentPadding = PaddingValues(16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
@@ -240,6 +268,7 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                                     }
                                 }
                             },
+                            onReorderTasks = ::persistTaskOrder,
                             allBuckets = projectBuckets,
                             userMap = userMap
                         )
@@ -416,6 +445,7 @@ fun PlannerColumn(
     tasks: List<Task>,
     onTaskClick: (Task) -> Unit,
     onMoveTask: (Task, String) -> Unit,
+    onReorderTasks: (List<Task>) -> Unit,
     allBuckets: List<String>,
     userMap: Map<String, String>
 ) {
@@ -444,18 +474,26 @@ fun PlannerColumn(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(tasks, key = { it.id }) { task ->
-                    TaskCard(
-                        task = task,
-                        onClick = { onTaskClick(task) },
-                        onMoveTask = { newStatus -> onMoveTask(task, newStatus) },
-                        allBuckets = allBuckets,
-                        userMap = userMap
-                    )
+            // ReorderableColumn is a plain (non-lazy) Column - see its own doc comment - so it's
+            // wrapped in a regular verticalScroll here to keep buckets with many cards (a "Not
+            // Started" column can easily hold 30+) scrollable, the same way the LazyColumn it
+            // replaces was.
+            Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                ReorderableColumn(
+                    items = tasks,
+                    onReorder = onReorderTasks,
+                    rowHeight = 120.dp
+                ) { task, dragHandleModifier ->
+                    Box(modifier = Modifier.padding(bottom = 8.dp)) {
+                        TaskCard(
+                            task = task,
+                            onClick = { onTaskClick(task) },
+                            onMoveTask = { newStatus -> onMoveTask(task, newStatus) },
+                            allBuckets = allBuckets,
+                            userMap = userMap,
+                            dragHandleModifier = dragHandleModifier
+                        )
+                    }
                 }
             }
         }
@@ -468,18 +506,30 @@ fun TaskCard(
     onClick: () -> Unit,
     onMoveTask: (String) -> Unit,
     allBuckets: List<String>,
-    userMap: Map<String, String>
+    userMap: Map<String, String>,
+    dragHandleModifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
     val assignedList = remember(task) { task.getAllAssignedEmails() }
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
-        colors = CardDefaults.cardColors(containerColor = Color(parseColor(task.color))),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
+    // The drag handle sits as a sibling of the (still fully clickable) Card, not nested inside
+    // it - a custom drag-gesture detector nested under an ancestor's plain clickable{} gets its
+    // drag stuck after the initial grab (the ancestor's own tap/press handling wins the gesture
+    // arbitration), the same issue PlannerOutlineTaskRow hit in the List view.
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Icon(
+            Icons.Default.Menu,
+            contentDescription = "Drag to reorder within ${task.status}",
+            modifier = dragHandleModifier.padding(top = 14.dp, end = 4.dp).size(18.dp),
+            tint = Color.Gray
+        )
+        Card(
+            modifier = Modifier
+                .weight(1f)
+                .clickable { onClick() },
+            colors = CardDefaults.cardColors(containerColor = Color(parseColor(task.color))),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -577,6 +627,7 @@ fun TaskCard(
                     )
                 }
             }
+        }
         }
     }
 }
@@ -711,63 +762,77 @@ fun PlannerOutlineTaskRow(
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
+            // The drag handle is a sibling of the clickable-to-expand Row, not nested inside it -
+            // a custom drag-gesture detector nested under an ancestor's plain clickable{} gets
+            // its drag stuck right after the initial long-press grab (the ancestor's own tap
+            // handling wins the gesture arbitration), which is exactly the "it grabs it but won't
+            // go up or down" bug this fixes.
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { if (items.isNotEmpty()) expanded = !expanded }
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     Icons.Default.Menu,
                     contentDescription = "Drag to reorder within ${task.status}",
-                    modifier = dragHandleModifier.size(18.dp),
+                    modifier = dragHandleModifier.padding(start = 12.dp, end = 6.dp).size(18.dp),
                     tint = Color.Gray
                 )
-                Spacer(Modifier.width(6.dp))
 
-                if (items.isNotEmpty()) {
-                    Icon(
-                        if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = if (expanded) "Collapse" else "Expand",
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                } else {
-                    Spacer(Modifier.width(24.dp))
-                }
-
-                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(parseColor(task.color))))
-                Spacer(Modifier.width(8.dp))
-
-                Column(modifier = Modifier.weight(1f).clickable { onTaskClick() }) {
-                    Text(
-                        text = task.title,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
-                        textDecoration = if (isDoneStatus(task.status)) TextDecoration.LineThrough else null
-                    )
-                    val assignedList = task.getAllAssignedEmails()
-                    val subtitle = buildString {
-                        append(task.status)
-                        if (assignedList.isNotEmpty()) append("  -  " + assignedList.joinToString(", ") { userMap[it] ?: it })
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { if (items.isNotEmpty()) expanded = !expanded }
+                        .padding(end = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (items.isNotEmpty()) {
+                        Icon(
+                            if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = if (expanded) "Collapse" else "Expand",
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    } else {
+                        Spacer(Modifier.width(24.dp))
                     }
-                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                }
 
-                if (items.isNotEmpty()) {
+                    Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(parseColor(task.color))))
                     Spacer(Modifier.width(8.dp))
-                    Text("$doneCount/${items.size}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                    Spacer(Modifier.width(8.dp))
+
+                    // Nested inside the expand-toggle Row above, but that's fine - two plain
+                    // clickable{} modifiers compose correctly (the inner one claims taps within
+                    // its own bounds, the outer handles the rest). It's only a clickable ancestor
+                    // wrapping the drag handle's custom gesture detector that breaks, which this
+                    // Column isn't.
+                    Column(modifier = Modifier.weight(1f).clickable { onTaskClick() }) {
+                        Text(
+                            text = task.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            textDecoration = if (isDoneStatus(task.status)) TextDecoration.LineThrough else null
+                        )
+                        val assignedList = task.getAllAssignedEmails()
+                        val subtitle = buildString {
+                            append(task.status)
+                            if (assignedList.isNotEmpty()) append("  -  " + assignedList.joinToString(", ") { userMap[it] ?: it })
+                        }
+                        Text(subtitle, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    }
+
+                    if (items.isNotEmpty()) {
+                        Spacer(Modifier.width(8.dp))
+                        Text("$doneCount/${items.size}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(
+                        "$percent%",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (percent >= 100) Color(0xFF10B981) else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.width(44.dp),
+                        textAlign = TextAlign.End
+                    )
                 }
-                Text(
-                    "$percent%",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (percent >= 100) Color(0xFF10B981) else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.width(44.dp),
-                    textAlign = TextAlign.End
-                )
             }
 
             if (expanded) {
