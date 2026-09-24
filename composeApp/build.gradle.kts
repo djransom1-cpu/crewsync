@@ -166,7 +166,7 @@ compose.desktop {
             includeAllModules = true
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Crewsync" // Changed from com.djransom.crewsync
-            packageVersion = "1.0.7"
+            packageVersion = "1.0.8"
             description = "Construction Crew Management"
             copyright = "© 2026 Crewsync Team"
             vendor = "Crewsync"
