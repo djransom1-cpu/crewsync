@@ -20,15 +20,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -53,10 +56,11 @@ import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.toLocalDateTime
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlannerScreen(projectId: String, environmentId: String, projectBuckets: List<String>, projectMembers: List<String>) {
+fun PlannerScreen(projectId: String, environmentId: String, projectName: String, projectBuckets: List<String>, projectMembers: List<String>) {
     val firestore = Firebase.firestore
     val scope = rememberCoroutineScope()
 
@@ -69,6 +73,9 @@ fun PlannerScreen(projectId: String, environmentId: String, projectBuckets: List
     var pendingTaskId by remember { mutableStateOf<String?>(null) }
     var pendingSaveTask by remember { mutableStateOf<Task?>(null) }
     var pendingDeleteTaskId by remember { mutableStateOf<String?>(null) }
+    // rememberSaveable, not remember - matches selectedTab in ProjectDetailsScreen: a rotation
+    // shouldn't silently bounce the user from the outline view back to the board.
+    var viewMode by rememberSaveable { mutableStateOf("Board") }
 
     val tasksFlow = remember(projectId, environmentId) {
         if (environmentId.isEmpty()) return@remember kotlinx.coroutines.flow.flowOf(emptyList())
@@ -169,36 +176,63 @@ fun PlannerScreen(projectId: String, environmentId: String, projectBuckets: List
                 Spacer(Modifier.width(4.dp))
                 Text("Manage Buckets", fontSize = 12.sp)
             }
+            Spacer(Modifier.width(8.dp))
+            SegmentedButtonRow(viewMode = viewMode, onViewModeChange = { viewMode = it })
+            Spacer(Modifier.width(8.dp))
+            IconButton(onClick = { printPlannerOutline(projectName, projectBuckets, visibleTasks) }) {
+                Icon(Icons.Default.Send, contentDescription = "Print Planner")
+            }
         }
 
         Box(modifier = Modifier.weight(1f)) {
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                items(projectBuckets) { bucketName ->
-                    val columnTasks = visibleTasks.filter { it.status == bucketName }
-                    PlannerColumn(
-                        title = bucketName,
-                        tasks = columnTasks,
-                        onTaskClick = { selectedTask = it },
-                        onMoveTask = { task, newStatus ->
-                            scope.launch {
-                                firestore.collection("tasks").document(task.id).update("status" to newStatus)
-                                if (newStatus == "In Progress") {
-                                    notifyTaskUpdate(
-                                        title = "Task In Progress",
-                                        message = "The task '${task.title}' has been moved to In Progress."
-                                    )
+            when (viewMode) {
+                "List" -> PlannerListView(
+                    buckets = projectBuckets,
+                    tasks = visibleTasks,
+                    userMap = userMap,
+                    onTaskClick = { selectedTask = it },
+                    onToggleChecklistItem = { task, groupId, itemId, checked ->
+                        val updatedGroups = task.checklistGroups.map { group ->
+                            if (group.id == groupId) {
+                                group.copy(items = group.items.map { item ->
+                                    if (item.id == itemId) item.copy(isDone = checked) else item
+                                })
+                            } else group
+                        }
+                        scope.launch {
+                            firestore.collection("tasks").document(task.id)
+                                .set(task.copy(checklistGroups = updatedGroups).toFirestoreMap())
+                        }
+                    }
+                )
+                else -> LazyRow(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                    contentPadding = PaddingValues(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    items(projectBuckets) { bucketName ->
+                        val columnTasks = visibleTasks.filter { it.status == bucketName }
+                        PlannerColumn(
+                            title = bucketName,
+                            tasks = columnTasks,
+                            onTaskClick = { selectedTask = it },
+                            onMoveTask = { task, newStatus ->
+                                scope.launch {
+                                    firestore.collection("tasks").document(task.id).update("status" to newStatus)
+                                    if (newStatus == "In Progress") {
+                                        notifyTaskUpdate(
+                                            title = "Task In Progress",
+                                            message = "The task '${task.title}' has been moved to In Progress."
+                                        )
+                                    }
                                 }
-                            }
-                        },
-                        allBuckets = projectBuckets,
-                        userMap = userMap
-                    )
+                            },
+                            allBuckets = projectBuckets,
+                            userMap = userMap
+                        )
+                    }
                 }
             }
 
@@ -535,13 +569,218 @@ fun TaskCard(
     }
 }
 
+@Composable
+fun SegmentedButtonRow(viewMode: String, onViewModeChange: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+    ) {
+        listOf("Board", "List").forEach { mode ->
+            val selected = viewMode == mode
+            Box(
+                modifier = Modifier
+                    .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                    .clickable { onViewModeChange(mode) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    mode,
+                    fontSize = 12.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+// The outline/list view: every task grouped by its status bucket, each expandable to show its
+// checklist items with interactive checkboxes right there (no need to open the task's edit
+// dialog just to check a step off) plus a completion percentage per task and overall.
+@Composable
+fun PlannerListView(
+    buckets: List<String>,
+    tasks: List<Task>,
+    userMap: Map<String, String>,
+    onTaskClick: (Task) -> Unit,
+    onToggleChecklistItem: (task: Task, groupId: String, itemId: String, checked: Boolean) -> Unit
+) {
+    val overallDone = tasks.count { isDoneStatus(it.status) }
+    val overallTotal = tasks.size
+    val overallProgress = if (overallTotal > 0) overallDone.toFloat() / overallTotal else 0f
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        item {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Overall Progress", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        "${(overallProgress * 100).roundToInt()}%  ($overallDone/$overallTotal tasks)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                LinearProgressIndicator(
+                    progress = { overallProgress },
+                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(50))
+                )
+            }
+        }
+
+        if (tasks.isEmpty()) {
+            item {
+                Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text("No task cards yet.", color = Color.Gray)
+                }
+            }
+        }
+
+        buckets.forEach { bucket ->
+            val bucketTasks = tasks.filter { it.status == bucket }
+            if (bucketTasks.isNotEmpty()) {
+                item(key = "bucket_$bucket") {
+                    Text(
+                        text = "$bucket (${bucketTasks.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+                items(bucketTasks, key = { it.id }) { task ->
+                    PlannerOutlineTaskRow(
+                        task = task,
+                        userMap = userMap,
+                        onTaskClick = { onTaskClick(task) },
+                        onToggleChecklistItem = { groupId, itemId, checked -> onToggleChecklistItem(task, groupId, itemId, checked) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PlannerOutlineTaskRow(
+    task: Task,
+    userMap: Map<String, String>,
+    onTaskClick: () -> Unit,
+    onToggleChecklistItem: (groupId: String, itemId: String, checked: Boolean) -> Unit
+) {
+    var expanded by remember(task.id) { mutableStateOf(false) }
+    val items = remember(task) { task.allChecklistItems() }
+    val doneCount = items.count { it.isDone }
+    val percent = remember(task) { taskCompletionPercent(task) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { if (items.isNotEmpty()) expanded = !expanded }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (items.isNotEmpty()) {
+                    Icon(
+                        if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = if (expanded) "Collapse" else "Expand",
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                } else {
+                    Spacer(Modifier.width(24.dp))
+                }
+
+                Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(Color(parseColor(task.color))))
+                Spacer(Modifier.width(8.dp))
+
+                Column(modifier = Modifier.weight(1f).clickable { onTaskClick() }) {
+                    Text(
+                        text = task.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        textDecoration = if (isDoneStatus(task.status)) TextDecoration.LineThrough else null
+                    )
+                    val assignedList = task.getAllAssignedEmails()
+                    val subtitle = buildString {
+                        append(task.status)
+                        if (assignedList.isNotEmpty()) append("  -  " + assignedList.joinToString(", ") { userMap[it] ?: it })
+                    }
+                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                }
+
+                if (items.isNotEmpty()) {
+                    Spacer(Modifier.width(8.dp))
+                    Text("$doneCount/${items.size}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    "$percent%",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (percent >= 100) Color(0xFF10B981) else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.width(44.dp),
+                    textAlign = TextAlign.End
+                )
+            }
+
+            if (expanded) {
+                Column(modifier = Modifier.padding(start = 44.dp, end = 12.dp, bottom = 8.dp)) {
+                    task.checklistGroups.forEach { group ->
+                        if (group.items.isNotEmpty()) {
+                            Text(
+                                group.title,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Gray,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                            group.items.forEach { item ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onToggleChecklistItem(group.id, item.id, !item.isDone) },
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = item.isDone,
+                                        onCheckedChange = { checked -> onToggleChecklistItem(group.id, item.id, checked) }
+                                    )
+                                    Text(
+                                        item.text,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        textDecoration = if (item.isDone) TextDecoration.LineThrough else null,
+                                        color = if (item.isDone) Color.Gray else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // A single pull-up view of every task card on the board, sorted so due-dated cards
 // lead (earliest due date first) and undated cards follow alphabetically, with
 // Done cards pushed to the bottom of the list regardless of due date - a clean
 // read on overall project progress without hunting across bucket columns.
-private val doneStatusSynonyms = setOf("done", "completed", "complete", "finished", "closed")
-private fun isDoneStatus(status: String) = status.trim().lowercase() in doneStatusSynonyms
-
+// (isDoneStatus lives in util/TaskUtils.kt - shared with PlannerListView's progress bar above.)
 @Composable
 fun ProjectSummaryDialog(tasks: List<Task>, onDismiss: () -> Unit, onTaskClick: (Task) -> Unit) {
     val now = remember { Clock.System.now().toEpochMilliseconds() }

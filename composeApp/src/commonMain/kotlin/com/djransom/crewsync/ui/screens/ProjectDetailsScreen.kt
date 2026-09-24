@@ -389,7 +389,7 @@ fun ProjectDetailsScreen(
                                 }
                             }
                         )
-                        4 -> PlannerScreen(projectId = projectId, environmentId = environmentId, projectBuckets = project!!.buckets, projectMembers = project!!.members)
+                        4 -> PlannerScreen(projectId = projectId, environmentId = environmentId, projectName = project!!.name, projectBuckets = project!!.buckets, projectMembers = project!!.members)
                         5 -> CalendarScreen(
                             projectId = projectId,
                             tasks = tasks,
