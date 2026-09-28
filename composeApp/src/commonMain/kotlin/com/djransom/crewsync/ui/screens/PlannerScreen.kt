@@ -226,7 +226,7 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                     },
                     onReorderTasks = ::persistTaskOrder,
                     onEditChecklist = { pendingChecklistEditId = it.id },
-                    onPrintTask = { printPlannerTask(projectName, it) }
+                    onPrintTask = { printPlannerTask(projectName, it, userMap) }
                 )
                 else -> LazyRow(
                     state = boardScrollState,
@@ -274,7 +274,7 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                             },
                             onReorderTasks = ::persistTaskOrder,
                             onEditChecklist = { pendingChecklistEditId = it.id },
-                            onPrintTask = { printPlannerTask(projectName, it) },
+                            onPrintTask = { printPlannerTask(projectName, it, userMap) },
                             allBuckets = projectBuckets,
                             userMap = userMap
                         )
@@ -441,7 +441,7 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                 selectedTask = null
                 pendingDeleteTaskId = taskId
             },
-            onPrint = { printPlannerTask(projectName, it) }
+            onPrint = { printPlannerTask(projectName, it, userMap) }
         )
     }
 

@@ -18,16 +18,25 @@ data class PlannerPrintLine(
 fun plannerPrintHeading(projectName: String, detailed: Boolean): String =
     "${projectName.ifBlank { "Project" }} - ${if (detailed) "Task Card" else "Task Planner"}"
 
-/** Prints one task card on its own: its bucket, description, dates and every checklist (with
- * each named checklist's title) - the full-board print only lists the steps. */
-fun printPlannerTask(projectName: String, task: Task) =
-    printPlannerOutline(projectName, listOf(task.status), listOf(task), detailed = true)
+/** Prints one task card on its own: its bucket, description, assigned crew, dates and every
+ * checklist (with each named checklist's title) - the full-board print only lists the steps.
+ *
+ * [userMap] (email -> display name) resolves the assignees to names. The printed copy of the
+ * task carries those names in place of the emails, so the platform print code doesn't need a
+ * separate lookup - it's never saved back. */
+fun printPlannerTask(projectName: String, task: Task, userMap: Map<String, String>) {
+    val printTask = task.copy(
+        assignedTo = null,
+        assignedMembers = task.getAllAssignedEmails().map { userMap[it] ?: it }
+    )
+    printPlannerOutline(projectName, listOf(task.status), listOf(printTask), detailed = true)
+}
 
 // Shared by every platform's actual printPlannerOutline (see PrintUtils.kt), so "what goes on
 // the printed page" has exactly one implementation - each platform only decides how to lay these
 // lines out (PDF text on Desktop/Android, an HTML string on iOS/Web).
 //
-// detailed = true (single-task print) adds the description, start/due dates, and each checklist
+// detailed = true (single-task print) adds the description, assigned crew, start/due dates, and each checklist
 // group's title as its own sub-header above that group's items.
 fun buildPlannerPrintLines(buckets: List<String>, tasks: List<Task>, detailed: Boolean = false): List<PlannerPrintLine> {
     val lines = mutableListOf<PlannerPrintLine>()
@@ -46,6 +55,9 @@ fun buildPlannerPrintLines(buckets: List<String>, tasks: List<Task>, detailed: B
             lines += PlannerPrintLine(titleText, indent = 1, bold = true)
             if (detailed) {
                 wrapPrintText(task.description).forEach { lines += PlannerPrintLine(it, indent = 2) }
+                val assigned = task.getAllAssignedEmails()
+                wrapPrintText("Assigned: " + (if (assigned.isEmpty()) "Unassigned" else assigned.joinToString(", ")))
+                    .forEach { lines += PlannerPrintLine(it, indent = 2) }
                 val dates = listOfNotNull(
                     task.startDate?.let { "Start: ${formatDate(it)}" },
                     task.dueDate?.let { "Due: ${formatDate(it)}" }
