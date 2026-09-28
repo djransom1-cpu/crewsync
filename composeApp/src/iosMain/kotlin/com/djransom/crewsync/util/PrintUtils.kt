@@ -13,19 +13,19 @@ import platform.UIKit.UIPrintInteractionController
 // platforms take) - UIMarkupTextPrintFormatter handles page breaks itself from markup, which
 // is considerably less code than replicating Desktop/Android's manual line-by-page layout in
 // Core Graphics.
-actual fun printPlannerOutline(projectName: String, buckets: List<String>, tasks: List<Task>) {
+actual fun printPlannerOutline(projectName: String, buckets: List<String>, tasks: List<Task>, detailed: Boolean) {
     val printInfo = UIPrintInfo.printInfo()
     printInfo.outputType = UIPrintInfoOutputType.UIPrintInfoOutputGeneral
-    printInfo.jobName = "${projectName.ifBlank { "Project" }} Planner"
+    printInfo.jobName = plannerPrintHeading(projectName, detailed)
 
     val controller = UIPrintInteractionController.sharedPrintController() ?: return
     controller.printInfo = printInfo
-    controller.printFormatter = UIMarkupTextPrintFormatter(markupText = buildPlannerHtml(projectName, buckets, tasks))
+    controller.printFormatter = UIMarkupTextPrintFormatter(markupText = buildPlannerHtml(projectName, buckets, tasks, detailed))
     controller.presentAnimated(true, completionHandler = null)
 }
 
-private fun buildPlannerHtml(projectName: String, buckets: List<String>, tasks: List<Task>): String {
-    val lines = buildPlannerPrintLines(buckets, tasks)
+private fun buildPlannerHtml(projectName: String, buckets: List<String>, tasks: List<Task>, detailed: Boolean): String {
+    val lines = buildPlannerPrintLines(buckets, tasks, detailed)
     val formatter = NSDateFormatter().apply { dateStyle = NSDateFormatterStyle.NSDateFormatterMediumStyle }
     val dateStr = formatter.stringFromDate(NSDate())
 
@@ -39,15 +39,17 @@ private fun buildPlannerHtml(projectName: String, buckets: List<String>, tasks: 
                 val box = if (line.isChecked) "&#9745;" else "&#9744;"
                 body.append("<div style='margin-left:${marginLeft}px;font-size:14px;'>$box ${escapeHtml(line.text)}</div>")
             }
-            else ->
+            line.bold ->
                 body.append("<div style='margin-left:${marginLeft}px;font-weight:bold;font-size:15px;margin-top:6px;'>${escapeHtml(line.text)}</div>")
+            else ->
+                body.append("<div style='margin-left:${marginLeft}px;font-size:14px;color:#333;'>${escapeHtml(line.text)}</div>")
         }
     }
 
     return """
         <html>
         <body style="font-family: -apple-system, Helvetica, sans-serif;">
-        <h2 style="margin-bottom:0;">${escapeHtml(projectName.ifBlank { "Project" })} - Task Planner</h2>
+        <h2 style="margin-bottom:0;">${escapeHtml(plannerPrintHeading(projectName, detailed))}</h2>
         <div style="color:#666;font-size:12px;">Printed $dateStr</div>
         $body
         </body>

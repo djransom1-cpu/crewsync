@@ -14,12 +14,12 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 
-actual fun printPlannerOutline(projectName: String, buckets: List<String>, tasks: List<Task>) {
+actual fun printPlannerOutline(projectName: String, buckets: List<String>, tasks: List<Task>, detailed: Boolean) {
     CoroutineScope(Dispatchers.IO).launch {
         try {
             val file = File.createTempFile("crewsync_planner_", ".pdf")
             file.deleteOnExit()
-            renderPlannerPdf(projectName, buckets, tasks, file)
+            renderPlannerPdf(projectName, buckets, tasks, detailed, file)
 
             // Desktop.Action.PRINT depends on a "print" verb being registered for .pdf in the
             // OS shell, which isn't reliable across machines/PDF-handler configs and fails
@@ -37,8 +37,8 @@ actual fun printPlannerOutline(projectName: String, buckets: List<String>, tasks
     }
 }
 
-private fun renderPlannerPdf(projectName: String, buckets: List<String>, tasks: List<Task>, outFile: File) {
-    val lines = buildPlannerPrintLines(buckets, tasks)
+private fun renderPlannerPdf(projectName: String, buckets: List<String>, tasks: List<Task>, detailed: Boolean, outFile: File) {
+    val lines = buildPlannerPrintLines(buckets, tasks, detailed)
     val pageHeight = PDRectangle.LETTER.height
     val margin = 50f
     val bodyFontSize = 11f
@@ -67,7 +67,7 @@ private fun renderPlannerPdf(projectName: String, buckets: List<String>, tasks: 
             stream.endText()
         }
 
-        drawLine("${projectName.ifBlank { "Project" }} - Task Planner", margin, 16f, PDType1Font.HELVETICA_BOLD)
+        drawLine(plannerPrintHeading(projectName, detailed), margin, 16f, PDType1Font.HELVETICA_BOLD)
         y -= 20f
         drawLine("Printed ${SimpleDateFormat("MMM d, yyyy").format(Date())}", margin, 9f, PDType1Font.HELVETICA)
         y -= lineHeight * 1.5f

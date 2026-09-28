@@ -77,6 +77,8 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
     var pendingTaskId by remember { mutableStateOf<String?>(null) }
     var pendingSaveTask by remember { mutableStateOf<Task?>(null) }
     var pendingDeleteTaskId by remember { mutableStateOf<String?>(null) }
+    var checklistEditTask by remember { mutableStateOf<Task?>(null) }
+    var pendingChecklistEditId by remember { mutableStateOf<String?>(null) }
     // rememberSaveable, not remember - matches selectedTab in ProjectDetailsScreen: a rotation
     // shouldn't silently bounce the user from the outline view back to the board.
     var viewMode by rememberSaveable { mutableStateOf("Board") }
@@ -198,7 +200,7 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
             SegmentedButtonRow(viewMode = viewMode, onViewModeChange = { viewMode = it })
             Spacer(Modifier.width(8.dp))
             IconButton(onClick = { printPlannerOutline(projectName, projectBuckets, visibleTasks) }) {
-                Icon(Icons.Default.Send, contentDescription = "Print Planner")
+                Icon(Icons.Default.Print, contentDescription = "Print Planner")
             }
         }
 
@@ -222,7 +224,9 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                                 .set(task.copy(checklistGroups = updatedGroups).toFirestoreMap())
                         }
                     },
-                    onReorderTasks = ::persistTaskOrder
+                    onReorderTasks = ::persistTaskOrder,
+                    onEditChecklist = { pendingChecklistEditId = it.id },
+                    onPrintTask = { printPlannerTask(projectName, it) }
                 )
                 else -> LazyRow(
                     state = boardScrollState,
@@ -269,6 +273,8 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                                 }
                             },
                             onReorderTasks = ::persistTaskOrder,
+                            onEditChecklist = { pendingChecklistEditId = it.id },
+                            onPrintTask = { printPlannerTask(projectName, it) },
                             allBuckets = projectBuckets,
                             userMap = userMap
                         )
@@ -434,6 +440,29 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
             onDelete = { taskId ->
                 selectedTask = null
                 pendingDeleteTaskId = taskId
+            },
+            onPrint = { printPlannerTask(projectName, it) }
+        )
+    }
+
+    // Opened from a card/row dropdown menu - deferred one frame via pendingChecklistEditId for
+    // the same reason as pendingTaskId above (a popup closing and a dialog opening in the same
+    // click handler wedged the web target), and looked up fresh from `tasks` so the editor
+    // starts from the latest checklist state.
+    LaunchedEffect(pendingChecklistEditId) {
+        pendingChecklistEditId?.let { taskId ->
+            checklistEditTask = tasks.find { it.id == taskId }
+            pendingChecklistEditId = null
+        }
+    }
+
+    checklistEditTask?.let { task ->
+        ChecklistEditorDialog(
+            task = task,
+            onDismiss = { checklistEditTask = null },
+            onSave = { updatedTask ->
+                checklistEditTask = null
+                pendingSaveTask = updatedTask
             }
         )
     }
@@ -446,6 +475,8 @@ fun PlannerColumn(
     onTaskClick: (Task) -> Unit,
     onMoveTask: (Task, String) -> Unit,
     onReorderTasks: (List<Task>) -> Unit,
+    onEditChecklist: (Task) -> Unit,
+    onPrintTask: (Task) -> Unit,
     allBuckets: List<String>,
     userMap: Map<String, String>
 ) {
@@ -489,6 +520,8 @@ fun PlannerColumn(
                             task = task,
                             onClick = { onTaskClick(task) },
                             onMoveTask = { newStatus -> onMoveTask(task, newStatus) },
+                            onEditChecklist = { onEditChecklist(task) },
+                            onPrint = { onPrintTask(task) },
                             allBuckets = allBuckets,
                             userMap = userMap,
                             dragHandleModifier = dragHandleModifier
@@ -505,6 +538,8 @@ fun TaskCard(
     task: Task,
     onClick: () -> Unit,
     onMoveTask: (String) -> Unit,
+    onEditChecklist: () -> Unit,
+    onPrint: () -> Unit,
     allBuckets: List<String>,
     userMap: Map<String, String>,
     dragHandleModifier: Modifier = Modifier
@@ -539,16 +574,34 @@ fun TaskCard(
                         onClick = { showMenu = true },
                         modifier = Modifier.size(24.dp)
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Move", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.MoreVert, contentDescription = "Card actions", modifier = Modifier.size(16.dp))
                     }
 
                     DropdownMenu(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text("Edit Checklist") },
+                            leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            onClick = {
+                                showMenu = false
+                                onEditChecklist()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Print Task") },
+                            leadingIcon = { Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            onClick = {
+                                showMenu = false
+                                onPrint()
+                            }
+                        )
+                        HorizontalDivider()
                         allBuckets.filter { it != task.status }.forEach { targetBucket ->
                             DropdownMenuItem(
                                 text = { Text("Move to $targetBucket") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp)) },
                                 onClick = {
                                     showMenu = false
                                     onMoveTask(targetBucket)
@@ -659,7 +712,9 @@ fun PlannerListView(
     userMap: Map<String, String>,
     onTaskClick: (Task) -> Unit,
     onToggleChecklistItem: (task: Task, groupId: String, itemId: String, checked: Boolean) -> Unit,
-    onReorderTasks: (List<Task>) -> Unit
+    onReorderTasks: (List<Task>) -> Unit,
+    onEditChecklist: (Task) -> Unit,
+    onPrintTask: (Task) -> Unit
 ) {
     val overallDone = tasks.count { isDoneStatus(it.status) }
     val overallTotal = tasks.size
@@ -725,6 +780,8 @@ fun PlannerListView(
                             userMap = userMap,
                             onTaskClick = { onTaskClick(task) },
                             onToggleChecklistItem = { groupId, itemId, checked -> onToggleChecklistItem(task, groupId, itemId, checked) },
+                            onEditChecklist = { onEditChecklist(task) },
+                            onPrint = { onPrintTask(task) },
                             dragHandleModifier = dragHandleModifier
                         )
                     }
@@ -740,9 +797,12 @@ fun PlannerOutlineTaskRow(
     userMap: Map<String, String>,
     onTaskClick: () -> Unit,
     onToggleChecklistItem: (groupId: String, itemId: String, checked: Boolean) -> Unit,
+    onEditChecklist: () -> Unit,
+    onPrint: () -> Unit,
     dragHandleModifier: Modifier = Modifier
 ) {
     var expanded by remember(task.id) { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
     val items = remember(task) { task.allChecklistItems() }
     val doneCount = items.count { it.isDone }
     val percent = remember(task) { taskCompletionPercent(task) }
@@ -807,6 +867,29 @@ fun PlannerOutlineTaskRow(
                     modifier = Modifier.width(44.dp),
                     textAlign = TextAlign.End
                 )
+                Box {
+                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Task actions", modifier = Modifier.size(18.dp))
+                    }
+                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Edit Checklist") },
+                            leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            onClick = {
+                                showMenu = false
+                                onEditChecklist()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Print Task") },
+                            leadingIcon = { Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            onClick = {
+                                showMenu = false
+                                onPrint()
+                            }
+                        )
+                    }
+                }
             }
 
             if (expanded) {
@@ -1301,7 +1384,8 @@ fun TaskDetailsDialog(
     allBuckets: List<String>,
     onDismiss: () -> Unit,
     onSave: (Task) -> Unit,
-    onDelete: (String) -> Unit
+    onDelete: (String) -> Unit,
+    onPrint: (Task) -> Unit
 ) {
     var title by remember { mutableStateOf(task.title) }
     var description by remember { mutableStateOf(task.description) }
@@ -1309,8 +1393,6 @@ fun TaskDetailsDialog(
     var status by remember { mutableStateOf(task.status) }
     var selectedColor by remember { mutableStateOf(task.color) }
     var checklistGroups by remember { mutableStateOf(task.checklistGroups) }
-    var newGroupTitle by remember { mutableStateOf("") }
-    val newItemTextByGroup = remember { mutableStateMapOf<String, String>() }
     var attachments by remember { mutableStateOf(task.attachments) }
     var isUploadingPhoto by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -1346,9 +1428,30 @@ fun TaskDetailsDialog(
 
     val colors = listOf("#FFFFFF", "#FFCDD2", "#C8E6C9", "#BBDEFB", "#FFF9C4", "#E1BEE7", "#F5F5F5", "#212121", "#38BDF8", "#EF4444", "#F59E0B", "#10B981")
 
+    fun currentEdits(): Task = task.copy(
+        title = title,
+        description = description,
+        assignedTo = selectedMembers.firstOrNull(),
+        assignedMembers = selectedMembers,
+        status = status,
+        color = selectedColor,
+        startDate = startDate,
+        dueDate = dueDate,
+        checklistGroups = checklistGroups,
+        attachments = attachments
+    )
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Task Card Details & Site Photos", fontWeight = FontWeight.Bold) },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Task Card Details & Site Photos", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                // Prints what's in the dialog right now, unsaved edits included.
+                IconButton(onClick = { onPrint(currentEdits()) }) {
+                    Icon(Icons.Default.Print, contentDescription = "Print Task")
+                }
+            }
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
                 OutlinedTextField(
@@ -1431,131 +1534,8 @@ fun TaskDetailsDialog(
                     }
                 }
 
-                // Checklist Groups - a card can hold several named checklists (e.g. "Materials",
-                // "Safety"), each with its own drag-reorderable items.
                 HorizontalDivider()
-                val allChecklistItems = checklistGroups.flatMap { it.items }
-                Text(
-                    "Checklists (${allChecklistItems.count { it.isDone }}/${allChecklistItems.size} steps done):",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp
-                )
-
-                checklistGroups.forEach { group ->
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                OutlinedTextField(
-                                    value = group.title,
-                                    onValueChange = { newTitle ->
-                                        checklistGroups = checklistGroups.map { if (it.id == group.id) it.copy(title = newTitle) else it }
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = true,
-                                    textStyle = MaterialTheme.typography.labelLarge
-                                )
-                                Text(
-                                    "${group.items.count { it.isDone }}/${group.items.size}",
-                                    fontSize = 11.sp,
-                                    color = Color.Gray,
-                                    modifier = Modifier.padding(horizontal = 6.dp)
-                                )
-                                IconButton(onClick = {
-                                    checklistGroups = checklistGroups.filter { it.id != group.id }
-                                    newItemTextByGroup.remove(group.id)
-                                }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Remove Checklist \"${group.title}\"", tint = Color.Red, modifier = Modifier.size(18.dp))
-                                }
-                            }
-
-                            ReorderableColumn(
-                                items = group.items,
-                                onReorder = { reordered ->
-                                    checklistGroups = checklistGroups.map { if (it.id == group.id) it.copy(items = reordered) else it }
-                                }
-                            ) { item, dragHandleModifier ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Menu,
-                                        contentDescription = "Drag to reorder",
-                                        modifier = dragHandleModifier.size(18.dp),
-                                        tint = Color.Gray
-                                    )
-                                    Checkbox(
-                                        checked = item.isDone,
-                                        onCheckedChange = { isDone ->
-                                            val updatedItems = group.items.map { if (it.id == item.id) it.copy(isDone = isDone) else it }
-                                            checklistGroups = checklistGroups.map { if (it.id == group.id) it.copy(items = updatedItems) else it }
-                                        }
-                                    )
-                                    OutlinedTextField(
-                                        value = item.text,
-                                        onValueChange = { updatedText ->
-                                            val updatedItems = group.items.map { if (it.id == item.id) it.copy(text = updatedText) else it }
-                                            checklistGroups = checklistGroups.map { if (it.id == group.id) it.copy(items = updatedItems) else it }
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                        singleLine = false,
-                                        maxLines = 5
-                                    )
-                                    IconButton(onClick = {
-                                        val updatedItems = group.items.filter { it.id != item.id }
-                                        checklistGroups = checklistGroups.map { if (it.id == group.id) it.copy(items = updatedItems) else it }
-                                    }) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Remove Step", tint = Color.Red, modifier = Modifier.size(18.dp))
-                                    }
-                                }
-                            }
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                OutlinedTextField(
-                                    value = newItemTextByGroup[group.id] ?: "",
-                                    onValueChange = { newItemTextByGroup[group.id] = it },
-                                    label = { Text("Add Step") },
-                                    modifier = Modifier.weight(1f),
-                                    singleLine = false,
-                                    maxLines = 5
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Button(onClick = {
-                                    val text = (newItemTextByGroup[group.id] ?: "").trim()
-                                    if (text.isNotBlank()) {
-                                        val newItem = ChecklistItem(id = "chk_" + Clock.System.now().toEpochMilliseconds(), text = text, isDone = false)
-                                        checklistGroups = checklistGroups.map { if (it.id == group.id) it.copy(items = it.items + newItem) else it }
-                                        newItemTextByGroup[group.id] = ""
-                                    }
-                                }) { Text("Add") }
-                            }
-                        }
-                    }
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = newGroupTitle,
-                        onValueChange = { newGroupTitle = it },
-                        label = { Text("New Checklist Name (e.g. Materials, Safety)") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Button(onClick = {
-                        val title = newGroupTitle.trim().ifBlank { "Checklist ${checklistGroups.size + 1}" }
-                        checklistGroups = checklistGroups + ChecklistGroup(id = "chk_grp_" + Clock.System.now().toEpochMilliseconds(), title = title)
-                        newGroupTitle = ""
-                    }) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Add Checklist")
-                    }
-                }
+                ChecklistGroupsEditor(checklistGroups = checklistGroups, onChange = { checklistGroups = it })
 
                 // Site Photos & Attachments
                 HorizontalDivider()
@@ -1635,26 +1615,178 @@ fun TaskDetailsDialog(
             }
         },
         confirmButton = {
-            Button(onClick = {
-                val updated = task.copy(
-                    title = title,
-                    description = description,
-                    assignedTo = selectedMembers.firstOrNull(),
-                    assignedMembers = selectedMembers,
-                    status = status,
-                    color = selectedColor,
-                    startDate = startDate,
-                    dueDate = dueDate,
-                    checklistGroups = checklistGroups,
-                    attachments = attachments
-                )
-                onSave(updated)
-            }) { Text("Save Changes") }
+            Button(onClick = { onSave(currentEdits()) }) { Text("Save Changes") }
         },
         dismissButton = {
             TextButton(onClick = { onDelete(task.id) }, colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)) {
                 Text("Delete Card")
             }
+        }
+    )
+}
+
+// The named-checklist editor (rename/remove checklists, add/edit/remove/check/drag-reorder their
+// steps, add new checklists). Shared by TaskDetailsDialog and the standalone ChecklistEditorDialog
+// so both edit a card's checklists the same way; the caller owns the list and decides when to save.
+@Composable
+fun ChecklistGroupsEditor(checklistGroups: List<ChecklistGroup>, onChange: (List<ChecklistGroup>) -> Unit) {
+    var newGroupTitle by remember { mutableStateOf("") }
+    val newItemTextByGroup = remember { mutableStateMapOf<String, String>() }
+    // Callbacks below (drag-reorder especially) can outlive the composition that created them,
+    // so they read the latest list through this rather than the captured parameter.
+    val latestGroups by rememberUpdatedState(checklistGroups)
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        val allChecklistItems = checklistGroups.flatMap { it.items }
+        Text(
+            "Checklists (${allChecklistItems.count { it.isDone }}/${allChecklistItems.size} steps done):",
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp
+        )
+
+        checklistGroups.forEach { group ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = group.title,
+                            onValueChange = { newTitle ->
+                                onChange(latestGroups.map { if (it.id == group.id) it.copy(title = newTitle) else it })
+                            },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.labelLarge
+                        )
+                        Text(
+                            "${group.items.count { it.isDone }}/${group.items.size}",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(horizontal = 6.dp)
+                        )
+                        IconButton(onClick = {
+                            onChange(latestGroups.filter { it.id != group.id })
+                            newItemTextByGroup.remove(group.id)
+                        }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Remove Checklist \"${group.title}\"", tint = Color.Red, modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    ReorderableColumn(
+                        items = group.items,
+                        onReorder = { reordered ->
+                            onChange(latestGroups.map { if (it.id == group.id) it.copy(items = reordered) else it })
+                        }
+                    ) { item, dragHandleModifier ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Menu,
+                                contentDescription = "Drag to reorder",
+                                modifier = dragHandleModifier.size(18.dp),
+                                tint = Color.Gray
+                            )
+                            Checkbox(
+                                checked = item.isDone,
+                                onCheckedChange = { isDone ->
+                                    val updatedItems = group.items.map { if (it.id == item.id) it.copy(isDone = isDone) else it }
+                                    onChange(latestGroups.map { if (it.id == group.id) it.copy(items = updatedItems) else it })
+                                }
+                            )
+                            OutlinedTextField(
+                                value = item.text,
+                                onValueChange = { updatedText ->
+                                    val updatedItems = group.items.map { if (it.id == item.id) it.copy(text = updatedText) else it }
+                                    onChange(latestGroups.map { if (it.id == group.id) it.copy(items = updatedItems) else it })
+                                },
+                                modifier = Modifier.weight(1f),
+                                singleLine = false,
+                                maxLines = 5
+                            )
+                            IconButton(onClick = {
+                                val updatedItems = group.items.filter { it.id != item.id }
+                                onChange(latestGroups.map { if (it.id == group.id) it.copy(items = updatedItems) else it })
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Remove Step", tint = Color.Red, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = newItemTextByGroup[group.id] ?: "",
+                            onValueChange = { newItemTextByGroup[group.id] = it },
+                            label = { Text("Add Step") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = false,
+                            maxLines = 5
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Button(onClick = {
+                            val text = (newItemTextByGroup[group.id] ?: "").trim()
+                            if (text.isNotBlank()) {
+                                val newItem = ChecklistItem(id = "chk_" + Clock.System.now().toEpochMilliseconds(), text = text, isDone = false)
+                                onChange(latestGroups.map { if (it.id == group.id) it.copy(items = it.items + newItem) else it })
+                                newItemTextByGroup[group.id] = ""
+                            }
+                        }) { Text("Add") }
+                    }
+                }
+            }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = newGroupTitle,
+                onValueChange = { newGroupTitle = it },
+                label = { Text("New Checklist Name (e.g. Materials, Safety)") },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+            Spacer(Modifier.width(6.dp))
+            Button(onClick = {
+                val title = newGroupTitle.trim().ifBlank { "Checklist ${latestGroups.size + 1}" }
+                onChange(latestGroups + ChecklistGroup(id = "chk_grp_" + Clock.System.now().toEpochMilliseconds(), title = title))
+                newGroupTitle = ""
+            }) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Add Checklist")
+            }
+        }
+
+    }
+}
+
+// Opened from a card's menu (Board) or row menu (List) to edit just its checklists without going
+// through the full card-details dialog.
+@Composable
+fun ChecklistEditorDialog(task: Task, onDismiss: () -> Unit, onSave: (Task) -> Unit) {
+    var checklistGroups by remember(task.id) { mutableStateOf(task.checklistGroups) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("Edit Checklist", fontWeight = FontWeight.Bold)
+                Text(task.title, style = MaterialTheme.typography.bodyMedium, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                ChecklistGroupsEditor(checklistGroups = checklistGroups, onChange = { checklistGroups = it })
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSave(task.copy(checklistGroups = checklistGroups)) }) { Text("Save Checklist") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
 }
