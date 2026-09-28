@@ -513,7 +513,8 @@ fun PlannerColumn(
                 ReorderableColumn(
                     items = tasks,
                     onReorder = onReorderTasks,
-                    rowHeight = 120.dp
+                    rowHeight = 120.dp,
+                    itemKey = { it.id }
                 ) { task, dragHandleModifier ->
                     Box(modifier = Modifier.padding(bottom = 8.dp)) {
                         TaskCard(
@@ -773,7 +774,8 @@ fun PlannerListView(
                     ReorderableColumn(
                         items = bucketTasks,
                         onReorder = { reordered -> onReorderTasks(reordered) },
-                        rowHeight = 56.dp
+                        rowHeight = 56.dp,
+                        itemKey = { it.id }
                     ) { task, dragHandleModifier ->
                         PlannerOutlineTaskRow(
                             task = task,
@@ -1678,7 +1680,8 @@ fun ChecklistGroupsEditor(checklistGroups: List<ChecklistGroup>, onChange: (List
                         items = group.items,
                         onReorder = { reordered ->
                             onChange(latestGroups.map { if (it.id == group.id) it.copy(items = reordered) else it })
-                        }
+                        },
+                        itemKey = { it.id }
                     ) { item, dragHandleModifier ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
