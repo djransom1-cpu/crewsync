@@ -8,11 +8,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -38,12 +38,18 @@ import kotlin.math.roundToInt
  * separate tap action that would otherwise compete with the drag. Drag starts immediately on
  * pointer movement (no long-press gate): long-press detection was tried first but didn't
  * reliably continue past the initial grab with desktop mouse input.
+ *
+ * [itemKey] must return a stable identity for each item (e.g. its id) - NOT the item itself when
+ * the item's content can be edited in place. Keying on a data class that changes on every
+ * keystroke (a checklist step's text) tears down and rebuilds that row's TextField each time,
+ * dropping focus after a single character.
  */
 @Composable
 fun <T> ReorderableColumn(
     items: List<T>,
     onReorder: (List<T>) -> Unit,
     rowHeight: Dp = 48.dp,
+    itemKey: (T) -> Any = { it as Any },
     itemContent: @Composable (item: T, dragHandleModifier: Modifier) -> Unit
 ) {
     val density = LocalDensity.current
@@ -52,22 +58,34 @@ fun <T> ReorderableColumn(
     var draggingIndex by remember { mutableStateOf(-1) }
     var dragOffsetPx by remember { mutableStateOf(0f) }
     var localItems by remember { mutableStateOf(items) }
+    val currentItems by rememberUpdatedState(items)
+    // The [items] list a finished drag was committed against. Until the caller hands back a new
+    // list (e.g. the Firestore write round-trips), keep showing the dropped order instead of
+    // snapping back to the old one for a moment.
+    var committedAgainst by remember { mutableStateOf<List<T>?>(null) }
 
-    // Pick up external changes (add/remove/edit elsewhere) except mid-drag, where localItems
-    // is the source of truth until the drag finishes and onReorder commits it back up.
-    LaunchedEffect(items) {
-        if (draggingIndex == -1) localItems = items
+    // Outside a drag, render straight from [items] so in-place edits (typing into a row's
+    // TextField) show up in the same frame - lagging a frame behind via a LaunchedEffect copy
+    // made the field briefly revert to stale text on every keystroke. Mid-drag, localItems is
+    // the source of truth until the drag finishes and onReorder commits it back up.
+    val displayItems = when {
+        draggingIndex != -1 -> localItems
+        committedAgainst === items -> localItems
+        else -> items
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        localItems.forEachIndexed { index, item ->
-            // Keyed on the item itself, not the loop index - without this, a reorder mid-drag
+        displayItems.forEachIndexed { index, item ->
+            // Keyed on the item's stable identity (itemKey), not the loop index - without this, a reorder mid-drag
             // (localItems mutated in onDrag below) makes Compose reuse each positional slot for
             // whatever item now lands at that index instead of moving the existing node with its
             // data, tearing down and rebuilding the displaced rows' composables (losing their
             // remembered state and any in-flight styling) instead of smoothly repositioning them
             // - exactly the flicker/stutter on siblings seen during a drag.
-            key(item) {
+            key(itemKey(item)) {
+                // The drag gesture below is only restarted when this row's key changes, so it
+                // reads the row's current index through this rather than a stale capture.
+                val currentIndex by rememberUpdatedState(index)
                 val isDragging = index == draggingIndex
                 Box(
                     modifier = Modifier
@@ -82,10 +100,11 @@ fun <T> ReorderableColumn(
                             }
                         )
                 ) {
-                    val handleModifier = Modifier.pointerInput(item) {
+                    val handleModifier = Modifier.pointerInput(itemKey(item)) {
                         detectDragGestures(
                             onDragStart = { _ ->
-                                draggingIndex = index
+                                localItems = currentItems
+                                draggingIndex = currentIndex
                                 dragOffsetPx = 0f
                             },
                             onDrag = { change, delta ->
@@ -106,6 +125,7 @@ fun <T> ReorderableColumn(
                                 }
                             },
                             onDragEnd = {
+                                committedAgainst = currentItems
                                 draggingIndex = -1
                                 dragOffsetPx = 0f
                                 onReorder(localItems)
@@ -113,7 +133,7 @@ fun <T> ReorderableColumn(
                             onDragCancel = {
                                 draggingIndex = -1
                                 dragOffsetPx = 0f
-                                localItems = items
+                                localItems = currentItems
                             }
                         )
                     }

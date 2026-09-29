@@ -26,19 +26,19 @@ private const val PAGE_HEIGHT = 792
 private const val MARGIN = 50f
 private const val LINE_HEIGHT = 18f
 
-actual fun printPlannerOutline(projectName: String, buckets: List<String>, tasks: List<Task>) {
+actual fun printPlannerOutline(projectName: String, buckets: List<String>, tasks: List<Task>, detailed: Boolean) {
     val context = ContextHolder.context ?: return
     try {
-        val pdfBytes = renderPlannerPdfBytes(projectName, buckets, tasks)
+        val pdfBytes = renderPlannerPdfBytes(projectName, buckets, tasks, detailed)
         val printManager = context.getSystemService(Context.PRINT_SERVICE) as PrintManager
-        val jobName = "${projectName.ifBlank { "Project" }} Planner"
+        val jobName = plannerPrintHeading(projectName, detailed)
         printManager.print(jobName, PlannerPdfPrintAdapter(pdfBytes), PrintAttributes.Builder().build())
     } catch (_: Exception) {
     }
 }
 
-private fun renderPlannerPdfBytes(projectName: String, buckets: List<String>, tasks: List<Task>): ByteArray {
-    val lines = buildPlannerPrintLines(buckets, tasks)
+private fun renderPlannerPdfBytes(projectName: String, buckets: List<String>, tasks: List<Task>, detailed: Boolean): ByteArray {
+    val lines = buildPlannerPrintLines(buckets, tasks, detailed)
     val titlePaint = Paint().apply { textSize = 18f; isFakeBoldText = true; isAntiAlias = true }
     val subPaint = Paint().apply { textSize = 10f; color = android.graphics.Color.DKGRAY; isAntiAlias = true }
     val bodyPaint = Paint().apply { textSize = 11f; isAntiAlias = true }
@@ -51,7 +51,7 @@ private fun renderPlannerPdfBytes(projectName: String, buckets: List<String>, ta
     var canvas = page.canvas
     var y = MARGIN + titlePaint.textSize
 
-    canvas.drawText("${projectName.ifBlank { "Project" }} - Task Planner", MARGIN, y, titlePaint)
+    canvas.drawText(plannerPrintHeading(projectName, detailed), MARGIN, y, titlePaint)
     y += 20f
     canvas.drawText("Printed ${SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date())}", MARGIN, y, subPaint)
     y += LINE_HEIGHT * 1.5f
