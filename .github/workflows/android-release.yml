@@ -42,6 +42,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default is "tools platform-tools", but the legacy "tools" package no
+          # longer exists in current cmdline-tools (16.0+) - sdkmanager exits 1 on it and fails
+          # the job before the build starts.
+          packages: 'platform-tools'
 
       # composeApp has an externalNativeBuild.cmake step (built from src/androidMain/cpp) that
       # setup-android doesn't provision by default - without this, "Build release AAB" fails
