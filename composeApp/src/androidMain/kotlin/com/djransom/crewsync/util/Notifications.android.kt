@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -26,8 +27,8 @@ fun showInAppNotification(context: Context, title: String, message: String) {
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        val channel = NotificationChannel(ALERT_CHANNEL_ID, "Project Alerts", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "Critical site updates and project alerts"
+        val channel = NotificationChannel(ALERT_CHANNEL_ID, t("Project Alerts"), NotificationManager.IMPORTANCE_HIGH).apply {
+            description = t("Critical site updates and project alerts")
             enableLights(true)
             enableVibration(true)
         }
@@ -57,13 +58,13 @@ fun showChatNotification(context: Context, projectId: String, senderName: String
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        val channel = NotificationChannel(CHAT_CHANNEL_ID, "Crew Chat", NotificationManager.IMPORTANCE_DEFAULT).apply {
-            description = "New messages from your crew"
+        val channel = NotificationChannel(CHAT_CHANNEL_ID, t("Crew Chat"), NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = t("New messages from your crew")
         }
         notificationManager.createNotificationChannel(channel)
     }
 
-    val remoteInput = RemoteInput.Builder(KEY_TEXT_REPLY).setLabel("Reply...").build()
+    val remoteInput = RemoteInput.Builder(KEY_TEXT_REPLY).setLabel(t("Reply...")).build()
     val replyIntent = Intent(context, ChatReplyReceiver::class.java).apply {
         putExtra("projectId", projectId)
     }
@@ -77,7 +78,7 @@ fun showChatNotification(context: Context, projectId: String, senderName: String
 
     val action = NotificationCompat.Action.Builder(
         android.R.drawable.ic_menu_send,
-        "Reply",
+        t("Reply"),
         replyPendingIntent
     ).addRemoteInput(remoteInput).build()
 
@@ -88,7 +89,7 @@ fun showChatNotification(context: Context, projectId: String, senderName: String
         .setSmallIcon(android.R.drawable.stat_notify_chat)
         .setContentTitle(senderName)
         .setContentText(message)
-        .setSubText("Project: $projectId")
+        .setSubText(t("Project: {0}", projectId))
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setCategory(NotificationCompat.CATEGORY_MESSAGE)
         .setContentIntent(pendingIntent)

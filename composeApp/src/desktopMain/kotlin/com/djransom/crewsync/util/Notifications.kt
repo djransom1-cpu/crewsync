@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import java.awt.Image
 import java.awt.SystemTray
 import java.awt.Toolkit
@@ -40,7 +41,7 @@ actual fun notifyChatMessage(projectId: String, senderName: String, message: Str
     try {
         val icon = getOrCreateTrayIcon()
         if (icon != null) {
-            icon.displayMessage("Crew Chat - $senderName", message, MessageType.INFO)
+            icon.displayMessage(t("Crew Chat - {0}", senderName), message, MessageType.INFO)
         } else {
             println("CHAT NOTIFICATION: [$projectId] $senderName: $message")
         }

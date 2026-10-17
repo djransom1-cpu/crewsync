@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import platform.UserNotifications.*
 import kotlin.time.Clock
 
@@ -27,7 +28,7 @@ actual fun notifyTaskUpdate(title: String, message: String) {
 actual fun notifyChatMessage(projectId: String, senderName: String, message: String) {
     val content = UNMutableNotificationContent().apply {
         setTitle("New Message: $projectId")
-        setSubtitle("From: $senderName")
+        setSubtitle(t("From: {0}", senderName))
         setBody(message)
         setSound(UNNotificationSound.defaultSound)
     }

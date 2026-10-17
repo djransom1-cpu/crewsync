@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -41,7 +42,7 @@ fun DirectChatScreen(otherUserEmail: String, onBack: () -> Unit) {
                 title = { Text(otherUserEmail) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("Back"))
                     }
                 }
             )

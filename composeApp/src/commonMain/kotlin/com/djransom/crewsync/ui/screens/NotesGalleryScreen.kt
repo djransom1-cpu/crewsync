@@ -1,5 +1,7 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
+import com.djransom.crewsync.i18n.numericDate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -78,8 +80,8 @@ fun NotesGalleryScreen(
             ) {
                 Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(48.dp), tint = Color.Gray)
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("No notes yet.", style = MaterialTheme.typography.titleMedium)
-                Text("Tap + to add a sketch or note.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                Text(t("No notes yet."), style = MaterialTheme.typography.titleMedium)
+                Text(t("Tap + to add a sketch or note."), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
             }
         } else {
             LazyVerticalGrid(
@@ -103,7 +105,7 @@ fun NotesGalleryScreen(
             onClick = { showAddDialog = true },
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = "New Note")
+            Icon(Icons.Default.Add, contentDescription = t("New Note"))
         }
     }
 
@@ -131,8 +133,8 @@ fun NotesGalleryScreen(
     noteToDelete?.let { note ->
         AlertDialog(
             onDismissRequest = { noteToDelete = null },
-            title = { Text("Delete \"${note.title.ifBlank { "Untitled Note" }}\"?") },
-            text = { Text("This deletes the note and everything drawn on it. This can't be undone.") },
+            title = { Text(t("Delete \"{0}\"?", note.title.ifBlank { t("Untitled Note") })) },
+            text = { Text(t("This deletes the note and everything drawn on it. This can't be undone.")) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -145,10 +147,10 @@ fun NotesGalleryScreen(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) { Text("Delete") }
+                ) { Text(t("Delete")) }
             },
             dismissButton = {
-                TextButton(onClick = { noteToDelete = null }) { Text("Cancel") }
+                TextButton(onClick = { noteToDelete = null }) { Text(t("Cancel")) }
             }
         )
     }
@@ -164,12 +166,12 @@ fun NoteCard(note: Note, onClick: () -> Unit, onDelete: () -> Unit) {
         Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete Note", modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Delete, contentDescription = t("Delete Note"), modifier = Modifier.size(16.dp))
                 }
             }
             Spacer(modifier = Modifier.weight(1f))
             Text(
-                note.title.ifBlank { "Untitled Note" },
+                note.title.ifBlank { t("Untitled Note") },
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 maxLines = 2,
@@ -190,16 +192,16 @@ fun AddNoteDialog(onDismiss: () -> Unit, onConfirm: (title: String, colorHex: St
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New Note") },
+        title = { Text(t("New Note")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("Title (optional)") },
+                    label = { Text(t("Title (optional)")) },
                     modifier = Modifier.fillMaxWidth()
                 )
-                Text("Color", style = MaterialTheme.typography.labelMedium)
+                Text(t("Color"), style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     colors.forEach { hex ->
                         Box(
@@ -219,15 +221,15 @@ fun AddNoteDialog(onDismiss: () -> Unit, onConfirm: (title: String, colorHex: St
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(title, selectedColor) }) { Text("Create") }
+            Button(onClick = { onConfirm(title, selectedColor) }) { Text(t("Create")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
 
 private fun formatShortDateTime(timestamp: Long): String {
     val date = Instant.fromEpochMilliseconds(timestamp).toLocalDateTime(TimeZone.currentSystemDefault())
-    return "${date.monthNumber}/${date.dayOfMonth}"
+    return numericDate(date.monthNumber, date.dayOfMonth)
 }

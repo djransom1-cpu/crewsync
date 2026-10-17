@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import android.content.Context
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
@@ -53,7 +54,7 @@ private fun renderPlannerPdfBytes(projectName: String, buckets: List<String>, ta
 
     canvas.drawText(plannerPrintHeading(projectName, detailed), MARGIN, y, titlePaint)
     y += 20f
-    canvas.drawText("Printed ${SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date())}", MARGIN, y, subPaint)
+    canvas.drawText(t("Printed {0}", SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date())), MARGIN, y, subPaint)
     y += LINE_HEIGHT * 1.5f
 
     fun newPage() {

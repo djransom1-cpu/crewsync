@@ -38,6 +38,9 @@ import com.djransom.crewsync.util.toProjectSafe
 import androidx.savedstate.read
 import org.koin.core.context.GlobalContext
 import org.koin.core.context.startKoin
+import com.djransom.crewsync.i18n.I18n
+import com.djransom.crewsync.i18n.t
+import com.djransom.crewsync.util.rememberSettings
 
 sealed class Screen(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object Dashboard : Screen("dashboard", "Home", Icons.Default.Home)
@@ -49,6 +52,9 @@ sealed class Screen(val route: String, val label: String, val icon: androidx.com
 @Composable
 fun App() {
     var firebaseState by remember { mutableStateOf("loading") } 
+    // the language picked in About (or the device's language)
+    val appSettings = rememberSettings()
+    remember { I18n.init(appSettings.getString(I18n.SETTINGS_KEY, "")); true }
 
     LaunchedEffect(Unit) {
         try {
@@ -76,11 +82,11 @@ fun App() {
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("Database Error", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.error)
-                        Text("Check connection and retry.", textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Text(t("Database Error"), style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.error)
+                        Text(t("Check connection and retry."), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         Spacer(Modifier.height(24.dp))
                         Button(onClick = { firebaseState = "loading" }) {
-                            Text("Retry")
+                            Text(t("Retry"))
                         }
                     }
                 }
@@ -166,10 +172,10 @@ fun AppMainContent() {
                     }.forEach { broadcast ->
                         if (broadcast.timestamp > Clock.System.now().toEpochMilliseconds() - 10000) {
                             notifyTaskUpdate(
-                                title = "SITE ALERT: ${broadcast.title}",
+                                title = t("SITE ALERT: {0}", broadcast.title),
                                 message = broadcast.message
                             )
-                            snackbarHostState.showSnackbar("🚨 SITE ALERT: ${broadcast.title} - ${broadcast.message}")
+                            snackbarHostState.showSnackbar(t("🚨 SITE ALERT: {0} - {1}", broadcast.title, broadcast.message))
                         }
                     }
                 }
@@ -207,7 +213,7 @@ fun AppMainContent() {
                                         if (last != null && last.senderEmail.lowercase() != userEmail && last.timestamp > Clock.System.now().toEpochMilliseconds() - 8000) {
                                             val sender = last.senderEmail.substringBefore("@")
                                             notifyChatMessage(projId, sender, last.text)
-                                            snackbarHostState.showSnackbar("💬 Chat ($sender): ${last.text}")
+                                            snackbarHostState.showSnackbar(t("💬 Chat ({0}): {1}", sender, last.text))
                                         }
                                     }
                                 }
@@ -271,7 +277,7 @@ fun AppMainContent() {
                                     fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
                                 )
                                 Text(
-                                    "WEB DASHBOARD",
+                                    t("WEB DASHBOARD"),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -282,7 +288,7 @@ fun AppMainContent() {
                         items.forEach { screen ->
                             NavigationRailItem(
                                 icon = { Icon(screen.icon, contentDescription = screen.label) },
-                                label = { Text(screen.label) },
+                                label = { Text(t(screen.label)) },
                                 selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
                                 onClick = {
                                     navController.navigate(screen.route) {
@@ -370,7 +376,7 @@ fun AppMainContent() {
                         items.forEach { screen ->
                             NavigationBarItem(
                                 icon = { Icon(screen.icon, contentDescription = null) },
-                                label = { Text(screen.label) },
+                                label = { Text(t(screen.label)) },
                                 selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
                                 onClick = {
                                     navController.navigate(screen.route) {

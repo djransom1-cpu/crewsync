@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -40,10 +41,10 @@ fun BugReportsScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Bug Reports") },
+                title = { Text(t("Bug Reports")) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("Back"))
                     }
                 }
             )
@@ -51,7 +52,7 @@ fun BugReportsScreen(onBack: () -> Unit) {
     ) { padding ->
         if (reports.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("No bug reports found.")
+                Text(t("No bug reports found."))
             }
         } else {
             LazyColumn(
@@ -88,7 +89,7 @@ fun BugReportCard(report: Feedback, onDelete: () -> Unit) {
             ) {
                 Text(text = report.title, style = MaterialTheme.typography.titleMedium)
                 IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                    Icon(Icons.Default.Delete, contentDescription = t("Delete"), tint = MaterialTheme.colorScheme.error)
                 }
             }
             
@@ -102,8 +103,8 @@ fun BugReportCard(report: Feedback, onDelete: () -> Unit) {
             
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
-                    Text(text = "By: ${report.userEmail}", style = MaterialTheme.typography.labelSmall)
-                    Text(text = "Version: ${report.appVersion}", style = MaterialTheme.typography.labelSmall)
+                    Text(text = t("By: {0}", report.userEmail), style = MaterialTheme.typography.labelSmall)
+                    Text(text = t("Version: {0}", report.appVersion), style = MaterialTheme.typography.labelSmall)
                 }
                 Text(
                     text = formatTimestamp(report.timestamp),
@@ -116,7 +117,7 @@ fun BugReportCard(report: Feedback, onDelete: () -> Unit) {
 }
 
 private fun formatTimestamp(timestamp: Long): String {
-    if (timestamp == 0L) return "Unknown"
+    if (timestamp == 0L) return t("Unknown")
     val instant = Instant.fromEpochMilliseconds(timestamp)
     val date = instant.toLocalDateTime(TimeZone.currentSystemDefault())
     return "${date.monthNumber}/${date.dayOfMonth} ${date.hour}:${date.minute.toString().padStart(2, '0')}"

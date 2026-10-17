@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -140,13 +141,13 @@ fun ContactsScreen() {
     Scaffold(
         topBar = {
             Column {
-                TopAppBar(title = { Text("Master Contacts") })
+                TopAppBar(title = { Text(t("Master Contacts")) })
                 PrimaryTabRow(selectedTabIndex = selectedTab) {
                     tabs.forEachIndexed { index, title ->
                         Tab(
                             selected = selectedTab == index,
                             onClick = { selectedTab = index },
-                            text = { Text(title) }
+                            text = { Text(t(title)) }
                         )
                     }
                 }
@@ -156,7 +157,7 @@ fun ContactsScreen() {
             if (isAdmin) {
                 if (selectedTab == 0 && isSuperAdmin) {
                     FloatingActionButton(onClick = { showAddUserDialog = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add User")
+                        Icon(Icons.Default.Add, contentDescription = t("Add User"))
                     }
                 } else if (selectedTab != 0) {
                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -164,19 +165,19 @@ fun ContactsScreen() {
                             onClick = { cardScanCameraLauncher() },
                             containerColor = MaterialTheme.colorScheme.secondaryContainer
                         ) {
-                            Icon(Icons.Default.Info, contentDescription = "Scan Business Card")
+                            Icon(Icons.Default.Info, contentDescription = t("Scan Business Card"))
                         }
                         SmallFloatingActionButton(
                             onClick = { contactPickerLauncher() },
                             containerColor = MaterialTheme.colorScheme.secondaryContainer
                         ) {
-                            Icon(Icons.Default.Person, contentDescription = "Import from Phone")
+                            Icon(Icons.Default.Person, contentDescription = t("Import from Phone"))
                         }
                         FloatingActionButton(onClick = {
                             contactToEdit = null
                             showAddContactDialog = true
                         }) {
-                            Icon(Icons.Default.Add, contentDescription = "Add Contact")
+                            Icon(Icons.Default.Add, contentDescription = t("Add Contact"))
                         }
                     }
                 }
@@ -188,7 +189,7 @@ fun ContactsScreen() {
                 0 -> {
                     if (registeredUsers.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("No users found.")
+                            Text(t("No users found."))
                         }
                     } else {
                         LazyColumn(
@@ -218,7 +219,7 @@ fun ContactsScreen() {
                     
                     if (filtered.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("No contacts in this list.")
+                            Text(t("No contacts in this list."))
                         }
                     } else {
                         LazyColumn(
@@ -267,12 +268,12 @@ fun ContactsScreen() {
         if (isScanningCard) {
             AlertDialog(
                 onDismissRequest = {},
-                title = { Text("Scanning Business Card…") },
+                title = { Text(t("Scanning Business Card…")) },
                 text = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(16.dp))
-                        Text("Reading text from the photo. This can take a few seconds.")
+                        Text(t("Reading text from the photo. This can take a few seconds."))
                     }
                 },
                 confirmButton = {}
@@ -311,44 +312,44 @@ fun AddUserDialog(onDismiss: () -> Unit, onConfirm: (User) -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Invite User to Crewsync") },
+        title = { Text(t("Invite User to Crewsync")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
                 TextField(
                     value = email, 
                     onValueChange = { email = it }, 
-                    label = { Text("Email Address") }, 
+                    label = { Text(t("Email Address")) }, 
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = true)
                 )
                 TextField(
                     value = name, 
                     onValueChange = { name = it }, 
-                    label = { Text("Full Name") }, 
+                    label = { Text(t("Full Name")) }, 
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
                 )
                 TextField(
                     value = phone, 
                     onValueChange = { phone = it }, 
-                    label = { Text("Phone Number") }, 
+                    label = { Text(t("Phone Number")) }, 
                     modifier = Modifier.fillMaxWidth()
                 )
                 TextField(
                     value = trade, 
                     onValueChange = { trade = it }, 
-                    label = { Text("Trade/Skill") }, 
+                    label = { Text(t("Trade/Skill")) }, 
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
                 )
                 
                 Box {
                     OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Default Role: $role")
+                        Text(t("Default Role: {0}", t(role)))
                     }
                     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                        DropdownMenuItem(text = { Text("Member") }, onClick = { role = "Member"; expanded = false })
-                        DropdownMenuItem(text = { Text("Admin") }, onClick = { role = "Admin"; expanded = false })
+                        DropdownMenuItem(text = { Text(t("Member")) }, onClick = { role = "Member"; expanded = false })
+                        DropdownMenuItem(text = { Text(t("Admin")) }, onClick = { role = "Admin"; expanded = false })
                     }
                 }
             }
@@ -357,11 +358,11 @@ fun AddUserDialog(onDismiss: () -> Unit, onConfirm: (User) -> Unit) {
             Button(onClick = { 
                 onConfirm(User(email = email, name = name, phone = phone, trade = trade, role = role)) 
             }, enabled = email.isNotBlank()) {
-                Text("Add to Directory")
+                Text(t("Add to Directory"))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
@@ -413,28 +414,28 @@ fun UserCard(user: User, showAdminActions: Boolean, canManageAdmins: Boolean, cu
                     Text(text = user.email, style = MaterialTheme.typography.bodySmall)
                 }
                 if (user.trade.isNotEmpty()) {
-                    Text(text = "Trade: ${user.trade}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                    Text(text = t("Trade: {0}", user.trade), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                 }
-                Text(text = "Role: ${user.role}", style = MaterialTheme.typography.labelSmall)
+                Text(text = t("Role: {0}", t(user.role)), style = MaterialTheme.typography.labelSmall)
             }
             if (showAdminActions && user.email != currentUserEmail) {
                 if (user.role == "Member") {
                     TextButton(onClick = { onRoleChange("Admin") }) {
-                        Text("Make Admin")
+                        Text(t("Make Admin"))
                     }
                 } else if (user.role == "Admin" && canManageAdmins) {
                     TextButton(onClick = { onRoleChange("Member") }) {
-                        Text("Make Member")
+                        Text(t("Make Member"))
                     }
                 }
             }
             if (user.phone.isNotEmpty()) {
                 IconButton(onClick = { makePhoneCall(user.phone) }) {
-                    Icon(Icons.Default.Phone, contentDescription = "Call", tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.Phone, contentDescription = t("Call"), tint = MaterialTheme.colorScheme.primary)
                 }
             }
             IconButton(onClick = { sendEmail(user.email) }) {
-                Icon(Icons.Default.Email, contentDescription = "Email", tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Default.Email, contentDescription = t("Email"), tint = MaterialTheme.colorScheme.primary)
             }
         }
     }
@@ -462,10 +463,10 @@ fun ContactCard(contact: Contact, showAdminActions: Boolean, onDelete: () -> Uni
                 Row {
                     if (showAdminActions) {
                         IconButton(onClick = onEdit) {
-                            Icon(Icons.Default.Edit, contentDescription = "Edit")
+                            Icon(Icons.Default.Edit, contentDescription = t("Edit"))
                         }
                         IconButton(onClick = onDelete) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Default.Delete, contentDescription = t("Delete"), tint = MaterialTheme.colorScheme.error)
                         }
                     }
                     Icon(
@@ -483,13 +484,13 @@ fun ContactCard(contact: Contact, showAdminActions: Boolean, onDelete: () -> Uni
                 // Emails
                 ContactInfoRow(Icons.Default.Email, contact.email) { onEmail(contact.email) }
                 if (contact.secondaryEmail.isNotEmpty()) {
-                    ContactInfoRow(Icons.Default.Email, contact.secondaryEmail, label = "Secondary") { onEmail(contact.secondaryEmail) }
+                    ContactInfoRow(Icons.Default.Email, contact.secondaryEmail, label = t("Secondary")) { onEmail(contact.secondaryEmail) }
                 }
 
                 // Phones
                 ContactInfoRow(Icons.Default.Phone, contact.phone) { onCall(contact.phone) }
                 if (contact.secondaryPhone.isNotEmpty()) {
-                    ContactInfoRow(Icons.Default.Phone, contact.secondaryPhone, label = "Secondary") { onCall(contact.secondaryPhone) }
+                    ContactInfoRow(Icons.Default.Phone, contact.secondaryPhone, label = t("Secondary")) { onCall(contact.secondaryPhone) }
                 }
 
                 // Address
@@ -500,7 +501,7 @@ fun ContactCard(contact: Contact, showAdminActions: Boolean, onDelete: () -> Uni
                 // Notes
                 if (contact.notes.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
-                    Text("Notes:", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    Text(t("Notes:"), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     Text(contact.notes, style = MaterialTheme.typography.bodySmall)
                 }
             } else {
@@ -562,68 +563,68 @@ fun ContactDialog(contact: Contact?, activeEnvironmentId: String, defaultType: S
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (contact == null) "Add New Contact" else "Edit Contact") },
+        title = { Text(if (contact == null) t("Add New Contact") else t("Edit Contact")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
                 TextField(
                     value = name, 
                     onValueChange = { name = it }, 
-                    label = { Text("Full Name") }, 
+                    label = { Text(t("Full Name")) }, 
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
                 )
                 TextField(
                     value = jobTitle, 
                     onValueChange = { jobTitle = it }, 
-                    label = { Text("Job Title") }, 
+                    label = { Text(t("Job Title")) }, 
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
                 )
                 TextField(
                     value = company, 
                     onValueChange = { company = it }, 
-                    label = { Text("Company") }, 
+                    label = { Text(t("Company")) }, 
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
                 )
                 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                Text("Communication", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text(t("Communication"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 
                 TextField(
                     value = email, 
                     onValueChange = { email = it }, 
-                    label = { Text("Primary Email") }, 
+                    label = { Text(t("Primary Email")) }, 
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = true)
                 )
                 TextField(
                     value = secondaryEmail, 
                     onValueChange = { secondaryEmail = it }, 
-                    label = { Text("Secondary Email") }, 
+                    label = { Text(t("Secondary Email")) }, 
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(autoCorrectEnabled = true)
                 )
                 TextField(
                     value = phone, 
                     onValueChange = { phone = it }, 
-                    label = { Text("Primary Phone") }, 
+                    label = { Text(t("Primary Phone")) }, 
                     modifier = Modifier.fillMaxWidth()
                 )
                 TextField(
                     value = secondaryPhone, 
                     onValueChange = { secondaryPhone = it }, 
-                    label = { Text("Secondary Phone") }, 
+                    label = { Text(t("Secondary Phone")) }, 
                     modifier = Modifier.fillMaxWidth()
                 )
                 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                Text("Additional Details", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text(t("Additional Details"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 
                 TextField(
                     value = address, 
                     onValueChange = { address = it }, 
-                    label = { Text("Physical Address") }, 
+                    label = { Text(t("Physical Address")) }, 
                     modifier = Modifier.fillMaxWidth(), 
                     minLines = 2,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, autoCorrectEnabled = true)
@@ -631,7 +632,7 @@ fun ContactDialog(contact: Contact?, activeEnvironmentId: String, defaultType: S
                 TextField(
                     value = notes, 
                     onValueChange = { notes = it }, 
-                    label = { Text("Private Notes") }, 
+                    label = { Text(t("Private Notes")) }, 
                     modifier = Modifier.fillMaxWidth(), 
                     minLines = 3,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, autoCorrectEnabled = true)
@@ -639,10 +640,10 @@ fun ContactDialog(contact: Contact?, activeEnvironmentId: String, defaultType: S
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = type == "Company", onClick = { type = "Company" })
-                    Text("Company Internal")
+                    Text(t("Company Internal"))
                     Spacer(modifier = Modifier.width(16.dp))
                     RadioButton(selected = type == "Subcontractor", onClick = { type = "Subcontractor" })
-                    Text("Sub")
+                    Text(t("Sub"))
                 }
             }
         },
@@ -663,11 +664,11 @@ fun ContactDialog(contact: Contact?, activeEnvironmentId: String, defaultType: S
                     type = type
                 )) 
             }, enabled = name.isNotBlank() && email.isNotBlank()) {
-                Text(if (contact == null) "Add" else "Save")
+                Text(if (contact == null) t("Add") else t("Save"))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }

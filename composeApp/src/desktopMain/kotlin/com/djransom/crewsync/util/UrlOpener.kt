@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -67,7 +68,7 @@ actual fun shareFile(url: String, name: String) {
 }
 
 actual fun downloadFile(url: String, suggestedName: String) {
-    val fileDialog = FileDialog(null as Frame?, "Save File", FileDialog.SAVE)
+    val fileDialog = FileDialog(null as Frame?, t("Save File"), FileDialog.SAVE)
     fileDialog.file = suggestedName
     fileDialog.isVisible = true
     val dir = fileDialog.directory ?: return

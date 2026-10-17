@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.runtime.Composable
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.storage.Data
@@ -11,7 +12,7 @@ import java.io.File
 @Composable
 actual fun rememberFilePickerLauncher(onFilePicked: (PickedFile) -> Unit): () -> Unit {
     return {
-        val fileDialog = FileDialog(null as Frame?, "Select File", FileDialog.LOAD)
+        val fileDialog = FileDialog(null as Frame?, t("Select File"), FileDialog.LOAD)
         fileDialog.isVisible = true
         if (fileDialog.file != null) {
             val file = File(fileDialog.directory, fileDialog.file)

@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.runtime.Composable
 import platform.LocalAuthentication.LAContext
 import platform.LocalAuthentication.LAPolicyDeviceOwnerAuthenticationWithBiometrics
@@ -10,12 +11,12 @@ actual fun rememberBiometricAuthenticator(onAuthenticated: () -> Unit, onError: 
         val context = LAContext()
         context.evaluatePolicy(
             LAPolicyDeviceOwnerAuthenticationWithBiometrics,
-            localizedReason = "Log in to Crewsync"
+            localizedReason = t("Log in to Crewsync")
         ) { success, authError ->
             if (success) {
                 onAuthenticated()
             } else {
-                onError(authError?.localizedDescription ?: "Authentication failed")
+                onError(authError?.localizedDescription ?: t("Authentication failed"))
             }
         }
     }

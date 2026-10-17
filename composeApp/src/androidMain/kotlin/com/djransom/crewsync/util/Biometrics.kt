@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.runtime.Composable
@@ -32,9 +33,9 @@ actual fun rememberBiometricAuthenticator(onAuthenticated: () -> Unit, onError: 
 
     val promptInfo = remember {
         BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Biometric Login")
-            .setSubtitle("Log in using your fingerprint or face")
-            .setNegativeButtonText("Cancel")
+            .setTitle(t("Biometric Login"))
+            .setSubtitle(t("Log in using your fingerprint or face"))
+            .setNegativeButtonText(t("Cancel"))
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
             .build()
     }

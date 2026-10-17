@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.components
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -104,7 +105,7 @@ fun ChatTab(
                                     Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = msg.attachmentName ?: "Attachment",
+                                        text = msg.attachmentName ?: t("Attachment"),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.primary
                                     )
@@ -140,14 +141,14 @@ fun ChatTab(
                 Spacer(modifier = Modifier.width(16.dp))
             } else {
                 IconButton(onClick = { attachmentLauncher() }) {
-                    Icon(Icons.Default.Add, contentDescription = "Attach File")
+                    Icon(Icons.Default.Add, contentDescription = t("Attach File"))
                 }
             }
             TextField(
                 value = text,
                 onValueChange = { text = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Type a message...") }
+                placeholder = { Text(t("Type a message...")) }
             )
             IconButton(onClick = { 
                 if (text.isNotBlank()) {
@@ -155,7 +156,7 @@ fun ChatTab(
                     text = ""
                 }
             }) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = t("Send"))
             }
         }
     }

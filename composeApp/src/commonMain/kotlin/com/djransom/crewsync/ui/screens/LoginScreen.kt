@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,18 +26,18 @@ private fun friendlyAuthError(e: Exception, isRegistering: Boolean): String {
     val raw = e.message ?: ""
     return when {
         raw.contains("INVALID_LOGIN_CREDENTIALS") || raw.contains("INVALID_PASSWORD") || raw.contains("EMAIL_NOT_FOUND") ->
-            "Incorrect email or password. If you don't have an account yet, use \"Don't have an account? Sign Up\" below."
+            t("Incorrect email or password. If you don't have an account yet, use \"Don't have an account? Sign Up\" below.")
         raw.contains("EMAIL_EXISTS") ->
-            "An account with this email already exists - try logging in instead."
+            t("An account with this email already exists - try logging in instead.")
         raw.contains("WEAK_PASSWORD") ->
-            "That password is too weak - please use at least 6 characters."
+            t("That password is too weak - please use at least 6 characters.")
         raw.contains("INVALID_EMAIL") ->
-            "That doesn't look like a valid email address."
+            t("That doesn't look like a valid email address.")
         raw.contains("USER_DISABLED") ->
-            "This account has been disabled. Contact an admin for help."
+            t("This account has been disabled. Contact an admin for help.")
         raw.contains("TOO_MANY_ATTEMPTS_TRY_LATER") ->
-            "Too many failed attempts. Please wait a bit and try again."
-        else -> if (isRegistering) "Registration failed. Please try again." else "Login failed. Please try again."
+            t("Too many failed attempts. Please wait a bit and try again.")
+        else -> if (isRegistering) t("Registration failed. Please try again.") else t("Login failed. Please try again.")
     }
 }
 
@@ -83,7 +84,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
             verticalArrangement = Arrangement.Center
         ) {
         Text(
-            text = if (isRegistering) "Create Account" else "Crewsync",
+            text = if (isRegistering) t("Create Account") else "Crewsync",
             style = MaterialTheme.typography.headlineLarge,
             color = MaterialTheme.colorScheme.primary
         )
@@ -95,7 +96,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 email = it 
                 if (errorMessage != null) errorMessage = null
             },
-            label = { Text("Email") },
+            label = { Text(t("Email")) },
             modifier = Modifier.fillMaxWidth(),
             enabled = !isLoading,
             singleLine = true
@@ -108,7 +109,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 password = it 
                 if (errorMessage != null) errorMessage = null
             },
-            label = { Text("Password") },
+            label = { Text(t("Password")) },
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
             enabled = !isLoading,
@@ -120,8 +121,8 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
             TextField(
                 value = inviteCode,
                 onValueChange = { inviteCode = it },
-                label = { Text("Invite Code (optional)") },
-                placeholder = { Text("Have one? Enter it to join that environment") },
+                label = { Text(t("Invite Code (optional)")) },
+                placeholder = { Text(t("Have one? Enter it to join that environment")) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !isLoading,
                 singleLine = true
@@ -131,8 +132,8 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 TextField(
                     value = environmentName,
                     onValueChange = { environmentName = it },
-                    label = { Text("Name Your Environment") },
-                    placeholder = { Text("e.g. your company or family name") },
+                    label = { Text(t("Name Your Environment")) },
+                    placeholder = { Text(t("e.g. your company or family name")) },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading,
                     singleLine = true
@@ -149,7 +150,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 checked = rememberMe,
                 onCheckedChange = { rememberMe = it }
             )
-            Text("Remember Me")
+            Text(t("Remember Me"))
         }
 
         if (errorMessage != null) {
@@ -222,7 +223,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                                         User(uid = uid, email = cleanEmail, role = "Admin", environmentIds = listOf(newEnvId), activeEnvironmentId = newEnvId)
                                     )
                                     if (cleanCode.isNotEmpty()) {
-                                        errorMessage = "That invite code wasn't found, so we set you up with your own new environment instead."
+                                        errorMessage = t("That invite code wasn't found, so we set you up with your own new environment instead.")
                                     }
                                 }
                             }
@@ -254,7 +255,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                     strokeWidth = 2.dp
                 )
             } else {
-                Text(if (isRegistering) "Sign Up" else "Login")
+                Text(if (isRegistering) t("Sign Up") else t("Login"))
             }
         }
 
@@ -264,11 +265,11 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 horizontalArrangement = Arrangement.End
             ) {
                 TextButton(onClick = { showForgotPasswordDialog = true }) {
-                    Text("Forgot Password?")
+                    Text(t("Forgot Password?"))
                 }
             }
             TextButton(onClick = { biometricAuthenticator() }) {
-                Text("Login with Fingerprint")
+                Text(t("Login with Fingerprint"))
             }
         }
         
@@ -278,8 +279,8 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
             enabled = !isLoading
         ) {
             Text(
-                if (isRegistering) "Already have an account? Login" 
-                else "Don't have an account? Sign Up"
+                if (isRegistering) t("Already have an account? Login") 
+                else t("Don't have an account? Sign Up")
             )
         }
     }
@@ -292,15 +293,15 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         
         AlertDialog(
             onDismissRequest = { if (!isSending) showForgotPasswordDialog = false },
-            title = { Text("Reset Password") },
+            title = { Text(t("Reset Password")) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Enter your email address and we'll send you a link to reset your password.")
+                    Text(t("Enter your email address and we'll send you a link to reset your password."))
                     
                     TextField(
                         value = resetEmail,
                         onValueChange = { resetEmail = it },
-                        label = { Text("Email Address") },
+                        label = { Text(t("Email Address")) },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !isSending
                     )
@@ -322,13 +323,13 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                             dialogError = null
                             try {
                                 auth.sendPasswordResetEmail(resetEmail)
-                                successMessage = "Check your inbox! Reset link sent to $resetEmail"
+                                successMessage = t("Check your inbox! Reset link sent to {0}", resetEmail)
                                 showForgotPasswordDialog = false
                             } catch (e: Exception) {
                                 dialogError = if (e.message?.contains("EMAIL_NOT_FOUND") == true)
-                                    "No account found for that email address."
+                                    t("No account found for that email address.")
                                 else
-                                    "Failed to send reset email. Please try again."
+                                    t("Failed to send reset email. Please try again.")
                             } finally {
                                 isSending = false
                             }
@@ -337,7 +338,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                     enabled = !isSending && resetEmail.contains("@")
                 ) {
                     if (isSending) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    else Text("Send Reset Link")
+                    else Text(t("Send Reset Link"))
                 }
             },
             dismissButton = {
@@ -345,7 +346,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                     onClick = { showForgotPasswordDialog = false },
                     enabled = !isSending
                 ) {
-                    Text("Cancel")
+                    Text(t("Cancel"))
                 }
             }
         )

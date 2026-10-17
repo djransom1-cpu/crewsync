@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -255,19 +256,19 @@ fun MarkupScreen(
                 TopAppBar(
                     title = {
                         Column {
-                            Text(projectFile?.name ?: "Blueprint Redline", style = MaterialTheme.typography.titleMedium, maxLines = 1)
-                            Text("Scale: $scalePresetName", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                            Text(projectFile?.name ?: t("Blueprint Redline"), style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                            Text(t("Scale: {0}", t(scalePresetName)), fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
                         }
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("Back"))
                         }
                     },
                     actions = {
                         // Rotate Document
                         IconButton(onClick = { rotationDegrees = (rotationDegrees + 90f) % 360f }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Rotate 90°")
+                            Icon(Icons.Default.Refresh, contentDescription = t("Rotate 90°"))
                         }
                         // Export Redlined PDF - bakes every page's markups into a real PDF you
                         // can open outside the app; only available where a PDF is loaded and
@@ -302,13 +303,13 @@ fun MarkupScreen(
                                                     uploadedAt = Clock.System.now().toEpochMilliseconds()
                                                 )
                                                 firestore.collection("projects").document(projectId).collection("files").add(exportedFile.toFirestoreMap())
-                                                snackbarHostState.showSnackbar("Exported Redlined_$safeName")
+                                                snackbarHostState.showSnackbar(t("Exported Redlined_{0}", safeName))
                                             } else {
-                                                snackbarHostState.showSnackbar("PDF export isn't available on this platform yet")
+                                                snackbarHostState.showSnackbar(t("PDF export isn't available on this platform yet"))
                                             }
                                         } catch (e: Exception) {
                                             e.printStackTrace()
-                                            snackbarHostState.showSnackbar("Export failed: ${e.message ?: "unknown error"}")
+                                            snackbarHostState.showSnackbar(t("Export failed: {0}", e.message ?: t("unknown error")))
                                         } finally {
                                             isExporting = false
                                         }
@@ -316,22 +317,22 @@ fun MarkupScreen(
                                 }
                             ) {
                                 if (isExporting) CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                                else Icon(Icons.Default.DateRange, contentDescription = "Export Redlined PDF")
+                                else Icon(Icons.Default.DateRange, contentDescription = t("Export Redlined PDF"))
                             }
                         }
                         // Calibration Scale Button
                         IconButton(onClick = { showScaleDialog = true }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Scale")
+                            Icon(Icons.Default.Settings, contentDescription = t("Scale"))
                         }
                         // Undo Button
                         IconButton(onClick = { 
                             val lastOnPage = actions.findLast { it.pageIndex == currentPageIndex }
                             if (lastOnPage != null) actions.remove(lastOnPage)
                         }) {
-                            Icon(Icons.Default.Build, contentDescription = "Undo")
+                            Icon(Icons.Default.Build, contentDescription = t("Undo"))
                         }
                         TextButton(onClick = { actions.removeAll { it.pageIndex == currentPageIndex } }) {
-                            Text("Clear", color = MaterialTheme.colorScheme.error)
+                            Text(t("Clear"), color = MaterialTheme.colorScheme.error)
                         }
                     }
                 )
@@ -393,11 +394,11 @@ fun MarkupScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(onClick = { if (currentPageIndex > 0) currentPageIndex-- }, enabled = currentPageIndex > 0) {
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Prev Page")
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = t("Prev Page"))
                         }
-                        Text("Page ${currentPageIndex + 1} of ${pdfRenderer.pageCount}", style = MaterialTheme.typography.labelMedium)
+                        Text(t("Page {0} of {1}", currentPageIndex + 1, pdfRenderer.pageCount), style = MaterialTheme.typography.labelMedium)
                         IconButton(onClick = { if (currentPageIndex < pdfRenderer.pageCount - 1) currentPageIndex++ }, enabled = currentPageIndex < pdfRenderer.pageCount - 1) {
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next Page")
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = t("Next Page"))
                         }
                     }
                 }
@@ -407,7 +408,7 @@ fun MarkupScreen(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Size:", style = MaterialTheme.typography.labelSmall)
+                    Text(t("Size:"), style = MaterialTheme.typography.labelSmall)
                     Spacer(modifier = Modifier.width(6.dp))
                     listOf(3f, 8f, 16f, 28f).forEach { presetWidth ->
                         StrokeWidthButton(presetWidth, strokeWidth == presetWidth) { strokeWidth = presetWidth }
@@ -420,13 +421,13 @@ fun MarkupScreen(
                         modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
                     )
                     IconButton(onClick = { zoomScale = (zoomScale * 1.25f).coerceAtMost(5f) }) {
-                        Icon(Icons.Default.Add, contentDescription = "Zoom In")
+                        Icon(Icons.Default.Add, contentDescription = t("Zoom In"))
                     }
                     IconButton(onClick = { zoomScale = (zoomScale / 1.25f).coerceAtLeast(1f) }) {
-                        Icon(Icons.Default.Menu, contentDescription = "Zoom Out")
+                        Icon(Icons.Default.Menu, contentDescription = t("Zoom Out"))
                     }
                     IconButton(onClick = { zoomScale = 1f; zoomOffset = Offset.Zero; rotationDegrees = 0f }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Reset View")
+                        Icon(Icons.Default.Refresh, contentDescription = t("Reset View"))
                     }
                 }
             }
@@ -560,7 +561,7 @@ fun MarkupScreen(
                         onSaveSuccess()
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        scope.launch { snackbarHostState.showSnackbar("Save failed: ${e.message ?: "unknown error"}") }
+                        scope.launch { snackbarHostState.showSnackbar(t("Save failed: {0}", e.message ?: t("unknown error"))) }
                     } finally {
                         isSaving = false
                         suppressMarkupSync = false
@@ -568,7 +569,7 @@ fun MarkupScreen(
                 }
             }) {
                 if (isSaving) CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                else Icon(Icons.Default.Check, contentDescription = "Save Plan")
+                else Icon(Icons.Default.Check, contentDescription = t("Save Plan"))
             }
         }
     ) { padding ->
@@ -628,8 +629,8 @@ fun MarkupScreen(
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(Icons.Default.Build, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(48.dp))
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text("Architectural Blueprint Studio", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
-                                Text("Tap any tool at the top to draw redlines, add callouts, stamps & dimensions", color = Color.LightGray, fontSize = 12.sp)
+                                Text(t("Architectural Blueprint Studio"), fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                                Text(t("Tap any tool at the top to draw redlines, add callouts, stamps & dimensions"), color = Color.LightGray, fontSize = 12.sp)
                             }
                         }
                     }
@@ -899,11 +900,11 @@ fun MarkupScreen(
                             }
                             is MarkupAction.Stamp -> {
                                 val (bg, text) = when (action.stampType) {
-                                    "APPROVED" -> Color(0xFF2E7D32) to "APPROVED"
-                                    "REJECTED" -> Color(0xFFC62828) to "REJECTED"
-                                    "REVISED" -> Color(0xFFE65100) to "REVISED"
-                                    "PUNCH LIST" -> Color(0xFF6A1B9A) to "PUNCH LIST"
-                                    else -> Color(0xFF1565C0) to "FOR REVIEW"
+                                    "APPROVED" -> Color(0xFF2E7D32) to t("APPROVED")
+                                    "REJECTED" -> Color(0xFFC62828) to t("REJECTED")
+                                    "REVISED" -> Color(0xFFE65100) to t("REVISED")
+                                    "PUNCH LIST" -> Color(0xFF6A1B9A) to t("PUNCH LIST")
+                                    else -> Color(0xFF1565C0) to t("FOR REVIEW")
                                 }
                                 val currentAction by rememberUpdatedState(action)
                                 var dragOffset by remember { mutableStateOf(Offset.Zero) }
@@ -988,7 +989,7 @@ fun MarkupScreen(
         if (showStampMenu) {
             AlertDialog(
                 onDismissRequest = { showStampMenu = false },
-                title = { Text("Select Architectural Stamp") },
+                title = { Text(t("Select Architectural Stamp")) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("APPROVED", "REJECTED", "REVISED", "FOR REVIEW", "PUNCH LIST").forEach { stamp ->
@@ -1002,7 +1003,7 @@ fun MarkupScreen(
                                     containerColor = if (selectedStamp == stamp) MaterialTheme.colorScheme.primary else Color.LightGray
                                 )
                             ) {
-                                Text(stamp, fontWeight = FontWeight.Bold)
+                                Text(t(stamp), fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1015,7 +1016,7 @@ fun MarkupScreen(
         if (showScaleDialog) {
             AlertDialog(
                 onDismissRequest = { showScaleDialog = false },
-                title = { Text("Drawing Scale Calibration") },
+                title = { Text(t("Drawing Scale Calibration")) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
@@ -1025,10 +1026,10 @@ fun MarkupScreen(
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Calibrate by Drawing a Known Wall/Line", fontWeight = FontWeight.SemiBold)
+                            Text(t("Calibrate by Drawing a Known Wall/Line"), fontWeight = FontWeight.SemiBold)
                         }
                         HorizontalDivider()
-                        Text("Or select a standard architectural drawing scale:")
+                        Text(t("Or select a standard architectural drawing scale:"))
                         listOf(
                             "1/4\" = 1'-0\"" to 40.0,
                             "1/8\" = 1'-0\"" to 20.0,
@@ -1049,7 +1050,7 @@ fun MarkupScreen(
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = { showScaleDialog = false }) { Text("Close") }
+                    TextButton(onClick = { showScaleDialog = false }) { Text(t("Close")) }
                 }
             )
         }
@@ -1062,21 +1063,21 @@ fun MarkupScreen(
             var inchesInput by remember { mutableStateOf("") }
             AlertDialog(
                 onDismissRequest = { showCalibrationInputDialog = false },
-                title = { Text("Set Scale From Drawn Line") },
+                title = { Text(t("Set Scale From Drawn Line")) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Enter the real-world length of the line you just drew (e.g. a known wall):")
+                        Text(t("Enter the real-world length of the line you just drew (e.g. a known wall):"))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = feetInput,
                                 onValueChange = { feetInput = it.filter(Char::isDigit) },
-                                label = { Text("Feet") },
+                                label = { Text(t("Feet")) },
                                 modifier = Modifier.weight(1f)
                             )
                             OutlinedTextField(
                                 value = inchesInput,
                                 onValueChange = { inchesInput = it.filter(Char::isDigit) },
-                                label = { Text("Inches") },
+                                label = { Text(t("Inches")) },
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -1094,13 +1095,13 @@ fun MarkupScreen(
                             toolMode = "Pen"
                         },
                         enabled = (feetInput.toIntOrNull() ?: 0) > 0 || (inchesInput.toIntOrNull() ?: 0) > 0
-                    ) { Text("Set Scale") }
+                    ) { Text(t("Set Scale")) }
                 },
                 dismissButton = {
                     TextButton(onClick = {
                         showCalibrationInputDialog = false
                         toolMode = "Pen"
-                    }) { Text("Cancel") }
+                    }) { Text(t("Cancel")) }
                 }
             )
         }
@@ -1360,7 +1361,7 @@ fun ToolChip(label: String, selected: Boolean, icon: androidx.compose.ui.graphic
     FilterChip(
         selected = selected,
         onClick = onClick,
-        label = { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+        label = { Text(t(label), fontSize = 11.sp, fontWeight = FontWeight.Bold) },
         leadingIcon = { Icon(icon, contentDescription = label, modifier = Modifier.size(14.dp)) }
     )
 }
@@ -1412,30 +1413,30 @@ fun AddTextDialog(onDismiss: () -> Unit, onConfirm: (text: String, size: Float, 
     var transparent by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Plan Callout Note") },
+        title = { Text(t("Add Plan Callout Note")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it },
-                    label = { Text("Note / Callout Text") },
+                    label = { Text(t("Note / Callout Text")) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Column {
-                    Text("Text size: ${size.toInt()}sp", style = MaterialTheme.typography.labelMedium)
+                    Text(t("Text size: {0}sp", size.toInt()), style = MaterialTheme.typography.labelMedium)
                     Slider(value = size, onValueChange = { size = it }, valueRange = 10f..48f)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = transparent, onCheckedChange = { transparent = it })
-                    Text("Transparent background")
+                    Text(t("Transparent background"))
                 }
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(text, size, transparent) }) { Text("Add Callout") }
+            Button(onClick = { onConfirm(text, size, transparent) }) { Text(t("Add Callout")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }

@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -68,9 +69,9 @@ fun ProfileScreen() {
                 val url = uploadFile(path, pickedFile.platformFile)
                 profilePictureUrl = url
                 firestore.collection("users").document(uid).update("profilePictureUrl" to url)
-                snackbarHostState.showSnackbar("Profile picture uploaded!")
+                snackbarHostState.showSnackbar(t("Profile picture uploaded!"))
             } catch (e: Exception) {
-                snackbarHostState.showSnackbar("Failed to upload image: ${e.message}")
+                snackbarHostState.showSnackbar(t("Failed to upload image: {0}", e.message))
             } finally {
                 isUploading = false
             }
@@ -136,7 +137,7 @@ fun ProfileScreen() {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(title = { Text("My Profile") })
+            TopAppBar(title = { Text(t("My Profile")) })
         },
         floatingActionButton = {
             FloatingActionButton(onClick = {
@@ -158,10 +159,10 @@ fun ProfileScreen() {
                         firstDayOfWeek = firstDayOfWeek
                     )
                     firestore.collection("users").document(uid).set(updatedUser.toFirestoreMap())
-                    snackbarHostState.showSnackbar("Profile updated successfully!")
+                    snackbarHostState.showSnackbar(t("Profile updated successfully!"))
                 }
             }) {
-                Icon(Icons.Default.Check, contentDescription = "Save")
+                Icon(Icons.Default.Check, contentDescription = t("Save"))
             }
         }
     ) { padding ->
@@ -190,7 +191,7 @@ fun ProfileScreen() {
                     if (profilePictureUrl != null) {
                         AsyncImage(
                             model = profilePictureUrl,
-                            contentDescription = "Profile Picture",
+                            contentDescription = t("Profile Picture"),
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )
@@ -214,7 +215,7 @@ fun ProfileScreen() {
                         ) {
                             Icon(
                                 Icons.Default.Add,
-                                contentDescription = "Change Picture",
+                                contentDescription = t("Change Picture"),
                                 modifier = Modifier.size(20.dp),
                                 tint = MaterialTheme.colorScheme.onPrimary
                             )
@@ -229,7 +230,7 @@ fun ProfileScreen() {
                 )
                 
                 Text(
-                    text = "Role: $role",
+                    text = t("Role: {0}", t(role)),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.secondary
                 )
@@ -247,12 +248,12 @@ fun ProfileScreen() {
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f))
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Environment", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(currentEnvironment?.name?.ifBlank { "Unnamed Environment" } ?: "Loading…", style = MaterialTheme.typography.titleSmall)
+                        Text(t("Environment"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(currentEnvironment?.name?.ifBlank { t("Unnamed Environment") } ?: t("Loading…"), style = MaterialTheme.typography.titleSmall)
                         if (currentEnvironment != null) {
-                            Text("Invite code: ${currentEnvironment.id}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                            Text(t("Invite code: {0}", currentEnvironment.id), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                         }
-                        Text("Tap to switch, create, or join another", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(t("Tap to switch, create, or join another"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
@@ -279,23 +280,23 @@ fun ProfileScreen() {
                 TextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Full Name") },
+                    label = { Text(t("Full Name")) },
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 TextField(
                     value = phone,
                     onValueChange = { phone = it },
-                    label = { Text("Phone Number") },
+                    label = { Text(t("Phone Number")) },
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 TextField(
                     value = trade,
                     onValueChange = { trade = it },
-                    label = { Text("Trade/Skill") },
+                    label = { Text(t("Trade/Skill")) },
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("e.g. Lead Carpenter") }
+                    placeholder = { Text(t("e.g. Lead Carpenter")) }
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -303,21 +304,21 @@ fun ProfileScreen() {
                 
                 if (!showPasswordChange) {
                     TextButton(onClick = { showPasswordChange = true }) {
-                        Text("Change Password")
+                        Text(t("Change Password"))
                     }
                 } else {
-                    Text("Change Password", style = MaterialTheme.typography.titleMedium)
+                    Text(t("Change Password"), style = MaterialTheme.typography.titleMedium)
                     TextField(
                         value = newPassword,
                         onValueChange = { newPassword = it },
-                        label = { Text("New Password") },
+                        label = { Text(t("New Password")) },
                         modifier = Modifier.fillMaxWidth(),
                         visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
                     )
                     TextField(
                         value = confirmPassword,
                         onValueChange = { confirmPassword = it },
-                        label = { Text("Confirm New Password") },
+                        label = { Text(t("Confirm New Password")) },
                         modifier = Modifier.fillMaxWidth(),
                         visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
                     )
@@ -325,25 +326,25 @@ fun ProfileScreen() {
                         Button(
                             onClick = {
                                 if (newPassword.length < 6) {
-                                    scope.launch { snackbarHostState.showSnackbar("Password must be at least 6 characters") }
+                                    scope.launch { snackbarHostState.showSnackbar(t("Password must be at least 6 characters")) }
                                     return@Button
                                 }
                                 if (newPassword != confirmPassword) {
-                                    scope.launch { snackbarHostState.showSnackbar("Passwords do not match") }
+                                    scope.launch { snackbarHostState.showSnackbar(t("Passwords do not match")) }
                                     return@Button
                                 }
                                 scope.launch {
                                     try {
                                         auth.currentUser?.updatePassword(newPassword)
-                                        snackbarHostState.showSnackbar("Password updated successfully!")
+                                        snackbarHostState.showSnackbar(t("Password updated successfully!"))
                                         newPassword = ""
                                         confirmPassword = ""
                                         showPasswordChange = false
                                     } catch (e: Exception) {
                                         val msg = if (e.message?.contains("recent login") == true) {
-                                            "For security, please log out and log back in to change your password."
+                                            t("For security, please log out and log back in to change your password.")
                                         } else {
-                                            e.message ?: "Failed to update password"
+                                            e.message ?: t("Failed to update password")
                                         }
                                         snackbarHostState.showSnackbar(msg)
                                     }
@@ -351,14 +352,14 @@ fun ProfileScreen() {
                             },
                             enabled = newPassword.isNotEmpty() && confirmPassword.isNotEmpty()
                         ) {
-                            Text("Update Password")
+                            Text(t("Update Password"))
                         }
                         TextButton(onClick = { 
                             showPasswordChange = false 
                             newPassword = ""
                             confirmPassword = ""
                         }) {
-                            Text("Cancel")
+                            Text(t("Cancel"))
                         }
                     }
                 }

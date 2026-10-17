@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -102,10 +103,10 @@ fun NotepadScreen(projectId: String, noteId: String, noteTitle: String, onBack: 
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Notes")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("Back to Notes"))
                 }
                 Text(
-                    noteTitle.ifBlank { "Untitled Note" },
+                    noteTitle.ifBlank { t("Untitled Note") },
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -147,10 +148,10 @@ fun NotepadScreen(projectId: String, noteId: String, noteTitle: String, onBack: 
                         scope.launch { notepadColl.document(last.id).delete(); touchNote() }
                     }
                 }) {
-                    Icon(Icons.Default.Build, contentDescription = "Undo")
+                    Icon(Icons.Default.Build, contentDescription = t("Undo"))
                 }
                 TextButton(onClick = { showClearConfirm = true }) {
-                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                    Text(t("Clear"), color = MaterialTheme.colorScheme.error)
                 }
             }
             HorizontalDivider()
@@ -409,13 +410,13 @@ fun NotepadScreen(projectId: String, noteId: String, noteTitle: String, onBack: 
                     onClick = { zoomScale = (zoomScale * 1.25f).coerceAtMost(5f) },
                     modifier = Modifier.background(MaterialTheme.colorScheme.surface, CircleShape)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Zoom In")
+                    Icon(Icons.Default.Add, contentDescription = t("Zoom In"))
                 }
                 IconButton(
                     onClick = { zoomScale = (zoomScale / 1.25f).coerceAtLeast(1f); if (zoomScale <= 1f) zoomOffset = Offset.Zero },
                     modifier = Modifier.background(MaterialTheme.colorScheme.surface, CircleShape)
                 ) {
-                    Icon(Icons.Default.Menu, contentDescription = "Zoom Out")
+                    Icon(Icons.Default.Menu, contentDescription = t("Zoom Out"))
                 }
             }
         }
@@ -451,8 +452,8 @@ fun NotepadScreen(projectId: String, noteId: String, noteTitle: String, onBack: 
     if (showClearConfirm) {
         AlertDialog(
             onDismissRequest = { showClearConfirm = false },
-            title = { Text("Clear Note?") },
-            text = { Text("This erases everything drawn on this note for all project members. This can't be undone.") },
+            title = { Text(t("Clear Note?")) },
+            text = { Text(t("This erases everything drawn on this note for all project members. This can't be undone.")) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -461,10 +462,10 @@ fun NotepadScreen(projectId: String, noteId: String, noteTitle: String, onBack: 
                         showClearConfirm = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) { Text("Clear Everything") }
+                ) { Text(t("Clear Everything")) }
             },
             dismissButton = {
-                TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showClearConfirm = false }) { Text(t("Cancel")) }
             }
         )
     }
@@ -476,18 +477,18 @@ fun AddLinkDialog(onDismiss: () -> Unit, onConfirm: (label: String, url: String)
     var url by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Link") },
+        title = { Text(t("Add Link")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                TextField(value = url, onValueChange = { url = it }, label = { Text("URL") }, placeholder = { Text("e.g. airbnb.com/rooms/123") }, modifier = Modifier.fillMaxWidth())
-                TextField(value = label, onValueChange = { label = it }, label = { Text("Label (optional)") }, placeholder = { Text("e.g. Beach house listing") }, modifier = Modifier.fillMaxWidth())
+                TextField(value = url, onValueChange = { url = it }, label = { Text(t("URL")) }, placeholder = { Text(t("e.g. airbnb.com/rooms/123")) }, modifier = Modifier.fillMaxWidth())
+                TextField(value = label, onValueChange = { label = it }, label = { Text(t("Label (optional)")) }, placeholder = { Text(t("e.g. Beach house listing")) }, modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(label, url) }, enabled = url.isNotBlank()) { Text("Add Link") }
+            Button(onClick = { onConfirm(label, url) }, enabled = url.isNotBlank()) { Text(t("Add Link")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }

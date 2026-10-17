@@ -1,10 +1,11 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.runtime.Composable
 
 @Composable
 actual fun rememberBiometricAuthenticator(onAuthenticated: () -> Unit, onError: (String) -> Unit): () -> Unit {
-    return { onError("Biometrics not supported in browser.") }
+    return { onError(t("Biometrics not supported in browser.")) }
 }
 
 @Composable

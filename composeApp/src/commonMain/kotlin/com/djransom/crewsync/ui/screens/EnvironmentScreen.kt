@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -35,12 +36,12 @@ fun EnvironmentSwitcherRow(currentEnvironment: Environment?, onClick: () -> Unit
         Icon(Icons.Default.Home, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(6.dp))
         Text(
-            currentEnvironment?.name?.ifBlank { "Unnamed Environment" } ?: "Loading…",
+            currentEnvironment?.name?.ifBlank { t("Unnamed Environment") } ?: t("Loading…"),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
         )
-        Icon(Icons.Default.ArrowDropDown, contentDescription = "Switch Environment", tint = MaterialTheme.colorScheme.primary)
+        Icon(Icons.Default.ArrowDropDown, contentDescription = t("Switch Environment"), tint = MaterialTheme.colorScheme.primary)
     }
 }
 
@@ -86,21 +87,21 @@ fun EnvironmentSwitcherDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Your Environments") },
+        title = { Text(t("Your Environments")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (environments.isEmpty()) {
-                    Text("Loading…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(t("Loading…"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     environments.forEach { env ->
                         val isActive = env.id == userProfile.activeEnvironmentId
                         var showChangeCodeDialog by remember(env.id) { mutableStateOf(false) }
                         ListItem(
-                            headlineContent = { Text(env.name.ifBlank { "Unnamed Environment" }, fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal) },
+                            headlineContent = { Text(env.name.ifBlank { t("Unnamed Environment") }, fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal) },
                             supportingContent = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        if (copiedCodeId == env.id) "Copied!" else "Invite code: ${env.id}",
+                                        if (copiedCodeId == env.id) t("Copied!") else t("Invite code: {0}", env.id),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = if (copiedCodeId == env.id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -116,7 +117,7 @@ fun EnvironmentSwitcherDialog(
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                                         modifier = Modifier.height(24.dp)
                                     ) {
-                                        Text("Copy", style = MaterialTheme.typography.labelSmall)
+                                        Text(t("Copy"), style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                             },
@@ -124,10 +125,10 @@ fun EnvironmentSwitcherDialog(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     if (env.ownerId == userProfile.uid) {
                                         IconButton(onClick = { showChangeCodeDialog = true }, modifier = Modifier.size(32.dp)) {
-                                            Icon(Icons.Default.Edit, contentDescription = "Change Invite Code", modifier = Modifier.size(18.dp))
+                                            Icon(Icons.Default.Edit, contentDescription = t("Change Invite Code"), modifier = Modifier.size(18.dp))
                                         }
                                     }
-                                    if (isActive) Icon(Icons.Default.CheckCircle, contentDescription = "Current", tint = MaterialTheme.colorScheme.primary)
+                                    if (isActive) Icon(Icons.Default.CheckCircle, contentDescription = t("Current"), tint = MaterialTheme.colorScheme.primary)
                                 }
                             },
                             modifier = Modifier.clickable(enabled = !isActive) { onSwitch(env.id) }
@@ -145,7 +146,7 @@ fun EnvironmentSwitcherDialog(
                                             showChangeCodeDialog = false
                                             onSwitch(cleanNewCode)
                                         } catch (e: Exception) {
-                                            errorMessage = "Couldn't change code: ${e.message ?: "unknown error"}"
+                                            errorMessage = t("Couldn't change code: {0}", e.message ?: t("unknown error"))
                                             showChangeCodeDialog = false
                                         }
                                     }
@@ -162,18 +163,18 @@ fun EnvironmentSwitcherDialog(
                 OutlinedButton(onClick = { showCreateDialog = true }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Create New Environment")
+                    Text(t("Create New Environment"))
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(onClick = { showJoinDialog = true }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Join with Invite Code")
+                    Text(t("Join with Invite Code"))
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) { Text(t("Close")) }
         }
     )
 
@@ -188,7 +189,7 @@ fun EnvironmentSwitcherDialog(
                         val newId = if (requestedId.isNotEmpty()) {
                             val existing = firestore.collection("environments").document(requestedId).get()
                             if (existing.exists) {
-                                errorMessage = "That invite code is already taken - try another."
+                                errorMessage = t("That invite code is already taken - try another.")
                                 return@launch
                             }
                             requestedId
@@ -208,7 +209,7 @@ fun EnvironmentSwitcherDialog(
                         showCreateDialog = false
                         onCreated(newId)
                     } catch (e: Exception) {
-                        errorMessage = "Couldn't create environment: ${e.message ?: "unknown error"}"
+                        errorMessage = t("Couldn't create environment: {0}", e.message ?: t("unknown error"))
                     }
                 }
             }
@@ -225,7 +226,7 @@ fun EnvironmentSwitcherDialog(
                         val cleanCode = code.trim().uppercase().filter { it.isLetterOrDigit() }
                         val snap = firestore.collection("environments").document(cleanCode).get()
                         if (!snap.exists) {
-                            errorMessage = "No environment found for that invite code."
+                            errorMessage = t("No environment found for that invite code.")
                             return@launch
                         }
                         if (!userProfile.environmentIds.contains(cleanCode)) {
@@ -236,7 +237,7 @@ fun EnvironmentSwitcherDialog(
                         showJoinDialog = false
                         onJoined(cleanCode)
                     } catch (e: Exception) {
-                        errorMessage = "Couldn't join: ${e.message ?: "unknown error"}"
+                        errorMessage = t("Couldn't join: {0}", e.message ?: t("unknown error"))
                     }
                 }
             }
@@ -250,26 +251,26 @@ fun CreateEnvironmentDialog(onDismiss: () -> Unit, onConfirm: (name: String, cus
     var customCode by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Name Your Environment") },
+        title = { Text(t("Name Your Environment")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("This is a private workspace for your projects, team, and contacts - e.g. your company name, or a family/personal list.", style = MaterialTheme.typography.bodySmall)
-                TextField(value = name, onValueChange = { name = it }, label = { Text("Environment Name") }, modifier = Modifier.fillMaxWidth())
+                Text(t("This is a private workspace for your projects, team, and contacts - e.g. your company name, or a family/personal list."), style = MaterialTheme.typography.bodySmall)
+                TextField(value = name, onValueChange = { name = it }, label = { Text(t("Environment Name")) }, modifier = Modifier.fillMaxWidth())
                 TextField(
                     value = customCode,
                     onValueChange = { customCode = it },
-                    label = { Text("Invite Code (optional)") },
-                    placeholder = { Text("Leave blank for a random one") },
+                    label = { Text(t("Invite Code (optional)")) },
+                    placeholder = { Text(t("Leave blank for a random one")) },
                     modifier = Modifier.fillMaxWidth()
                 )
-                Text("This is what you'll share with people to invite them - pick something memorable, or leave it blank.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(t("This is what you'll share with people to invite them - pick something memorable, or leave it blank."), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(name.trim(), customCode) }, enabled = name.isNotBlank()) { Text("Create") }
+            Button(onClick = { onConfirm(name.trim(), customCode) }, enabled = name.isNotBlank()) { Text(t("Create")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
@@ -279,18 +280,18 @@ fun ChangeInviteCodeDialog(environment: Environment, onDismiss: () -> Unit, onCo
     var code by remember { mutableStateOf(environment.id) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Change Invite Code") },
+        title = { Text(t("Change Invite Code")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Anyone using the old code (\"${environment.id}\") won't be able to join with it anymore. Current members are unaffected.", style = MaterialTheme.typography.bodySmall)
-                TextField(value = code, onValueChange = { code = it }, label = { Text("New Invite Code") }, modifier = Modifier.fillMaxWidth())
+                Text(t("Anyone using the old code (\"{0}\") won't be able to join with it anymore. Current members are unaffected.", environment.id), style = MaterialTheme.typography.bodySmall)
+                TextField(value = code, onValueChange = { code = it }, label = { Text(t("New Invite Code")) }, modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(code) }, enabled = code.isNotBlank() && code.trim().uppercase() != environment.id) { Text("Change") }
+            Button(onClick = { onConfirm(code) }, enabled = code.isNotBlank() && code.trim().uppercase() != environment.id) { Text(t("Change")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
@@ -305,7 +306,7 @@ suspend fun changeEnvironmentInviteCode(environment: Environment, newCode: Strin
     val oldId = environment.id
 
     val existing = firestore.collection("environments").document(newCode).get()
-    if (existing.exists) throw Exception("That invite code is already taken - try another.")
+    if (existing.exists) throw Exception(t("That invite code is already taken - try another."))
 
     firestore.collection("environments").document(newCode).set(environment.copy(id = newCode))
 
@@ -333,18 +334,18 @@ fun JoinEnvironmentDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var code by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Join an Environment") },
+        title = { Text(t("Join an Environment")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Enter the invite code someone shared with you.", style = MaterialTheme.typography.bodySmall)
-                TextField(value = code, onValueChange = { code = it }, label = { Text("Invite Code") }, modifier = Modifier.fillMaxWidth())
+                Text(t("Enter the invite code someone shared with you."), style = MaterialTheme.typography.bodySmall)
+                TextField(value = code, onValueChange = { code = it }, label = { Text(t("Invite Code")) }, modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(code) }, enabled = code.isNotBlank()) { Text("Join") }
+            Button(onClick = { onConfirm(code) }, enabled = code.isNotBlank()) { Text(t("Join")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }

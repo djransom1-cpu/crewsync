@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import android.app.DownloadManager
 import android.content.Intent
 import android.net.Uri
@@ -16,7 +17,7 @@ actual fun openUrl(url: String) {
                 setDataAndType(Uri.parse(url), if (lowerUrl.contains(".pdf")) "application/pdf" else "image/*")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(Intent.createChooser(intent, "Open File With").apply {
+            context.startActivity(Intent.createChooser(intent, t("Open File With")).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
             return
@@ -51,7 +52,7 @@ actual fun shareFile(url: String, name: String) {
             putExtra(Intent.EXTRA_TEXT, url)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        context.startActivity(Intent.createChooser(intent, "Share $name").apply {
+        context.startActivity(Intent.createChooser(intent, t("Share {0}", name)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         })
     } catch (_: Exception) {}

@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import com.djransom.crewsync.data.model.Task
 import com.djransom.crewsync.ui.screens.formatDate
 
@@ -16,7 +17,7 @@ data class PlannerPrintLine(
 /** Page heading shared by every platform's print output - "Task Card" for a single-task
  * printout, "Task Planner" for the whole board. */
 fun plannerPrintHeading(projectName: String, detailed: Boolean): String =
-    "${projectName.ifBlank { "Project" }} - ${if (detailed) "Task Card" else "Task Planner"}"
+    "${projectName.ifBlank { t("Project") }} - ${if (detailed) t("Task Card") else t("Task Planner")}"
 
 /** Prints one task card on its own: its bucket, description, assigned crew, dates and every
  * checklist (with each named checklist's title) - the full-board print only lists the steps.
@@ -56,16 +57,16 @@ fun buildPlannerPrintLines(buckets: List<String>, tasks: List<Task>, detailed: B
             if (detailed) {
                 wrapPrintText(task.description).forEach { lines += PlannerPrintLine(it, indent = 2) }
                 val assigned = task.getAllAssignedEmails()
-                wrapPrintText("Assigned: " + (if (assigned.isEmpty()) "Unassigned" else assigned.joinToString(", ")))
+                wrapPrintText(t("Assigned: ") + (if (assigned.isEmpty()) t("Unassigned") else assigned.joinToString(", ")))
                     .forEach { lines += PlannerPrintLine(it, indent = 2) }
                 val dates = listOfNotNull(
-                    task.startDate?.let { "Start: ${formatDate(it)}" },
-                    task.dueDate?.let { "Due: ${formatDate(it)}" }
+                    task.startDate?.let { t("Start: {0}", formatDate(it)) },
+                    task.dueDate?.let { t("Due: {0}", formatDate(it)) }
                 )
                 if (dates.isNotEmpty()) lines += PlannerPrintLine(dates.joinToString("    "), indent = 2)
                 task.checklistGroups.filter { it.items.isNotEmpty() }.forEach { group ->
                     lines += PlannerPrintLine(
-                        "${group.title.ifBlank { "Checklist" }}   (${group.items.count { it.isDone }}/${group.items.size})",
+                        "${group.title.ifBlank { t("Checklist") }}   (${group.items.count { it.isDone }}/${group.items.size})",
                         indent = 2,
                         bold = true
                     )

@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import android.Manifest
 import android.content.pm.PackageManager
 import android.database.Cursor
@@ -61,7 +62,7 @@ actual fun rememberContactPickerLauncher(onContactPicked: (PickedContact) -> Uni
                     }
                 }
             } catch (e: Exception) {
-                Toast.makeText(context, "Error reading contact data. Please check permissions.", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, t("Error reading contact data. Please check permissions."), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -71,7 +72,7 @@ actual fun rememberContactPickerLauncher(onContactPicked: (PickedContact) -> Uni
         if (isGranted) {
             pickerLauncher.launch(null)
         } else {
-            Toast.makeText(context, "Contacts permission is required to import.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, t("Contacts permission is required to import."), Toast.LENGTH_SHORT).show()
         }
     }
 

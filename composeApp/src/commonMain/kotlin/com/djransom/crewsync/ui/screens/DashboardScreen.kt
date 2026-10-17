@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -194,10 +195,10 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Dashboard") },
+                title = { Text(t("Dashboard")) },
                 actions = {
                     IconButton(onClick = onLogout) {
-                        Icon(Icons.Default.ExitToApp, contentDescription = "Logout")
+                        Icon(Icons.Default.ExitToApp, contentDescription = t("Logout"))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -211,7 +212,7 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
         floatingActionButton = {
             if (isAdmin) {
                 FloatingActionButton(onClick = { showAddDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add Project")
+                    Icon(Icons.Default.Add, contentDescription = t("Add Project"))
                 }
             }
         }
@@ -234,7 +235,7 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                     ) {
                         Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                         Spacer(Modifier.width(8.dp))
-                        Text("You are offline. Showing cached data.", style = MaterialTheme.typography.labelSmall)
+                        Text(t("You are offline. Showing cached data."), style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -255,8 +256,8 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                         Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(12.dp))
                         Column {
-                            Text("New Version Available!", style = MaterialTheme.typography.labelLarge)
-                            Text("Click to download Version ${latestVersionInfo?.get("version")}", style = MaterialTheme.typography.bodySmall)
+                            Text(t("New Version Available!"), style = MaterialTheme.typography.labelLarge)
+                            Text(t("Click to download Version {0}", latestVersionInfo?.get("version")), style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -278,9 +279,9 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                         ?: userProfile?.email?.takeIf { it.isNotBlank() } 
                         ?: currentUserEmail.takeIf { it.isNotBlank() } 
                         ?: currentUser?.email?.takeIf { it.isNotBlank() } 
-                        ?: "User"
+                        ?: t("User")
                     Text(
-                        text = "Welcome, $displayName",
+                        text = t("Welcome, {0}", displayName),
                         style = MaterialTheme.typography.headlineMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -297,7 +298,7 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Active Projects",
+                    text = t("Active Projects"),
                     style = MaterialTheme.typography.headlineSmall
                 )
                 
@@ -309,7 +310,7 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                             firestore.collection("users").document(uid).update("dashboardViewMode" to "Cards")
                         }
                     }) {
-                        Icon(Icons.Default.Info, contentDescription = "Cards", tint = if (viewMode == "Cards") MaterialTheme.colorScheme.primary else LocalContentColor.current)
+                        Icon(Icons.Default.Info, contentDescription = t("Cards"), tint = if (viewMode == "Cards") MaterialTheme.colorScheme.primary else LocalContentColor.current)
                     }
                     IconButton(onClick = { 
                         scope.launch {
@@ -317,7 +318,7 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                             firestore.collection("users").document(uid).update("dashboardViewMode" to "List")
                         }
                     }) {
-                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "List", tint = if (viewMode == "List") MaterialTheme.colorScheme.primary else LocalContentColor.current)
+                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = t("List"), tint = if (viewMode == "List") MaterialTheme.colorScheme.primary else LocalContentColor.current)
                     }
                 }
             }
@@ -326,7 +327,7 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
 
             if (sortedProjects.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No projects assigned to you.")
+                    Text(t("No projects assigned to you."))
                 }
             } else {
                 LazyColumn(
@@ -394,11 +395,11 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f))
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text("System Overview", style = MaterialTheme.typography.titleSmall)
-                        Text("My Role on this device: ${userProfile?.role ?: "None"}", style = MaterialTheme.typography.bodySmall)
-                        Text("Projects arriving at device (Raw): $rawProjectsCount", style = MaterialTheme.typography.bodySmall)
-                        Text("Projects shown after filter: ${projects.size}", style = MaterialTheme.typography.bodySmall)
-                        Text("Total Registered Users: $allUsersCount", style = MaterialTheme.typography.bodySmall)
+                        Text(t("System Overview"), style = MaterialTheme.typography.titleSmall)
+                        Text(t("My Role on this device: {0}", userProfile?.role ?: t("None")), style = MaterialTheme.typography.bodySmall)
+                        Text(t("Projects arriving at device (Raw): {0}", rawProjectsCount), style = MaterialTheme.typography.bodySmall)
+                        Text(t("Projects shown after filter: {0}", projects.size), style = MaterialTheme.typography.bodySmall)
+                        Text(t("Total Registered Users: {0}", allUsersCount), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -467,12 +468,12 @@ fun ProjectCard(project: Project, isFirst: Boolean, isLast: Boolean, onClick: ()
                 Row {
                     if (!isFirst) {
                         IconButton(onClick = { onMove(-1) }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up")
+                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = t("Move Up"))
                         }
                     }
                     if (!isLast) {
                         IconButton(onClick = { onMove(1) }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down")
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = t("Move Down"))
                         }
                     }
                 }
@@ -495,7 +496,7 @@ fun ProjectCard(project: Project, isFirst: Boolean, isLast: Boolean, onClick: ()
                 Button(onClick = onClick) {
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Open Project Board")
+                    Text(t("Open Project Board"))
                 }
             }
         }
@@ -535,26 +536,26 @@ fun AddProjectDialog(onDismiss: () -> Unit, onConfirm: (String, String, String) 
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add New Project") },
+        title = { Text(t("Add New Project")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Project Name") },
+                    label = { Text(t("Project Name")) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 TextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Description") },
+                    label = { Text(t("Description")) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 TextField(
                     value = location,
                     onValueChange = { location = it },
-                    label = { Text("Job Site Address") },
-                    placeholder = { Text("e.g. 123 Main St, Nashville, TN 37201") },
+                    label = { Text(t("Job Site Address")) },
+                    placeholder = { Text(t("e.g. 123 Main St, Nashville, TN 37201")) },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -564,12 +565,12 @@ fun AddProjectDialog(onDismiss: () -> Unit, onConfirm: (String, String, String) 
                 onClick = { onConfirm(name, description, location) },
                 enabled = name.isNotBlank()
             ) {
-                Text("Add")
+                Text(t("Add"))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(t("Cancel"))
             }
         }
     )

@@ -1,5 +1,7 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
+import com.djransom.crewsync.i18n.numericDate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -62,7 +64,7 @@ fun ProjectHomeScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = if (project.location.isNotBlank()) "Project Dashboard • ${project.location}" else "Project Dashboard",
+                    text = if (project.location.isNotBlank()) t("Project Dashboard • {0}", project.location) else t("Project Dashboard"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -73,7 +75,7 @@ fun ProjectHomeScreen(
                 ).joinToString(" • ")
                 if (ownerLine.isNotBlank()) {
                     Text(
-                        text = "Owner: $ownerLine",
+                        text = t("Owner: {0}", ownerLine),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -86,7 +88,7 @@ fun ProjectHomeScreen(
             GridItemSpan(if (size == "Large") 2 else 1)
         }) { cardId ->
             HomeCardWrapper(
-                title = cardId,
+                title = t(cardId),
                 size = cardSizes[cardId] ?: "Large",
                 onMoveUp = { onMoveCard(cardId, -1) },
                 onMoveDown = { onMoveCard(cardId, 1) },
@@ -158,7 +160,7 @@ fun HomeCardWrapper(
                     IconButton(onClick = { onResize(if (size == "Large") "Small" else "Large") }, modifier = Modifier.size(28.dp)) {
                         Icon(
                             Icons.Default.Build, 
-                            contentDescription = "Resize", 
+                            contentDescription = t("Resize"), 
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -197,17 +199,17 @@ fun WeatherCard(location: String) {
 
     when {
         location.isBlank() -> {
-            Text("No project address set.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            Text(t("No project address set."), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
         }
         isLoading -> {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(12.dp))
-                Text("Loading weather…", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                Text(t("Loading weather…"), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
             }
         }
         failed || weather == null -> {
-            Text("Weather unavailable for this address.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            Text(t("Weather unavailable for this address."), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
         }
         else -> {
             val w = weather!!
@@ -216,7 +218,7 @@ fun WeatherCard(location: String) {
                     Text("${w.currentTempF}°F", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                     Text(w.shortForecast, style = MaterialTheme.typography.bodyMedium)
                     if (w.highF != null && w.lowF != null) {
-                        Text("High: ${w.highF}° Low: ${w.lowF}°", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Text(t("High: {0}° Low: {1}°", w.highF, w.lowF), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     }
                 }
                 Icon(
@@ -238,7 +240,7 @@ fun CalendarSummaryCard(appointments: List<Appointment>, tasks: List<Task>) {
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (upcomingAppts.isEmpty() && upcomingTasks.isEmpty()) {
-            Text("No upcoming events.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            Text(t("No upcoming events."), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
         } else {
             upcomingAppts.forEach { appt ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -270,7 +272,7 @@ fun TasksSummaryCard(tasks: List<Task>) {
             modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape)
         )
         Spacer(Modifier.height(8.dp))
-        Text("$done / $total Tasks Done", style = MaterialTheme.typography.bodySmall)
+        Text(t("{0} / {1} Tasks Done", done, total), style = MaterialTheme.typography.bodySmall)
 
         Spacer(Modifier.height(8.dp))
         tasks.filter { it.status != "Done" }.take(2).forEach { task ->
@@ -287,7 +289,7 @@ fun TasksSummaryCard(tasks: List<Task>) {
 fun ChatSummaryCard(messages: List<ChatMessage>, userMap: Map<String, String>, userPicMap: Map<String, String?>) {
     val lastMsg = messages.lastOrNull()
     if (lastMsg == null) {
-        Text("No messages yet.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+        Text(t("No messages yet."), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
     } else {
         Row(verticalAlignment = Alignment.CenterVertically) {
             val profilePic = userPicMap[lastMsg.senderEmail]
@@ -334,7 +336,7 @@ fun TeamSummaryCard(members: List<String>, userPicMap: Map<String, String?>) {
 fun FilesSummaryCard(files: List<ProjectFile>) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (files.isEmpty()) {
-            Text("No files.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            Text(t("No files."), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
         } else {
             files.take(2).forEach { file ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -350,16 +352,16 @@ fun FilesSummaryCard(files: List<ProjectFile>) {
 @Composable
 fun NotesSummaryCard(notes: List<Note>) {
     if (notes.isEmpty()) {
-        Text("No notes yet.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+        Text(t("No notes yet."), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
     } else {
         val latest = notes.maxByOrNull { it.updatedAt }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("${notes.size} note${if (notes.size == 1) "" else "s"}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+            Text(if (notes.size == 1) t("1 note") else t("{0} notes", notes.size), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
             if (latest != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color.Gray)
                     Spacer(Modifier.width(4.dp))
-                    Text(latest.title.ifBlank { "Untitled Note" }, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    Text(latest.title.ifBlank { t("Untitled Note") }, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                 }
             }
         }
@@ -369,5 +371,5 @@ fun NotesSummaryCard(notes: List<Note>) {
 private fun formatShortDate(timestamp: Long): String {
     val instant = Instant.fromEpochMilliseconds(timestamp)
     val date = instant.toLocalDateTime(TimeZone.currentSystemDefault())
-    return "${date.monthNumber}/${date.dayOfMonth}"
+    return numericDate(date.monthNumber, date.dayOfMonth)
 }

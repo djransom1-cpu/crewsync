@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import com.djransom.crewsync.data.model.Task
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -69,7 +70,7 @@ private fun renderPlannerPdf(projectName: String, buckets: List<String>, tasks: 
 
         drawLine(plannerPrintHeading(projectName, detailed), margin, 16f, PDType1Font.HELVETICA_BOLD)
         y -= 20f
-        drawLine("Printed ${SimpleDateFormat("MMM d, yyyy").format(Date())}", margin, 9f, PDType1Font.HELVETICA)
+        drawLine(t("Printed {0}", SimpleDateFormat("MMM d, yyyy").format(Date())), margin, 9f, PDType1Font.HELVETICA)
         y -= lineHeight * 1.5f
 
         lines.forEach { line ->
@@ -93,4 +94,14 @@ private fun renderPlannerPdf(projectName: String, buckets: List<String>, tasks: 
 // outside that range (a smart quote pasted from elsewhere, an emoji, etc.) throws mid-render and
 // would silently kill the whole print job. Strip to the safe range rather than let one bad
 // character in a task title blank the page.
-private fun sanitizeForPdf(text: String): String = text.map { if (it.code in 32..255) it else '?' }.joinToString("")
+// Letters outside it that have a plain form (Polish ą ę ł ś ż…) print as that plain letter
+// rather than '?'.
+private fun sanitizeForPdf(text: String): String = text.map { c ->
+    when {
+        c.code in 32..255 -> c.toString()
+        c == 'ł' -> "l"
+        c == 'Ł' -> "L"
+        else -> java.text.Normalizer.normalize(c.toString(), java.text.Normalizer.Form.NFD)
+            .filter { it.code in 32..255 }.ifEmpty { "?" }
+    }
+}.joinToString("")

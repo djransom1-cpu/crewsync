@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -239,7 +240,7 @@ fun ProjectDetailsScreen(
             ModalDrawerSheet {
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    text = project?.name ?: "Project Menu",
+                    text = project?.name ?: t("Project Menu"),
                     modifier = Modifier.padding(16.dp),
                     style = MaterialTheme.typography.titleLarge
                 )
@@ -247,7 +248,7 @@ fun ProjectDetailsScreen(
                 tabs.forEachIndexed { index, (label, icon) ->
                     NavigationDrawerItem(
                         icon = { Icon(icon, contentDescription = null) },
-                        label = { Text(label) },
+                        label = { Text(t(label)) },
                         selected = selectedTab == index,
                         onClick = {
                             selectedTab = index
@@ -264,30 +265,30 @@ fun ProjectDetailsScreen(
                 TopAppBar(
                     title = { 
                         Text(
-                            text = tabs[selectedTab].first,
+                            text = t(tabs[selectedTab].first),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         ) 
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Menu")
+                            Icon(Icons.Default.Menu, contentDescription = t("Menu"))
                         }
                     },
                     actions = {
                         if (isAdmin && selectedTab == 0) {
                             IconButton(onClick = { showEditProjectDialog = true }) {
-                                Icon(Icons.Default.Edit, contentDescription = "Edit Project")
+                                Icon(Icons.Default.Edit, contentDescription = t("Edit Project"))
                             }
                             IconButton(onClick = { showProjectAlertDialog = true }) {
-                                Icon(Icons.Default.Warning, contentDescription = "Send Alert", tint = MaterialTheme.colorScheme.error)
+                                Icon(Icons.Default.Warning, contentDescription = t("Send Alert"), tint = MaterialTheme.colorScheme.error)
                             }
                         }
                         IconButton(onClick = {
                             if (selectedTab != 0) selectedTab = 0
                             else onBack()
                         }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("Back"))
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -505,20 +506,20 @@ fun SendProjectAlertDialog(onDismiss: () -> Unit, onConfirm: (String, String) ->
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Project Alert") },
+        title = { Text(t("Project Alert")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, modifier = Modifier.fillMaxWidth())
-                TextField(value = message, onValueChange = { message = it }, label = { Text("Message") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+                TextField(value = title, onValueChange = { title = it }, label = { Text(t("Title")) }, modifier = Modifier.fillMaxWidth())
+                TextField(value = message, onValueChange = { message = it }, label = { Text(t("Message")) }, modifier = Modifier.fillMaxWidth(), minLines = 3)
             }
         },
         confirmButton = {
             Button(onClick = { onConfirm(title, message) }, enabled = title.isNotBlank() && message.isNotBlank()) {
-                Text("Send Alert")
+                Text(t("Send Alert"))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
@@ -543,32 +544,32 @@ fun EditProjectDialog(project: Project, onDismiss: () -> Unit, onConfirm: (Proje
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Edit Project") },
+        title = { Text(t("Edit Project")) },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.verticalScroll(rememberScrollState())
             ) {
-                TextField(value = name, onValueChange = { name = it }, label = { Text("Project Name") }, modifier = Modifier.fillMaxWidth())
-                TextField(value = description, onValueChange = { description = it }, label = { Text("Description") }, modifier = Modifier.fillMaxWidth())
+                TextField(value = name, onValueChange = { name = it }, label = { Text(t("Project Name")) }, modifier = Modifier.fillMaxWidth())
+                TextField(value = description, onValueChange = { description = it }, label = { Text(t("Description")) }, modifier = Modifier.fillMaxWidth())
                 TextField(
                     value = location,
                     onValueChange = { location = it },
-                    label = { Text("Job Site Address") },
-                    placeholder = { Text("e.g. 123 Main St, Nashville, TN 37201") },
+                    label = { Text(t("Job Site Address")) },
+                    placeholder = { Text(t("e.g. 123 Main St, Nashville, TN 37201")) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text(
-                    "A full street address gets the most accurate local weather on the dashboard.",
+                    t("A full street address gets the most accurate local weather on the dashboard."),
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.Gray
                 )
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                Text("Property Owner", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                TextField(value = ownerName, onValueChange = { ownerName = it }, label = { Text("Owner Name") }, modifier = Modifier.fillMaxWidth())
-                TextField(value = ownerPhone, onValueChange = { ownerPhone = it }, label = { Text("Owner Phone") }, modifier = Modifier.fillMaxWidth())
-                TextField(value = ownerEmail, onValueChange = { ownerEmail = it }, label = { Text("Owner Email") }, modifier = Modifier.fillMaxWidth())
+                Text(t("Property Owner"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                TextField(value = ownerName, onValueChange = { ownerName = it }, label = { Text(t("Owner Name")) }, modifier = Modifier.fillMaxWidth())
+                TextField(value = ownerPhone, onValueChange = { ownerPhone = it }, label = { Text(t("Owner Phone")) }, modifier = Modifier.fillMaxWidth())
+                TextField(value = ownerEmail, onValueChange = { ownerEmail = it }, label = { Text(t("Owner Email")) }, modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {
@@ -576,11 +577,11 @@ fun EditProjectDialog(project: Project, onDismiss: () -> Unit, onConfirm: (Proje
                 onClick = { onConfirm(ProjectEdits(name, description, location, ownerName, ownerPhone, ownerEmail)) },
                 enabled = name.isNotBlank()
             ) {
-                Text("Save")
+                Text(t("Save"))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
@@ -596,10 +597,10 @@ fun TeamTab(projectId: String, members: List<String>, userMap: Map<String, Strin
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Team Members", style = MaterialTheme.typography.titleMedium)
+            Text(t("Team Members"), style = MaterialTheme.typography.titleMedium)
             if (isLeader) {
                 IconButton(onClick = onAddMember) {
-                    Icon(Icons.Default.Add, contentDescription = "Add Member")
+                    Icon(Icons.Default.Add, contentDescription = t("Add Member"))
                 }
             }
         }
@@ -612,7 +613,7 @@ fun TeamTab(projectId: String, members: List<String>, userMap: Map<String, Strin
                     modifier = Modifier.clickable { onMemberClick(memberEmail) },
                     supportingContent = { 
                         if (displayName != memberEmail) Text(memberEmail)
-                        else Text("Tap to chat")
+                        else Text(t("Tap to chat"))
                     },
                     trailingContent = {
                         if (isLeader) {
@@ -622,7 +623,7 @@ fun TeamTab(projectId: String, members: List<String>, userMap: Map<String, Strin
                                     firestore.collection("projects").document(projectId).update("members" to newList)
                                 }
                             }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
+                                Icon(Icons.Default.Delete, contentDescription = t("Remove"), tint = MaterialTheme.colorScheme.error)
                             }
                         }
                     }
@@ -677,11 +678,11 @@ fun FilesTab(
                         val parent = folders.find { it.id == currentFolderId }?.parentFolderId
                         onFolderClick(parent)
                     }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("Up"))
                     }
                 }
                 Text(
-                    text = if (currentFolderId == null) "Project Files" else folders.find { it.id == currentFolderId }?.name ?: "Folder",
+                    text = if (currentFolderId == null) t("Project Files") else folders.find { it.id == currentFolderId }?.name ?: t("Folder"),
                     style = MaterialTheme.typography.titleMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -692,7 +693,7 @@ fun FilesTab(
                 IconButton(onClick = { isGalleryView = !isGalleryView }) {
                     Icon(
                         if (isGalleryView) Icons.AutoMirrored.Filled.List else Icons.Default.Menu, 
-                        contentDescription = "Toggle View"
+                        contentDescription = t("Toggle View")
                     )
                 }
                 if (isLeader) {
@@ -700,16 +701,16 @@ fun FilesTab(
                         CircularProgressIndicator(modifier = Modifier.size(24.dp))
                     } else {
                         IconButton(onClick = onAddFolder) {
-                            Icon(Icons.Default.Add, contentDescription = "New Folder")
+                            Icon(Icons.Default.Add, contentDescription = t("New Folder"))
                         }
                         IconButton(onClick = onAddLink) {
-                            Icon(Icons.Default.Star, contentDescription = "Add Link")
+                            Icon(Icons.Default.Star, contentDescription = t("Add Link"))
                         }
                         IconButton(onClick = onTakeCamera) {
-                            Icon(Icons.Default.Info, contentDescription = "Camera")
+                            Icon(Icons.Default.Info, contentDescription = t("Camera"))
                         }
                         IconButton(onClick = onUpload) {
-                            Icon(Icons.Default.Add, contentDescription = "Upload File")
+                            Icon(Icons.Default.Add, contentDescription = t("Upload File"))
                         }
                     }
                 }
@@ -799,12 +800,12 @@ fun FilesTab(
                 }
                 
                 if (currentFiles.isEmpty() && currentFolders.isEmpty()) {
-                    item { Text("No items in this folder.", modifier = Modifier.padding(16.dp)) }
+                    item { Text(t("No items in this folder."), modifier = Modifier.padding(16.dp)) }
                 } else {
                     items(currentFiles, key = { it.id }) { file ->
                         ListItem(
                             headlineContent = { Text(file.name) },
-                            supportingContent = { Text("By ${file.uploadedBy}") },
+                            supportingContent = { Text(t("By {0}", file.uploadedBy)) },
                             leadingContent = { 
                                 val isImage = file.name.lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".png") }
                                 if (isImage) {
@@ -821,26 +822,26 @@ fun FilesTab(
                             trailingContent = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     TextButton(onClick = { onMarkupClick(file.url, file.name, file.id) }) {
-                                        Text("Markup")
+                                        Text(t("Markup"))
                                     }
                                     TextButton(onClick = {
                                         val isImage = file.name.lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".png") }
                                         if (isImage) fullScreenImage = file
                                         else openUrl(file.url)
                                     }) {
-                                        Text("Open")
+                                        Text(t("Open"))
                                     }
                                     TextButton(onClick = { downloadFile(file.url, file.name) }) {
-                                        Text("Download")
+                                        Text(t("Download"))
                                     }
                                     IconButton(onClick = { shareFile(file.url, file.name) }) {
-                                        Icon(Icons.Default.Send, contentDescription = "Share \"${file.name}\"", modifier = Modifier.size(20.dp))
+                                        Icon(Icons.Default.Send, contentDescription = t("Share \"{0}\"", file.name), modifier = Modifier.size(20.dp))
                                     }
                                     if (isLeader) {
                                         IconButton(onClick = { onDeleteClick(file) }) {
                                             Icon(
                                                 Icons.Default.Delete, 
-                                                contentDescription = "Delete", 
+                                                contentDescription = t("Delete"), 
                                                 tint = MaterialTheme.colorScheme.error,
                                                 modifier = Modifier.size(20.dp)
                                             )
@@ -900,7 +901,7 @@ fun FolderColorPickerDialog(onDismiss: () -> Unit, onColorSelected: (String) -> 
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Folder Color") },
+        title = { Text(t("Folder Color")) },
         text = {
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -919,7 +920,7 @@ fun FolderColorPickerDialog(onDismiss: () -> Unit, onColorSelected: (String) -> 
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
@@ -949,7 +950,7 @@ fun FullScreenImageDialog(file: ProjectFile, onDismiss: () -> Unit, onMarkup: ()
                 Button(onClick = onMarkup) {
                     Icon(Icons.Default.Edit, null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Markup")
+                    Text(t("Markup"))
                 }
             }
             
@@ -968,15 +969,15 @@ fun AddFolderDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var name by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New Folder") },
+        title = { Text(t("New Folder")) },
         text = {
-            TextField(value = name, onValueChange = { name = it }, label = { Text("Folder Name") }, modifier = Modifier.fillMaxWidth())
+            TextField(value = name, onValueChange = { name = it }, label = { Text(t("Folder Name")) }, modifier = Modifier.fillMaxWidth())
         },
         confirmButton = {
-            Button(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text("Create") }
+            Button(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text(t("Create")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
@@ -987,18 +988,18 @@ fun AddLinkFileDialog(onDismiss: () -> Unit, onConfirm: (name: String, url: Stri
     var url by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Link") },
+        title = { Text(t("Add Link")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                TextField(value = url, onValueChange = { url = it }, label = { Text("URL") }, placeholder = { Text("e.g. airbnb.com/rooms/123") }, modifier = Modifier.fillMaxWidth())
-                TextField(value = name, onValueChange = { name = it }, label = { Text("Name (optional)") }, placeholder = { Text("e.g. Beach house listing") }, modifier = Modifier.fillMaxWidth())
+                TextField(value = url, onValueChange = { url = it }, label = { Text(t("URL")) }, placeholder = { Text(t("e.g. airbnb.com/rooms/123")) }, modifier = Modifier.fillMaxWidth())
+                TextField(value = name, onValueChange = { name = it }, label = { Text(t("Name (optional)")) }, placeholder = { Text(t("e.g. Beach house listing")) }, modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(name, url) }, enabled = url.isNotBlank()) { Text("Add Link") }
+            Button(onClick = { onConfirm(name, url) }, enabled = url.isNotBlank()) { Text(t("Add Link")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
@@ -1023,18 +1024,18 @@ fun AddMemberDialog(environmentId: String, onDismiss: () -> Unit, onConfirm: (St
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Team Member") },
+        title = { Text(t("Add Team Member")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextField(
                     value = email,
                     onValueChange = { email = it },
-                    label = { Text("Email Address") },
+                    label = { Text(t("Email Address")) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 
                 if (masterContacts.isNotEmpty()) {
-                    Text("Or pick from Master List:", style = MaterialTheme.typography.labelSmall)
+                    Text(t("Or pick from Master List:"), style = MaterialTheme.typography.labelSmall)
                     LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
                         items(masterContacts) { contact ->
                             ListItem(
@@ -1048,10 +1049,10 @@ fun AddMemberDialog(environmentId: String, onDismiss: () -> Unit, onConfirm: (St
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(email) }, enabled = email.isNotBlank()) { Text("Add") }
+            Button(onClick = { onConfirm(email) }, enabled = email.isNotBlank()) { Text(t("Add")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }

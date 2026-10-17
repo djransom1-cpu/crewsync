@@ -1,5 +1,11 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
+import com.djransom.crewsync.i18n.monthName
+import com.djransom.crewsync.i18n.monthDay
+import com.djransom.crewsync.i18n.dayShort
+import com.djransom.crewsync.i18n.hourLabel
+import com.djransom.crewsync.i18n.clockTime
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -131,14 +137,14 @@ fun CalendarScreen(
                 },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Appointment")
+                Icon(Icons.Default.Add, contentDescription = t("Add Appointment"))
             }
 
             SmallFloatingActionButton(
                 onClick = { showShareDialog = true },
                 modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
             ) {
-                Icon(Icons.Default.Send, contentDescription = "Share Calendar")
+                Icon(Icons.Default.Send, contentDescription = t("Share Calendar"))
             }
         }
     }
@@ -181,8 +187,8 @@ fun CalendarScreen(
     if (showDeleteConfirm != null) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = null },
-            title = { Text("Delete Appointment?") },
-            text = { Text("Are you sure you want to remove '${showDeleteConfirm!!.title}'?") },
+            title = { Text(t("Delete Appointment?")) },
+            text = { Text(t("Are you sure you want to remove '{0}'?", showDeleteConfirm!!.title)) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -193,10 +199,10 @@ fun CalendarScreen(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) { Text("Delete") }
+                ) { Text(t("Delete")) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = null }) { Text("Cancel") }
+                TextButton(onClick = { showDeleteConfirm = null }) { Text(t("Cancel")) }
             }
         )
     }
@@ -225,14 +231,14 @@ private fun ScheduleForDayPanel(
 ) {
     Column(modifier = modifier) {
         Text(
-            text = "Schedule for ${selectedDate.month.name} ${selectedDate.dayOfMonth}, ${selectedDate.year}",
+            text = t("Schedule for {0} {1}, {2}", monthName(selectedDate.monthNumber), selectedDate.dayOfMonth, selectedDate.year),
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
 
         if (calendarItems.isEmpty()) {
             Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                Text("No events scheduled.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                Text(t("No events scheduled."), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
             }
         } else {
             LazyColumn(
@@ -274,7 +280,7 @@ fun CalendarHeader(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "${currentMonth.month.name} ${currentMonth.year}",
+            text = "${monthName(currentMonth.monthNumber)} ${currentMonth.year}",
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -291,7 +297,7 @@ fun CalendarHeader(
                 }
                 onMonthChange(prev)
             }) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous")
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = t("Previous"))
             }
             IconButton(onClick = {
                 val next = if (currentMonth.monthNumber == 12) {
@@ -301,18 +307,18 @@ fun CalendarHeader(
                 }
                 onMonthChange(next)
             }) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next")
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = t("Next"))
             }
 
             Box {
                 TextButton(onClick = { showViewMenu = true }) {
-                    Text(viewMode)
-                    Icon(Icons.Default.ArrowDropDown, contentDescription = "Change view")
+                    Text(t(viewMode))
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = t("Change view"))
                 }
                 DropdownMenu(expanded = showViewMenu, onDismissRequest = { showViewMenu = false }) {
                     listOf("Day", "Week", "Month").forEach { option ->
                         DropdownMenuItem(
-                            text = { Text(option) },
+                            text = { Text(t(option)) },
                             onClick = {
                                 onViewModeChange(option)
                                 showViewMenu = false
@@ -347,7 +353,7 @@ fun MonthView(
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 weekDayLabels.forEach { dow ->
                     Text(
-                        text = dow.name.lowercase().replaceFirstChar { it.uppercase() }.take(3),
+                        text = dayShort(dow.isoDayNumber),
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.labelMedium,
@@ -442,7 +448,7 @@ fun MonthCell(
                     }
                     if (dayTasks.size + dayAppts.size > 3) {
                         Text(
-                            "+${dayTasks.size + dayAppts.size - 3} more",
+                            t("+{0} more", dayTasks.size + dayAppts.size - 3),
                             fontSize = 9.sp,
                             modifier = Modifier.padding(start = 2.dp),
                             color = MaterialTheme.colorScheme.primary
@@ -476,7 +482,7 @@ fun WeekView(
                         .padding(4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(date.dayOfWeek.name.take(3), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    Text(dayShort(date.dayOfWeek.isoDayNumber), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     Text(
                         text = date.dayOfMonth.toString(),
                         style = MaterialTheme.typography.titleMedium,
@@ -493,7 +499,7 @@ fun WeekView(
             items(24) { hour ->
                 Row(modifier = Modifier.fillMaxWidth().height(68.dp)) {
                     Text(
-                        text = if (hour == 0) "12 AM" else if (hour < 12) "$hour AM" else if (hour == 12) "12 PM" else "${hour-12} PM",
+                        text = hourLabel(hour),
                         style = MaterialTheme.typography.labelMedium,
                         fontSize = 12.sp,
                         modifier = Modifier.width(48.dp).padding(top = 4.dp),
@@ -541,7 +547,7 @@ fun DayView(
         item {
             val allDayEvents = appointments.filter { it.isAllDay && isAppointmentOnDay(it, selectedDate) }
             if (allDayEvents.isNotEmpty()) {
-                Text("All Day", style = MaterialTheme.typography.labelMedium)
+                Text(t("All Day"), style = MaterialTheme.typography.labelMedium)
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     allDayEvents.forEach { appt ->
                         Card(
@@ -559,7 +565,7 @@ fun DayView(
         items(24) { hour ->
             Row(modifier = Modifier.fillMaxWidth().height(84.dp)) {
                 Text(
-                    text = if (hour == 0) "12 AM" else if (hour < 12) "$hour AM" else if (hour == 12) "12 PM" else "${hour-12} PM",
+                    text = hourLabel(hour),
                     style = MaterialTheme.typography.labelMedium,
                     fontSize = 13.sp,
                     modifier = Modifier.width(56.dp).padding(top = 8.dp)
@@ -609,7 +615,7 @@ fun TaskItemSimple(task: Task) {
             Spacer(modifier = Modifier.width(12.dp))
             Column {
                 Text(text = task.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
-                Text(text = "Task: ${task.status}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                Text(text = t("Task: {0}", t(task.status)), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
             }
         }
     }
@@ -629,20 +635,20 @@ fun AppointmentItemCard(appointment: Appointment, showActions: Boolean, onEdit: 
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(text = appointment.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
-                    val timeText = if (appointment.isAllDay) "All Day" else "${formatTime(appointment.startDate)} - ${formatTime(appointment.endDate)}"
-                    val recurrenceText = if (appointment.recurrence != "None") " (${appointment.recurrence})" else ""
+                    val timeText = if (appointment.isAllDay) t("All Day") else "${formatTime(appointment.startDate)} - ${formatTime(appointment.endDate)}"
+                    val recurrenceText = if (appointment.recurrence != "None") " (${t(appointment.recurrence)})" else ""
                     Text(text = "$timeText$recurrenceText", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                 }
                 Row {
                     IconButton(onClick = { addToExternalCalendar(appointment) }) {
-                        Icon(Icons.Default.DateRange, contentDescription = "Add to Google Calendar", tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Default.DateRange, contentDescription = t("Add to Google Calendar"), tint = MaterialTheme.colorScheme.primary)
                     }
                     if (showActions) {
                         IconButton(onClick = { onEdit(appointment) }) {
-                            Icon(Icons.Default.Edit, contentDescription = "Edit")
+                            Icon(Icons.Default.Edit, contentDescription = t("Edit"))
                         }
                         IconButton(onClick = { onDelete(appointment) }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Default.Delete, contentDescription = t("Delete"), tint = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -698,18 +704,18 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (appointment == null) "New Appointment" else "Edit Appointment") },
+        title = { Text(if (appointment == null) t("New Appointment") else t("Edit Appointment")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
                 TextField(
                     value = title, 
                     onValueChange = { title = it }, 
-                    label = { Text("Title") }, 
+                    label = { Text(t("Title")) }, 
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
                 )
                 
-                Text("Label Color", style = MaterialTheme.typography.labelMedium)
+                Text(t("Label Color"), style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     colors.forEach { hex ->
                         Box(
@@ -724,14 +730,14 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("All Day", modifier = Modifier.weight(1f))
+                    Text(t("All Day"), modifier = Modifier.weight(1f))
                     Switch(checked = isAllDay, onCheckedChange = { isAllDay = it })
                 }
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { showStartDatePicker = true }, modifier = Modifier.weight(1f)) {
-                        val dateText = "${startDate.month.name.take(3)} ${startDate.dayOfMonth}"
-                        Text("Start: $dateText")
+                        val dateText = monthDay(startDate.monthNumber, startDate.dayOfMonth)
+                        Text(t("Start: {0}", dateText))
                     }
                     if (!isAllDay) {
                         Button(onClick = { showStartTimePicker = true }, modifier = Modifier.weight(1f)) {
@@ -742,8 +748,8 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { showEndDatePicker = true }, modifier = Modifier.weight(1f)) {
-                        val dateText = "${endDate.month.name.take(3)} ${endDate.dayOfMonth}"
-                        Text("End: $dateText")
+                        val dateText = monthDay(endDate.monthNumber, endDate.dayOfMonth)
+                        Text(t("End: {0}", dateText))
                     }
                     if (!isAllDay) {
                         Button(onClick = { showEndTimePicker = true }, modifier = Modifier.weight(1f)) {
@@ -754,11 +760,11 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
 
                 Box {
                     OutlinedButton(onClick = { showRecurrenceMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Repeat: $recurrence")
+                        Text(t("Repeat: {0}", t(recurrence)))
                     }
                     DropdownMenu(expanded = showRecurrenceMenu, onDismissRequest = { showRecurrenceMenu = false }) {
                         listOf("None", "Daily", "Weekly", "Monthly").forEach { option ->
-                            DropdownMenuItem(text = { Text(option) }, onClick = { 
+                            DropdownMenuItem(text = { Text(t(option)) }, onClick = { 
                                 recurrence = option
                                 showRecurrenceMenu = false 
                             })
@@ -769,14 +775,14 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
                 TextField(
                     value = location, 
                     onValueChange = { location = it }, 
-                    label = { Text("Location") }, 
+                    label = { Text(t("Location")) }, 
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
                 )
                 TextField(
                     value = description, 
                     onValueChange = { description = it }, 
-                    label = { Text("Description") }, 
+                    label = { Text(t("Description")) }, 
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, autoCorrectEnabled = true)
                 )
@@ -792,7 +798,7 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
                                 startDate = Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date 
                             }
                             showStartDatePicker = false
-                        }) { Text("OK") }
+                        }) { Text(t("OK")) }
                     }
                 ) { DatePicker(state = state) }
             }
@@ -806,21 +812,21 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
                                 endDate = Instant.fromEpochMilliseconds(it).toLocalDateTime(TimeZone.UTC).date 
                             }
                             showEndDatePicker = false
-                        }) { Text("OK") }
+                        }) { Text(t("OK")) }
                     }
                 ) { DatePicker(state = state) }
             }
             if (showStartTimePicker) {
                 AlertDialog(
                     onDismissRequest = { showStartTimePicker = false },
-                    confirmButton = { TextButton(onClick = { showStartTimePicker = false }) { Text("OK") } },
+                    confirmButton = { TextButton(onClick = { showStartTimePicker = false }) { Text(t("OK")) } },
                     text = { TimePicker(state = startTimeState) }
                 )
             }
             if (showEndTimePicker) {
                 AlertDialog(
                     onDismissRequest = { showEndTimePicker = false },
-                    confirmButton = { TextButton(onClick = { showEndTimePicker = false }) { Text("OK") } },
+                    confirmButton = { TextButton(onClick = { showEndTimePicker = false }) { Text(t("OK")) } },
                     text = { TimePicker(state = endTimeState) }
                 )
             }
@@ -845,10 +851,10 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
                     endDate = end,
                     recurrence = recurrence
                 )) 
-            }, enabled = title.isNotBlank()) { Text(if (appointment == null) "Add" else "Save") }
+            }, enabled = title.isNotBlank()) { Text(if (appointment == null) t("Add") else t("Save")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
@@ -882,16 +888,16 @@ fun ShareCalendarDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Share Calendar") },
+        title = { Text(t("Share Calendar")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "Anyone with this link can subscribe to this project's appointments from their own calendar app (Google Calendar, Apple Calendar, Outlook) - no Crewsync login needed.",
+                    t("Anyone with this link can subscribe to this project's appointments from their own calendar app (Google Calendar, Apple Calendar, Outlook) - no Crewsync login needed."),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.Gray
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Public link enabled", modifier = Modifier.weight(1f))
+                    Text(t("Public link enabled"), modifier = Modifier.weight(1f))
                     Switch(
                         checked = enabled,
                         onCheckedChange = { checked ->
@@ -908,25 +914,25 @@ fun ShareCalendarDialog(
                         value = feedUrl,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Feed link") },
+                        label = { Text(t("Feed link")) },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { clipboard.setText(AnnotatedString(feedUrl)) }) {
-                            Text("Copy")
+                            Text(t("Copy"))
                         }
-                        OutlinedButton(onClick = { shareFile(feedUrl, "Calendar Feed") }) {
-                            Text("Share")
+                        OutlinedButton(onClick = { shareFile(feedUrl, t("Calendar Feed")) }) {
+                            Text(t("Share"))
                         }
                     }
                     TextButton(onClick = { persist(true, randomShareToken()) }) {
-                        Text("Regenerate link")
+                        Text(t("Regenerate link"))
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Done") }
+            TextButton(onClick = onDismiss) { Text(t("Done")) }
         }
     )
 }
@@ -997,7 +1003,5 @@ private fun formatTime(timestamp: Long): String {
 }
 
 private fun formatTime(hour: Int, minute: Int): String {
-    val h = if (hour % 12 == 0) 12 else hour % 12
-    val amPm = if (hour < 12) "AM" else "PM"
-    return "$h:${minute.toString().padStart(2, '0')} $amPm"
+    return clockTime(hour, minute)
 }

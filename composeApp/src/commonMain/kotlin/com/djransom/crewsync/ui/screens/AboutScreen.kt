@@ -1,5 +1,11 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
+import com.djransom.crewsync.i18n.I18n
+import com.djransom.crewsync.i18n.systemLanguageCode
+import com.djransom.crewsync.util.rememberSettings
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.RadioButton
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -34,6 +40,7 @@ fun AboutScreen(onNavigateToReports: () -> Unit) {
     
     var userProfile by remember { mutableStateOf<User?>(null) }
     var showFeedbackDialog by remember { mutableStateOf(false) }
+    val appSettings = rememberSettings()
 
     LaunchedEffect(auth.currentUser?.uid) {
         auth.currentUser?.uid?.let { uid ->
@@ -52,7 +59,7 @@ fun AboutScreen(onNavigateToReports: () -> Unit) {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(title = { Text("About Crewsync") })
+            TopAppBar(title = { Text(t("About Crewsync")) })
         }
     ) { padding ->
         Column(
@@ -79,7 +86,7 @@ fun AboutScreen(onNavigateToReports: () -> Unit) {
             )
             
             Text(
-                text = "Construction Crew Management",
+                text = t("Construction Crew Management"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -91,7 +98,7 @@ fun AboutScreen(onNavigateToReports: () -> Unit) {
                 shape = MaterialTheme.shapes.medium
             ) {
                 Text(
-                    text = "Version ${getAppVersion()}",
+                    text = t("Version {0}", getAppVersion()),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSecondaryContainer
@@ -106,8 +113,8 @@ fun AboutScreen(onNavigateToReports: () -> Unit) {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Calendar Preferences", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-                    Text("First day of the week:", fontSize = 12.sp, color = Color.Gray)
+                    Text(t("Calendar Preferences"), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                    Text(t("First day of the week:"), fontSize = 12.sp, color = Color.Gray)
                     
                     val currentFirstDay = userProfile?.firstDayOfWeek ?: "Sunday"
                     val options = listOf("Sunday", "Monday", "Saturday")
@@ -121,14 +128,46 @@ fun AboutScreen(onNavigateToReports: () -> Unit) {
                                         auth.currentUser?.uid?.let { uid ->
                                             firestore.collection("users").document(uid).update("firstDayOfWeek" to dayOption)
                                             userProfile = userProfile?.copy(firstDayOfWeek = dayOption)
-                                            snackbarHostState.showSnackbar("Calendar set to start on $dayOption")
+                                            snackbarHostState.showSnackbar(t("Calendar set to start on {0}", t(dayOption)))
                                         }
                                     }
                                 },
-                                label = { Text(dayOption, fontSize = 12.sp) }
+                                label = { Text(t(dayOption), fontSize = 12.sp) }
                             )
                         }
                     }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Language: the device's language unless one is picked here (kept on this device)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(t("Language"), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                    val systemName = I18n.languages.firstOrNull { it.first == systemLanguageCode().lowercase().take(2) }?.second ?: "English"
+                    val choices = listOf("" to t("Same as this device ({0})", systemName)) + I18n.languages
+                    choices.forEach { (code, name) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { I18n.choose(code) { appSettings.putString(I18n.SETTINGS_KEY, it) } }
+                        ) {
+                            RadioButton(
+                                selected = I18n.chosen == code,
+                                onClick = { I18n.choose(code) { appSettings.putString(I18n.SETTINGS_KEY, it) } }
+                            )
+                            Text(name, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    Text(
+                        t("Task names, notes and messages stay the way people typed them."),
+                        fontSize = 12.sp, color = Color.Gray
+                    )
                 }
             }
 
@@ -141,7 +180,7 @@ fun AboutScreen(onNavigateToReports: () -> Unit) {
             ) {
                 Icon(Icons.Default.Warning, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Report a Bug")
+                Text(t("Report a Bug"))
             }
 
             if (isSuperAdmin) {
@@ -152,7 +191,7 @@ fun AboutScreen(onNavigateToReports: () -> Unit) {
                 ) {
                     Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("View Bug Reports")
+                    Text(t("View Bug Reports"))
                 }
             }
             
@@ -181,9 +220,9 @@ fun AboutScreen(onNavigateToReports: () -> Unit) {
                             )
                             firestore.collection("feedback").add(feedback)
                             showFeedbackDialog = false
-                            snackbarHostState.showSnackbar("Thank you for your feedback!")
+                            snackbarHostState.showSnackbar(t("Thank you for your feedback!"))
                         } catch (e: Exception) {
-                            snackbarHostState.showSnackbar("Failed to send feedback: ${e.message}")
+                            snackbarHostState.showSnackbar(t("Failed to send feedback: {0}", e.message))
                         }
                     }
                 }
@@ -199,21 +238,21 @@ fun FeedbackDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Report a Bug") },
+        title = { Text(t("Report a Bug")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("What happened?") },
-                    placeholder = { Text("e.g. App crashed on login") },
+                    label = { Text(t("What happened?")) },
+                    placeholder = { Text(t("e.g. App crashed on login")) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 TextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Details") },
-                    placeholder = { Text("Describe the steps to reproduce...") },
+                    label = { Text(t("Details")) },
+                    placeholder = { Text(t("Describe the steps to reproduce...")) },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3
                 )
@@ -224,12 +263,12 @@ fun FeedbackDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
                 onClick = { onConfirm(title, description) },
                 enabled = title.isNotBlank() && description.isNotBlank()
             ) {
-                Text("Send Report")
+                Text(t("Send Report"))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(t("Cancel"))
             }
         }
     )
