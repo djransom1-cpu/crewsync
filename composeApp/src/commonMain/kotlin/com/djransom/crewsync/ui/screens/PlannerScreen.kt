@@ -1681,7 +1681,9 @@ fun ChecklistGroupsEditor(checklistGroups: List<ChecklistGroup>, onChange: (List
                         onReorder = { reordered ->
                             onChange(latestGroups.map { if (it.id == group.id) it.copy(items = reordered) else it })
                         },
-                        itemKey = { it.id }
+                        itemKey = { it.id },
+                        // a small handle icon: drag right away, a scroll swipe won't start on it
+                        longPressOnTouch = false
                     ) { item, dragHandleModifier ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
