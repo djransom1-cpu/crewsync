@@ -251,3 +251,6 @@ exports.onNewBroadcast = onDocumentCreated("broadcasts/{broadcastId}", async (ev
     body: broadcast.message || "",
   });
 });
+
+// MCP connector for AI assistants (Claude custom connector) - see README-mcp.md
+exports.crewsyncMcp = require("./mcp").crewsyncMcp;
