@@ -3,7 +3,7 @@
   "description": "Crewsync Cloud Functions: push notifications, geocoder, calendar feed, and the MCP connector for AI assistants.",
   "main": "index.js",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
