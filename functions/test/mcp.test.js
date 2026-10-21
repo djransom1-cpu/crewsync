@@ -19,14 +19,14 @@ function makeDb() {
   });
   const colRef = (path, filters = [], lim = Infinity) => ({
     doc(id) { return docRef(path + "/" + (id || "auto" + ++n)); },
-    where(f, op, v) { assert.strictEqual(op, "=="); return colRef(path, [...filters, [f, v]], lim); },
+    where(f, op, v) { assert(op === "==" || op === "in"); return colRef(path, [...filters, [f, op, v]], lim); },
     limit(k) { return colRef(path, filters, k); },
     async add(data) { const r = docRef(path + "/auto" + ++n); await r.set(data); return r; },
     async get() {
       const docs = [];
       for (const [p, d] of store) {
         if (!p.startsWith(path + "/") || p.slice(path.length + 1).includes("/")) continue;
-        if (filters.every(([f, v]) => d[f] === v)) docs.push({ id: p.split("/").pop(), ref: docRef(p), exists: true, data: () => JSON.parse(JSON.stringify(d)) });
+        if (filters.every(([f, op, v]) => (op === "in" ? v.includes(d[f]) : d[f] === v))) docs.push({ id: p.split("/").pop(), ref: docRef(p), exists: true, data: () => JSON.parse(JSON.stringify(d)) });
         if (docs.length >= lim) break;
       }
       return { docs, empty: docs.length === 0, size: docs.length, forEach: (cb) => docs.forEach(cb) };
@@ -53,6 +53,8 @@ async function main() {
   const { zonedToUtc } = require("../mcp.js");
   const mtgStart = zonedToUtc(2026, 10, 13, 9, 0, 0, tz);
   await db.collection("projects").doc("pM").collection("appointments").doc("a1").set({ title: "Weekly Meeting", startDate: mtgStart, endDate: mtgStart + 3600000, recurrence: "Weekly", isAllDay: false });
+  // written by the old connector: no environmentId -> invisible in the app until repaired
+  await db.collection("tasks").doc("t0").set({ projectId: "pM", title: "Oct 20th Meeting Agenda", status: "TOP Priority" });
   await db.collection("tasks").doc("t1").set({ environmentId: "env1", projectId: "pM", title: "Roofing", status: "TOP Priority", assignedTo: "dan@example.com", dueDate: zonedToUtc(2026, 10, 5, 0, 0, 0, tz), checklist: [{ id: "x1", text: "Order shingles", isDone: true }, { id: "x2", text: "Tear off", isDone: false }] });
 
   // recurrence expansion: Oct 20 and Oct 27 should appear in a window Oct 19 - Oct 31
@@ -103,8 +105,9 @@ async function main() {
   r = await call("create_task", { project: "Martin", title: "calls - oct 21", status: "TOP Priority" }); assert(r.error && /already exists/.test(r.error));
   r = await call("add_checklist_items", { task: newId, checklistTitle: "calls", items: ["Electrician", "Spectrum"] }); assert.strictEqual(r.added.length, 1); assert.strictEqual(r.nowHas, 3);
   r = await call("list_tasks", { project: "Martin", assignee: "me", dueBefore: "2026-10-21" }); assert.strictEqual(r.count, 2);
+  assert.strictEqual(db._store.get("tasks/t0").environmentId, "env1", "orphaned task repaired");
   r = await call("update_task", { task: newId, status: "Completed", addAssignees: ["mike@example.com"] }); assert.strictEqual(r.status, "Completed"); assert.strictEqual(r.assignees.length, 2);
-  r = await call("list_tasks", { project: "Martin" }); assert.strictEqual(r.count, 1, "completed hidden");
+  r = await call("list_tasks", { project: "Martin" }); assert.strictEqual(r.count, 2, "completed hidden");
   r = await call("summarize_project", { project: "Martin" }); assert.strictEqual(r.overdue.length, 1);
 
   // appointments CRUD
