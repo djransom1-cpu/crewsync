@@ -1,5 +1,6 @@
 package com.djransom.crewsync.util
 
+import com.djransom.crewsync.i18n.t
 import androidx.compose.runtime.*
 import kotlinx.browser.window
 
@@ -54,7 +55,7 @@ actual fun notifyTaskUpdate(title: String, message: String) {
 
 actual fun notifyChatMessage(projectId: String, senderName: String, message: String) {
     try {
-        val notifTitle = "Crew Chat - " + senderName
+        val notifTitle = t("Crew Chat - ") + senderName
         val notifBody = message
         js("""
             if ('Notification' in window) {
@@ -76,3 +77,5 @@ actual fun addToExternalCalendar(appointment: Appointment) {
     val url = "https://www.google.com/calendar/render?action=TEMPLATE&text=${appointment.title}&details=${appointment.description}&location=${appointment.location}"
     window.open(url, "_blank")
 }
+
+actual val isTouchPlatform: Boolean = false

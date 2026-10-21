@@ -1,5 +1,7 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.i18n.t
+import com.djransom.crewsync.i18n.numericDate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -165,12 +168,12 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Search cards...", fontSize = 13.sp) },
+                placeholder = { Text(t("Search cards..."), fontSize = 13.sp) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
                         IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear search", modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Close, contentDescription = t("Clear search"), modifier = Modifier.size(16.dp))
                         }
                     }
                 },
@@ -182,25 +185,46 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
             TextButton(onClick = { showSummaryDialog = true }) {
                 Icon(Icons.AutoMirrored.Filled.List, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Project Summary", fontSize = 12.sp)
+                Text(t("Project Summary"), fontSize = 12.sp)
             }
             Spacer(Modifier.width(8.dp))
             TextButton(onClick = { showManageTemplatesDialog = true }) {
                 Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Trade Task Database", fontSize = 12.sp)
+                Text(t("Trade Task Database"), fontSize = 12.sp)
             }
             Spacer(Modifier.width(8.dp))
             TextButton(onClick = { showManageBucketsDialog = true }) {
                 Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Manage Buckets", fontSize = 12.sp)
+                Text(t("Manage Buckets"), fontSize = 12.sp)
             }
             Spacer(Modifier.width(8.dp))
+            if (viewMode == "Board" && !isTouchPlatform) {
+                // Step the board one bucket left/right - the buckets are wider than the window,
+                // and this is the deliberate way to move sideways now that the wheel only
+                // scrolls within a bucket.
+                val firstVisible = boardScrollState.firstVisibleItemIndex
+                val canGoLeft = firstVisible > 0 || boardScrollState.firstVisibleItemScrollOffset > 0
+                val canGoRight = boardScrollState.canScrollForward
+                IconButton(
+                    onClick = { scope.launch { boardScrollState.animateScrollToItem((firstVisible - 1).coerceAtLeast(0)) } },
+                    enabled = canGoLeft
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = t("Previous bucket"))
+                }
+                IconButton(
+                    onClick = { scope.launch { boardScrollState.animateScrollToItem((firstVisible + 1).coerceAtMost(projectBuckets.lastIndex.coerceAtLeast(0))) } },
+                    enabled = canGoRight
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = t("Next bucket"))
+                }
+                Spacer(Modifier.width(4.dp))
+            }
             SegmentedButtonRow(viewMode = viewMode, onViewModeChange = { viewMode = it })
             Spacer(Modifier.width(8.dp))
             IconButton(onClick = { printPlannerOutline(projectName, projectBuckets, visibleTasks) }) {
-                Icon(Icons.Default.Print, contentDescription = "Print Planner")
+                Icon(Icons.Default.Print, contentDescription = t("Print Planner"))
             }
         }
 
@@ -233,17 +257,21 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                        // LazyRow only reacts to horizontal drag by default - a mouse wheel
-                        // (which reports a vertical delta) does nothing on it otherwise, which
-                        // reads as "I can't scroll to see the rest of the buckets" since a
-                        // click-drag gesture isn't an obvious thing to try on desktop.
+                        // Mouse wheel over a bucket should scroll THAT bucket up and down only -
+                        // the column's own verticalScroll handles (and consumes) it. Sideways
+                        // input - Shift+wheel on Windows, or a trackpad swipe - reports a
+                        // horizontal delta, and that's the one that moves the board. The board
+                        // used to turn vertical wheel deltas into horizontal scrolling too, which
+                        // made the page lurch sideways while you were trying to read a bucket;
+                        // the < > buttons in the toolbar now cover "get to the next bucket".
                         .pointerInput(Unit) {
                             awaitPointerEventScope {
                                 while (true) {
                                     val event = awaitPointerEvent()
                                     if (event.type == PointerEventType.Scroll) {
                                         val scrollChange = event.changes.firstOrNull() ?: continue
-                                        val delta = scrollChange.scrollDelta.let { if (it.x != 0f) it.x else it.y }
+                                        if (scrollChange.isConsumed) continue
+                                        val delta = scrollChange.scrollDelta.x
                                         if (delta != 0f) {
                                             scope.launch { boardScrollState.scrollBy(delta * 60f) }
                                             scrollChange.consume()
@@ -266,8 +294,8 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                                     firestore.collection("tasks").document(task.id).update("status" to newStatus)
                                     if (newStatus == "In Progress") {
                                         notifyTaskUpdate(
-                                            title = "Task In Progress",
-                                            message = "The task '${task.title}' has been moved to In Progress."
+                                            title = t("Task In Progress"),
+                                            message = t("The task '{0}' has been moved to In Progress.", task.title)
                                         )
                                     }
                                 }
@@ -288,7 +316,7 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Task Card")
+                Icon(Icons.Default.Add, contentDescription = t("Add Task Card"))
             }
         }
     }
@@ -494,7 +522,7 @@ fun PlannerColumn(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = title,
+                    text = t(title),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -575,7 +603,7 @@ fun TaskCard(
                         onClick = { showMenu = true },
                         modifier = Modifier.size(24.dp)
                     ) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Card actions", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.MoreVert, contentDescription = t("Card actions"), modifier = Modifier.size(16.dp))
                     }
 
                     DropdownMenu(
@@ -583,7 +611,7 @@ fun TaskCard(
                         onDismissRequest = { showMenu = false }
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Edit Checklist") },
+                            text = { Text(t("Edit Checklist")) },
                             leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(18.dp)) },
                             onClick = {
                                 showMenu = false
@@ -591,7 +619,7 @@ fun TaskCard(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Print Task") },
+                            text = { Text(t("Print Task")) },
                             leadingIcon = { Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(18.dp)) },
                             onClick = {
                                 showMenu = false
@@ -601,7 +629,7 @@ fun TaskCard(
                         HorizontalDivider()
                         allBuckets.filter { it != task.status }.forEach { targetBucket ->
                             DropdownMenuItem(
-                                text = { Text("Move to $targetBucket") },
+                                text = { Text(t("Move to {0}", targetBucket)) },
                                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp)) },
                                 onClick = {
                                     showMenu = false
@@ -630,7 +658,7 @@ fun TaskCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("$doneCount/${allItems.size} steps done", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                    Text(t("{0}/{1} steps done", doneCount, allItems.size), fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
                 }
             }
 
@@ -639,7 +667,7 @@ fun TaskCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color(0xFFE11D48))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("${task.attachments.size} site photos", fontSize = 11.sp, color = Color(0xFFE11D48))
+                    Text(t("{0} site photos", task.attachments.size), fontSize = 11.sp, color = Color(0xFFE11D48))
                 }
             }
 
@@ -652,11 +680,11 @@ fun TaskCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     if (assignedList.isEmpty()) {
-                        Text("Unassigned", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Text(t("Unassigned"), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     } else {
                         val namesStr = assignedList.joinToString(", ") { userMap[it] ?: it }
                         Text(
-                            text = "Assigned: $namesStr",
+                            text = t("Assigned: {0}", namesStr),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1
@@ -693,7 +721,7 @@ fun SegmentedButtonRow(viewMode: String, onViewModeChange: (String) -> Unit) {
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Text(
-                    mode,
+                    t(mode),
                     fontSize = 12.sp,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                     color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
@@ -733,9 +761,9 @@ fun PlannerListView(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Overall Progress", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(t("Overall Progress"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Text(
-                        "${(overallProgress * 100).roundToInt()}%  ($overallDone/$overallTotal tasks)",
+                        t("{0}%  ({1}/{2} tasks)", (overallProgress * 100).roundToInt(), overallDone, overallTotal),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -751,7 +779,7 @@ fun PlannerListView(
         if (tasks.isEmpty()) {
             item {
                 Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text("No task cards yet.", color = Color.Gray)
+                    Text(t("No task cards yet."), color = Color.Gray)
                 }
             }
         }
@@ -761,7 +789,7 @@ fun PlannerListView(
             if (bucketTasks.isNotEmpty()) {
                 item(key = "bucket_$bucket") {
                     Text(
-                        text = "$bucket (${bucketTasks.size})",
+                        text = "${t(bucket)} (${bucketTasks.size})",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(vertical = 8.dp)
@@ -830,7 +858,7 @@ fun PlannerOutlineTaskRow(
                 if (items.isNotEmpty()) {
                     Icon(
                         if (expanded) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = if (expanded) "Collapse" else "Expand",
+                        contentDescription = if (expanded) t("Collapse") else t("Expand"),
                         modifier = Modifier.size(20.dp).clickable { expanded = !expanded }
                     )
                     Spacer(Modifier.width(4.dp))
@@ -850,7 +878,7 @@ fun PlannerOutlineTaskRow(
                     )
                     val assignedList = task.getAllAssignedEmails()
                     val subtitle = buildString {
-                        append(task.status)
+                        append(t(task.status))
                         if (assignedList.isNotEmpty()) append("  -  " + assignedList.joinToString(", ") { userMap[it] ?: it })
                     }
                     Text(subtitle, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
@@ -871,11 +899,11 @@ fun PlannerOutlineTaskRow(
                 )
                 Box {
                     IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Task actions", modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.MoreVert, contentDescription = t("Task actions"), modifier = Modifier.size(18.dp))
                     }
                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                         DropdownMenuItem(
-                            text = { Text("Edit Checklist") },
+                            text = { Text(t("Edit Checklist")) },
                             leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(18.dp)) },
                             onClick = {
                                 showMenu = false
@@ -883,7 +911,7 @@ fun PlannerOutlineTaskRow(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Print Task") },
+                            text = { Text(t("Print Task")) },
                             leadingIcon = { Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(18.dp)) },
                             onClick = {
                                 showMenu = false
@@ -954,7 +982,7 @@ fun ProjectSummaryDialog(tasks: List<Task>, onDismiss: () -> Unit, onTaskClick: 
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Project Summary", fontWeight = FontWeight.Bold) },
+        title = { Text(t("Project Summary"), fontWeight = FontWeight.Bold) },
         text = {
             Column(modifier = Modifier.heightIn(max = 480.dp)) {
                 val progress = if (total > 0) done.toFloat() / total.toFloat() else 0f
@@ -963,11 +991,11 @@ fun ProjectSummaryDialog(tasks: List<Task>, onDismiss: () -> Unit, onTaskClick: 
                     modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50))
                 )
                 Spacer(Modifier.height(4.dp))
-                Text("$done / $total task cards done", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                Text(t("{0} / {1} task cards done", done, total), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                 Spacer(Modifier.height(8.dp))
 
                 if (sortedTasks.isEmpty()) {
-                    Text("No task cards yet.", color = Color.Gray)
+                    Text(t("No task cards yet."), color = Color.Gray)
                 } else {
                     LazyColumn {
                         items(sortedTasks, key = { it.id }) { task ->
@@ -995,7 +1023,7 @@ fun ProjectSummaryDialog(tasks: List<Task>, onDismiss: () -> Unit, onTaskClick: 
                                 }
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = task.dueDate?.let { formatDate(it) } ?: "No due date",
+                                    text = task.dueDate?.let { formatDate(it) } ?: t("No due date"),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (isOverdue) MaterialTheme.colorScheme.error else Color.Gray
                                 )
@@ -1007,7 +1035,7 @@ fun ProjectSummaryDialog(tasks: List<Task>, onDismiss: () -> Unit, onTaskClick: 
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) { Text(t("Close")) }
         }
     )
 }
@@ -1039,12 +1067,12 @@ fun AddTaskDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New Project Task Card", fontWeight = FontWeight.Bold) },
+        title = { Text(t("New Project Task Card"), fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
                 // Template Selector Dropdown
                 Column {
-                    Text("Select from Master Trade Task Database:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    Text(t("Select from Master Trade Task Database:"), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     Box {
                         OutlinedButton(
                             onClick = { showTemplateDropdown = true },
@@ -1054,7 +1082,7 @@ fun AddTaskDialog(
                             Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                if (title.isEmpty()) "Choose Trade Template (Framing, Demo, Drywall, etc.)" else "Template: $title",
+                                if (title.isEmpty()) t("Choose Trade Template (Framing, Demo, Drywall, etc.)") else t("Template: {0}", title),
                                 fontSize = 12.sp
                             )
                         }
@@ -1089,21 +1117,21 @@ fun AddTaskDialog(
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("Task Title") },
+                    label = { Text(t("Task Title")) },
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
                 )
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Detailed Description") },
+                    label = { Text(t("Detailed Description")) },
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, autoCorrectEnabled = true)
                 )
                 
                 // Multi-Assignee Selection
                 Column {
-                    Text("Assign Team Members (${selectedMembers.size}):", style = MaterialTheme.typography.labelMedium)
+                    Text(t("Assign Team Members ({0}):", selectedMembers.size), style = MaterialTheme.typography.labelMedium)
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1128,11 +1156,11 @@ fun AddTaskDialog(
                         onCheckedChange = { saveToDb = it }
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Save this task to Master Database for future projects", fontSize = 11.sp)
+                    Text(t("Save this task to Master Database for future projects"), fontSize = 11.sp)
                 }
 
                 Column {
-                    Text("Card Color", style = MaterialTheme.typography.labelMedium)
+                    Text(t("Card Color"), style = MaterialTheme.typography.labelMedium)
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1156,10 +1184,10 @@ fun AddTaskDialog(
                 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { showStartDatePicker = true }, modifier = Modifier.weight(1f)) {
-                        Text(startDate?.let { "Start: ${formatDate(it)}" } ?: "Set Start")
+                        Text(startDate?.let { t("Start: {0}", formatDate(it)) } ?: t("Set Start"))
                     }
                     Button(onClick = { showDueDatePicker = true }, modifier = Modifier.weight(1f)) {
-                        Text(dueDate?.let { "Due: ${formatDate(it)}" } ?: "Set Due")
+                        Text(dueDate?.let { t("Due: {0}", formatDate(it)) } ?: t("Set Due"))
                     }
                 }
             }
@@ -1172,7 +1200,7 @@ fun AddTaskDialog(
                         TextButton(onClick = {
                             state.selectedDateMillis?.let { startDate = fromPickerMillis(it) }
                             showStartDatePicker = false
-                        }) { Text("OK") }
+                        }) { Text(t("OK")) }
                     }
                 ) { DatePicker(state = state) }
             }
@@ -1185,7 +1213,7 @@ fun AddTaskDialog(
                         TextButton(onClick = {
                             state.selectedDateMillis?.let { dueDate = fromPickerMillis(it) }
                             showDueDatePicker = false
-                        }) { Text("OK") }
+                        }) { Text(t("OK")) }
                     }
                 ) { DatePicker(state = state) }
             }
@@ -1199,11 +1227,11 @@ fun AddTaskDialog(
                 },
                 enabled = title.isNotBlank()
             ) {
-                Text("Create Task Card")
+                Text(t("Create Task Card"))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
@@ -1221,10 +1249,10 @@ fun ManageTaskTemplatesDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Master Trade Task Database", fontWeight = FontWeight.Bold) },
+        title = { Text(t("Master Trade Task Database"), fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().height(400.dp)) {
-                Text("Pre-built & Custom Task Templates (${templates.size} available):", fontSize = 12.sp, color = Color.Gray)
+                Text(t("Pre-built & Custom Task Templates ({0} available):", templates.size), fontSize = 12.sp, color = Color.Gray)
                 
                 LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(templates) { tpl ->
@@ -1243,7 +1271,7 @@ fun ManageTaskTemplatesDialog(
                                 }
                                 if (!tpl.id.startsWith("tpl_")) {
                                     IconButton(onClick = { onDeleteTemplate(tpl.id) }) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.Delete, contentDescription = t("Delete"), tint = Color.Red, modifier = Modifier.size(18.dp))
                                     }
                                 }
                             }
@@ -1252,17 +1280,17 @@ fun ManageTaskTemplatesDialog(
                 }
 
                 HorizontalDivider()
-                Text("Add New Custom Trade Template:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text(t("Add New Custom Trade Template:"), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 OutlinedTextField(
                     value = newTitle,
                     onValueChange = { newTitle = it },
-                    label = { Text("Task Card Title (e.g. Solar Panels)") },
+                    label = { Text(t("Task Card Title (e.g. Solar Panels)")) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = newDesc,
                     onValueChange = { newDesc = it },
-                    label = { Text("Short Description") },
+                    label = { Text(t("Short Description")) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Button(
@@ -1286,12 +1314,12 @@ fun ManageTaskTemplatesDialog(
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Add to Master Database")
+                    Text(t("Add to Master Database"))
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) { Text(t("Close")) }
         }
     )
 }
@@ -1307,14 +1335,14 @@ fun ManageBucketsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Manage Task Buckets") },
+        title = { Text(t("Manage Task Buckets")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
                         value = newBucketName,
                         onValueChange = { newBucketName = it },
-                        label = { Text("New Bucket Name") },
+                        label = { Text(t("New Bucket Name")) },
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -1326,7 +1354,7 @@ fun ManageBucketsDialog(
                             }
                         },
                         modifier = Modifier.align(Alignment.CenterVertically)
-                    ) { Text("Add") }
+                    ) { Text(t("Add")) }
                 }
 
                 LazyColumn {
@@ -1336,7 +1364,7 @@ fun ManageBucketsDialog(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(bucket, modifier = Modifier.weight(1f))
+                            Text(t(bucket), modifier = Modifier.weight(1f))
                             IconButton(
                                 onClick = {
                                     buckets = buckets.toMutableList().apply {
@@ -1345,7 +1373,7 @@ fun ManageBucketsDialog(
                                 },
                                 enabled = index > 0
                             ) {
-                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up")
+                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = t("Move up"))
                             }
                             IconButton(
                                 onClick = {
@@ -1355,11 +1383,11 @@ fun ManageBucketsDialog(
                                 },
                                 enabled = index < buckets.size - 1
                             ) {
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down")
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = t("Move down"))
                             }
                             if (buckets.size > 1) {
                                 IconButton(onClick = { buckets = buckets.filter { it != bucket }.toMutableList() }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete")
+                                    Icon(Icons.Default.Delete, contentDescription = t("Delete"))
                                 }
                             }
                         }
@@ -1368,10 +1396,10 @@ fun ManageBucketsDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onUpdateBuckets(buckets) }) { Text("Save Buckets") }
+            Button(onClick = { onUpdateBuckets(buckets) }) { Text(t("Save Buckets")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
@@ -1447,10 +1475,10 @@ fun TaskDetailsDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Task Card Details & Site Photos", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(t("Task Card Details & Site Photos"), fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 // Prints what's in the dialog right now, unsaved edits included.
                 IconButton(onClick = { onPrint(currentEdits()) }) {
-                    Icon(Icons.Default.Print, contentDescription = "Print Task")
+                    Icon(Icons.Default.Print, contentDescription = t("Print Task"))
                 }
             }
         },
@@ -1459,19 +1487,19 @@ fun TaskDetailsDialog(
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("Title") },
+                    label = { Text(t("Title")) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Description") },
+                    label = { Text(t("Description")) },
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 // Multi-Assignee Picker
                 Column {
-                    Text("Assigned Crew Members (${selectedMembers.size}):", style = MaterialTheme.typography.labelMedium)
+                    Text(t("Assigned Crew Members ({0}):", selectedMembers.size), style = MaterialTheme.typography.labelMedium)
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1491,20 +1519,20 @@ fun TaskDetailsDialog(
                 }
 
                 // Status Bucket
-                Text("Status Bucket", style = MaterialTheme.typography.labelMedium)
+                Text(t("Status Bucket"), style = MaterialTheme.typography.labelMedium)
                 Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     allBuckets.forEach { bucket ->
                         FilterChip(
                             selected = status == bucket,
                             onClick = { status = bucket },
-                            label = { Text(bucket) }
+                            label = { Text(t(bucket)) }
                         )
                     }
                 }
 
                 // Card Color Picker
                 Column {
-                    Text("Card Color", style = MaterialTheme.typography.labelMedium)
+                    Text(t("Card Color"), style = MaterialTheme.typography.labelMedium)
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1529,10 +1557,10 @@ fun TaskDetailsDialog(
                 // Dates
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { showStartDatePicker = true }, modifier = Modifier.weight(1f)) {
-                        Text(startDate?.let { "Start: ${formatDate(it)}" } ?: "Set Start Date")
+                        Text(startDate?.let { t("Start: {0}", formatDate(it)) } ?: t("Set Start Date"))
                     }
                     Button(onClick = { showDueDatePicker = true }, modifier = Modifier.weight(1f)) {
-                        Text(dueDate?.let { "Due: ${formatDate(it)}" } ?: "Set Due Date")
+                        Text(dueDate?.let { t("Due: {0}", formatDate(it)) } ?: t("Set Due Date"))
                     }
                 }
 
@@ -1541,7 +1569,7 @@ fun TaskDetailsDialog(
 
                 // Site Photos & Attachments
                 HorizontalDivider()
-                Text("Project Site Photos (${attachments.size}):", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text(t("Project Site Photos ({0}):", attachments.size), fontWeight = FontWeight.Bold, fontSize = 12.sp)
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
@@ -1551,7 +1579,7 @@ fun TaskDetailsDialog(
                     ) {
                         Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Camera")
+                        Text(t("Camera"))
                     }
                     Button(
                         onClick = { filePickerLauncher() },
@@ -1560,7 +1588,7 @@ fun TaskDetailsDialog(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Gallery / Browse")
+                        Text(t("Gallery / Browse"))
                     }
                     if (isUploadingPhoto) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
@@ -1583,7 +1611,7 @@ fun TaskDetailsDialog(
                                 Text(file.name, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                             IconButton(onClick = { attachments = attachments.filter { it.id != file.id } }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete Photo", tint = Color.Red, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Delete, contentDescription = t("Delete Photo"), tint = Color.Red, modifier = Modifier.size(16.dp))
                             }
                         }
                     }
@@ -1598,7 +1626,7 @@ fun TaskDetailsDialog(
                         TextButton(onClick = {
                             state.selectedDateMillis?.let { startDate = fromPickerMillis(it) }
                             showStartDatePicker = false
-                        }) { Text("OK") }
+                        }) { Text(t("OK")) }
                     }
                 ) { DatePicker(state = state) }
             }
@@ -1611,17 +1639,17 @@ fun TaskDetailsDialog(
                         TextButton(onClick = {
                             state.selectedDateMillis?.let { dueDate = fromPickerMillis(it) }
                             showDueDatePicker = false
-                        }) { Text("OK") }
+                        }) { Text(t("OK")) }
                     }
                 ) { DatePicker(state = state) }
             }
         },
         confirmButton = {
-            Button(onClick = { onSave(currentEdits()) }) { Text("Save Changes") }
+            Button(onClick = { onSave(currentEdits()) }) { Text(t("Save Changes")) }
         },
         dismissButton = {
             TextButton(onClick = { onDelete(task.id) }, colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)) {
-                Text("Delete Card")
+                Text(t("Delete Card"))
             }
         }
     )
@@ -1641,7 +1669,7 @@ fun ChecklistGroupsEditor(checklistGroups: List<ChecklistGroup>, onChange: (List
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val allChecklistItems = checklistGroups.flatMap { it.items }
         Text(
-            "Checklists (${allChecklistItems.count { it.isDone }}/${allChecklistItems.size} steps done):",
+            t("Checklists ({0}/{1} steps done):", allChecklistItems.count { it.isDone }, allChecklistItems.size),
             fontWeight = FontWeight.Bold,
             fontSize = 12.sp
         )
@@ -1672,7 +1700,7 @@ fun ChecklistGroupsEditor(checklistGroups: List<ChecklistGroup>, onChange: (List
                             onChange(latestGroups.filter { it.id != group.id })
                             newItemTextByGroup.remove(group.id)
                         }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Remove Checklist \"${group.title}\"", tint = Color.Red, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Delete, contentDescription = t("Remove Checklist \"{0}\"", group.title), tint = Color.Red, modifier = Modifier.size(18.dp))
                         }
                     }
 
@@ -1681,7 +1709,9 @@ fun ChecklistGroupsEditor(checklistGroups: List<ChecklistGroup>, onChange: (List
                         onReorder = { reordered ->
                             onChange(latestGroups.map { if (it.id == group.id) it.copy(items = reordered) else it })
                         },
-                        itemKey = { it.id }
+                        itemKey = { it.id },
+                        // a small handle icon: drag right away, a scroll swipe won't start on it
+                        longPressOnTouch = false
                     ) { item, dragHandleModifier ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1690,7 +1720,7 @@ fun ChecklistGroupsEditor(checklistGroups: List<ChecklistGroup>, onChange: (List
                         ) {
                             Icon(
                                 Icons.Default.Menu,
-                                contentDescription = "Drag to reorder",
+                                contentDescription = t("Drag to reorder"),
                                 modifier = dragHandleModifier.size(18.dp),
                                 tint = Color.Gray
                             )
@@ -1715,7 +1745,7 @@ fun ChecklistGroupsEditor(checklistGroups: List<ChecklistGroup>, onChange: (List
                                 val updatedItems = group.items.filter { it.id != item.id }
                                 onChange(latestGroups.map { if (it.id == group.id) it.copy(items = updatedItems) else it })
                             }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove Step", tint = Color.Red, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Delete, contentDescription = t("Remove Step"), tint = Color.Red, modifier = Modifier.size(18.dp))
                             }
                         }
                     }
@@ -1724,7 +1754,7 @@ fun ChecklistGroupsEditor(checklistGroups: List<ChecklistGroup>, onChange: (List
                         OutlinedTextField(
                             value = newItemTextByGroup[group.id] ?: "",
                             onValueChange = { newItemTextByGroup[group.id] = it },
-                            label = { Text("Add Step") },
+                            label = { Text(t("Add Step")) },
                             modifier = Modifier.weight(1f),
                             singleLine = false,
                             maxLines = 5
@@ -1737,7 +1767,7 @@ fun ChecklistGroupsEditor(checklistGroups: List<ChecklistGroup>, onChange: (List
                                 onChange(latestGroups.map { if (it.id == group.id) it.copy(items = it.items + newItem) else it })
                                 newItemTextByGroup[group.id] = ""
                             }
-                        }) { Text("Add") }
+                        }) { Text(t("Add")) }
                     }
                 }
             }
@@ -1747,7 +1777,7 @@ fun ChecklistGroupsEditor(checklistGroups: List<ChecklistGroup>, onChange: (List
             OutlinedTextField(
                 value = newGroupTitle,
                 onValueChange = { newGroupTitle = it },
-                label = { Text("New Checklist Name (e.g. Materials, Safety)") },
+                label = { Text(t("New Checklist Name (e.g. Materials, Safety)")) },
                 modifier = Modifier.weight(1f),
                 singleLine = true
             )
@@ -1759,7 +1789,7 @@ fun ChecklistGroupsEditor(checklistGroups: List<ChecklistGroup>, onChange: (List
             }) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Add Checklist")
+                Text(t("Add Checklist"))
             }
         }
 
@@ -1776,7 +1806,7 @@ fun ChecklistEditorDialog(task: Task, onDismiss: () -> Unit, onSave: (Task) -> U
         onDismissRequest = onDismiss,
         title = {
             Column {
-                Text("Edit Checklist", fontWeight = FontWeight.Bold)
+                Text(t("Edit Checklist"), fontWeight = FontWeight.Bold)
                 Text(task.title, style = MaterialTheme.typography.bodyMedium, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         },
@@ -1786,10 +1816,10 @@ fun ChecklistEditorDialog(task: Task, onDismiss: () -> Unit, onSave: (Task) -> U
             }
         },
         confirmButton = {
-            Button(onClick = { onSave(task.copy(checklistGroups = checklistGroups)) }) { Text("Save Checklist") }
+            Button(onClick = { onSave(task.copy(checklistGroups = checklistGroups)) }) { Text(t("Save Checklist")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
         }
     )
 }
@@ -1797,7 +1827,7 @@ fun ChecklistEditorDialog(task: Task, onDismiss: () -> Unit, onSave: (Task) -> U
 fun formatDate(millis: Long): String {
     val instant = Instant.fromEpochMilliseconds(millis)
     val date = instant.toLocalDateTime(TimeZone.currentSystemDefault()).date
-    return "${date.monthNumber}/${date.dayOfMonth}/${date.year}"
+    return numericDate(date.monthNumber, date.dayOfMonth, date.year)
 }
 
 // Material3's DatePicker always represents the selected day as UTC-midnight millis
