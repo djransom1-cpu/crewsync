@@ -8,3 +8,5 @@ actual fun getAppVersion(): String {
     val build = info?.get("CFBundleVersion") as? String
     return if (version != null) "$version ($build)" else "1.3"
 }
+
+actual val isTouchPlatform: Boolean = true

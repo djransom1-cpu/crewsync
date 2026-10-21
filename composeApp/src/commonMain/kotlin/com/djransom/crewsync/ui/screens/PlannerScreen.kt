@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -199,6 +200,27 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                 Text(t("Manage Buckets"), fontSize = 12.sp)
             }
             Spacer(Modifier.width(8.dp))
+            if (viewMode == "Board" && !isTouchPlatform) {
+                // Step the board one bucket left/right - the buckets are wider than the window,
+                // and this is the deliberate way to move sideways now that the wheel only
+                // scrolls within a bucket. Hidden on phones/tablets, which scroll by touch.
+                val firstVisible = boardScrollState.firstVisibleItemIndex
+                val canGoLeft = firstVisible > 0 || boardScrollState.firstVisibleItemScrollOffset > 0
+                val canGoRight = boardScrollState.canScrollForward
+                IconButton(
+                    onClick = { scope.launch { boardScrollState.animateScrollToItem((firstVisible - 1).coerceAtLeast(0)) } },
+                    enabled = canGoLeft
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = t("Previous bucket"))
+                }
+                IconButton(
+                    onClick = { scope.launch { boardScrollState.animateScrollToItem((firstVisible + 1).coerceAtMost(projectBuckets.lastIndex.coerceAtLeast(0))) } },
+                    enabled = canGoRight
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = t("Next bucket"))
+                }
+                Spacer(Modifier.width(4.dp))
+            }
             SegmentedButtonRow(viewMode = viewMode, onViewModeChange = { viewMode = it })
             Spacer(Modifier.width(8.dp))
             IconButton(onClick = { printPlannerOutline(projectName, projectBuckets, visibleTasks) }) {
@@ -235,17 +257,21 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                        // LazyRow only reacts to horizontal drag by default - a mouse wheel
-                        // (which reports a vertical delta) does nothing on it otherwise, which
-                        // reads as "I can't scroll to see the rest of the buckets" since a
-                        // click-drag gesture isn't an obvious thing to try on desktop.
+                        // Mouse wheel over a bucket should scroll THAT bucket up and down only -
+                        // the column's own verticalScroll handles (and consumes) it. Sideways
+                        // input - Shift+wheel on Windows, or a trackpad swipe - reports a
+                        // horizontal delta, and that's the one that moves the board. The board
+                        // used to turn vertical wheel deltas into horizontal scrolling too, which
+                        // made the page lurch sideways while you were trying to read a bucket;
+                        // the < > buttons in the toolbar now cover "get to the next bucket".
                         .pointerInput(Unit) {
                             awaitPointerEventScope {
                                 while (true) {
                                     val event = awaitPointerEvent()
                                     if (event.type == PointerEventType.Scroll) {
                                         val scrollChange = event.changes.firstOrNull() ?: continue
-                                        val delta = scrollChange.scrollDelta.let { if (it.x != 0f) it.x else it.y }
+                                        if (scrollChange.isConsumed) continue
+                                        val delta = scrollChange.scrollDelta.x
                                         if (delta != 0f) {
                                             scope.launch { boardScrollState.scrollBy(delta * 60f) }
                                             scrollChange.consume()
