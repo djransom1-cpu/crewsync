@@ -9,3 +9,5 @@ actual fun getAppVersion(): String {
         "1.0"
     }
 }
+
+actual val isTouchPlatform: Boolean = true
