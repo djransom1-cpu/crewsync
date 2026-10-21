@@ -187,7 +187,7 @@ function cleanForWrite(obj) {
 
 async function loadProjects(ctx) {
   const snap = await ctx.db.collection("projects").where("environmentId", "==", ctx.envId).get();
-  return snap.docs.map((d) => ({ id: d.id, ...d.data(), name: String(d.data().name ?? "").trim() }));
+  return snap.docs.map((d) => ({ ...d.data(), id: d.id, name: String(d.data().name ?? "").trim() }));
 }
 
 async function findProject(ctx, query) {
@@ -204,7 +204,7 @@ async function loadTasks(ctx, projectId) {
 
 /** Mirror toTaskSafe(): recover legacy flat `checklist` into a group when there are no groups. */
 function normalizeTask(id, data) {
-  const t = { id, ...data };
+  const t = { ...data, id }; // doc id wins over any stale "id" field stored in the document
   t.title = String(t.title ?? "").trim();
   t.status = t.status ?? "Not Started";
   t.assignedMembers = Array.isArray(t.assignedMembers) ? t.assignedMembers : [];
@@ -294,7 +294,7 @@ function taskDetail(t, ctx, projectName) {
 
 async function loadAppointments(ctx, projectId) {
   const snap = await ctx.db.collection("projects").doc(projectId).collection("appointments").get();
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return snap.docs.map((d) => ({ ...d.data(), id: d.id }));
 }
 
 /** Expand one stored appointment (with optional recurrence) into concrete instances within [from, to]. */
@@ -344,7 +344,7 @@ function apptView(a, ctx, projectName) {
 
 async function loadContacts(ctx) {
   const snap = await ctx.db.collection("contacts").where("environmentId", "==", ctx.envId).get();
-  return snap.docs.map((d) => ({ id: d.id, ...d.data(), name: String(d.data().name ?? "").trim() }));
+  return snap.docs.map((d) => ({ ...d.data(), id: d.id, name: String(d.data().name ?? "").trim() }));
 }
 
 function contactView(c) {
@@ -789,7 +789,7 @@ function buildServer(ctx) {
       };
       await ref.set(doc);
       const back = (await ref.get()).data();
-      return json({ created: true, ...apptView({ id: ref.id, ...back }, ctx, p.name) });
+      return json({ created: true, ...apptView({ ...back, id: ref.id }, ctx, p.name) });
     });
 
   reg("update_appointment",
@@ -818,7 +818,7 @@ function buildServer(ctx) {
       const ref = ctx.db.collection("projects").doc(p.id).collection("appointments").doc(target.id);
       await ref.update(patch);
       const back = (await ref.get()).data();
-      return json({ updated: Object.keys(patch), ...apptView({ id: target.id, ...back }, ctx, p.name) });
+      return json({ updated: Object.keys(patch), ...apptView({ ...back, id: target.id }, ctx, p.name) });
     });
 
   reg("delete_appointment",
@@ -863,7 +863,7 @@ function buildServer(ctx) {
         address: a.address ?? "", notes: a.notes ?? "", type: a.type ?? "Company",
       };
       await ref.set(doc);
-      return json({ created: true, ...contactView({ id: ref.id, ...(await ref.get()).data() }) });
+      return json({ created: true, ...contactView({ ...(await ref.get()).data(), id: ref.id }) });
     });
 
   reg("update_contact",
@@ -881,7 +881,7 @@ function buildServer(ctx) {
       if (!Object.keys(patch).length) throw new ToolError("Nothing to update.");
       const ref = ctx.db.collection("contacts").doc(c.id);
       await ref.update(patch);
-      return json({ updated: Object.keys(patch), ...contactView({ id: c.id, ...(await ref.get()).data() }) });
+      return json({ updated: Object.keys(patch), ...contactView({ ...(await ref.get()).data(), id: c.id }) });
     });
 
   reg("delete_contact",
@@ -904,7 +904,7 @@ function buildServer(ctx) {
         ctx.db.collection("projects").doc(p.id).collection("folders").get(),
       ]);
       const folders = Object.fromEntries(dSnap.docs.map((d) => [d.id, d.data().name]));
-      let files = fSnap.docs.map((d) => ({ id: d.id, ...d.data() })).map((f) => ({
+      let files = fSnap.docs.map((d) => ({ ...d.data(), id: d.id })).map((f) => ({
         id: f.id, name: f.name, folder: f.folderId ? folders[f.folderId] || f.folderId : undefined,
         uploadedBy: f.uploadedBy || undefined, uploadedAt: f.uploadedAt ? fmtDateTime(Number(f.uploadedAt), ctx.tz) : undefined, url: f.url,
       }));
@@ -931,7 +931,7 @@ function buildServer(ctx) {
     {},
     async () => {
       const snap = await ctx.db.collection("users").get();
-      const users = snap.docs.map((d) => ({ uid: d.id, ...d.data() }))
+      const users = snap.docs.map((d) => ({ ...d.data(), uid: d.id }))
         .filter((u) => (u.environmentIds || []).includes(ctx.envId) || u.activeEnvironmentId === ctx.envId)
         .map((u) => cleanForWrite({ name: u.name, email: u.email, trade: u.trade, role: u.role, phone: u.phone }));
       users.sort((x, y) => String(x.name || x.email).localeCompare(String(y.name || y.email)));

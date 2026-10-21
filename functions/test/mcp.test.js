@@ -45,7 +45,8 @@ async function main() {
   await db.collection("users").doc("u1").set({ email: "dan@example.com", name: "Dan", role: "Admin", activeEnvironmentId: "env1", environmentIds: ["env1"] });
   await db.collection("users").doc("u2").set({ email: "mike@example.com", name: "Mike", role: "Member", activeEnvironmentId: "env1", environmentIds: ["env1"] });
   await db.collection("environments").doc("env1").set({ name: "Ransom Carpentry" });
-  await db.collection("projects").doc("pM").set({ environmentId: "env1", name: "Martin ", buckets: ["Not Started", "In Progress", "TOP Priority", "Orders", "Completed"], members: ["dan@example.com"] });
+  // note the stale blank "id" field some real project docs carry - the doc id must win
+  await db.collection("projects").doc("pM").set({ id: "", environmentId: "env1", name: "Martin ", buckets: ["Not Started", "In Progress", "TOP Priority", "Orders", "Completed"], members: ["dan@example.com"] });
   await db.collection("projects").doc("pT").set({ environmentId: "env1", name: "test", buckets: ["Not Started", "Done"] });
   await db.collection("projects").doc("pT2").set({ environmentId: "env1", name: "Test", buckets: ["Not Started", "Done"] });
   // Weekly meeting Tue Oct 13 2026 9:00 AM Detroit
