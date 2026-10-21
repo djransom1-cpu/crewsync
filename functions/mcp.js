@@ -195,11 +195,34 @@ async function findProject(ctx, query) {
   return resolveByName(projects, query, "project");
 }
 
+/**
+ * Tasks are looked up by project (projects are already workspace-scoped) rather than by
+ * environmentId, because the first connector build wrote tasks with no environmentId at all —
+ * the app filters on that field, so those tasks were invisible in the planner. Any such task
+ * found here is repaired in place by stamping the workspace id its project belongs to.
+ */
 async function loadTasks(ctx, projectId) {
-  let q = ctx.db.collection("tasks").where("environmentId", "==", ctx.envId);
-  if (projectId) q = q.where("projectId", "==", projectId);
-  const snap = await q.get();
-  return snap.docs.map((d) => normalizeTask(d.id, d.data()));
+  const projectIds = projectId ? [projectId] : (await loadProjects(ctx)).map((p) => p.id);
+  if (!projectIds.length) return [];
+  const docs = [];
+  for (let i = 0; i < projectIds.length; i += 30) {
+    const snap = await ctx.db.collection("tasks").where("projectId", "in", projectIds.slice(i, i + 30)).get();
+    docs.push(...snap.docs);
+  }
+  const repairs = [];
+  const tasks = docs.map((d) => {
+    const t = normalizeTask(d.id, d.data());
+    if (!t.environmentId) {
+      t.environmentId = ctx.envId;
+      repairs.push(d.ref.update({ environmentId: ctx.envId }));
+    }
+    return t;
+  });
+  if (repairs.length) {
+    await Promise.all(repairs);
+    console.log(`[mcp] stamped environmentId on ${repairs.length} task(s) that were missing it`);
+  }
+  return tasks;
 }
 
 /** Mirror toTaskSafe(): recover legacy flat `checklist` into a group when there are no groups. */
