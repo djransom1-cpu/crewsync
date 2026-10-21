@@ -1,13 +1,19 @@
 {
   "name": "crewsync-functions",
-  "description": "Server-side push notifications for Crewsync chat messages and project alerts.",
+  "description": "Crewsync Cloud Functions: push notifications, geocoder, calendar feed, and the MCP connector for AI assistants.",
   "main": "index.js",
   "engines": {
     "node": "20"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "express": "^4.21.0",
     "firebase-admin": "^12.7.0",
-    "firebase-functions": "^6.3.0"
+    "firebase-functions": "^6.3.0",
+    "zod": "^4.6.1"
   },
-  "private": true
+  "private": true,
+  "scripts": {
+    "test": "node test/mcp.test.js"
+  }
 }
