@@ -188,6 +188,14 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    // ---------------- Sierra (Dan's truck assistant) ----------------
+    // A private relay between the Sierra Link app on a user's phone and the Sierra launcher in their truck:
+    // texts and call alerts one way, "send this text / call this person" the other. Each signed-in user can
+    // reach only their own /sierra/{their uid}; nothing here touches Crewsync's own data.
+    match /sierra/{userId}/{document=**} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
     // ---------------- app config ----------------
     // Read-only from the client; no write path exists in the app - manage
     // via the console or the Admin SDK.
