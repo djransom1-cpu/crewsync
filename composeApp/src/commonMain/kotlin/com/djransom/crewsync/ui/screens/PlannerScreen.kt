@@ -1040,7 +1040,7 @@ fun ProjectSummaryDialog(tasks: List<Task>, onDismiss: () -> Unit, onTaskClick: 
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AddTaskDialog(
     members: List<String>,
@@ -1132,8 +1132,9 @@ fun AddTaskDialog(
                 // Multi-Assignee Selection
                 Column {
                     Text(t("Assign Team Members ({0}):", selectedMembers.size), style = MaterialTheme.typography.labelMedium)
-                    Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    // Wraps onto extra lines so every crew member stays reachable on large teams.
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         members.forEach { email ->
@@ -1404,7 +1405,7 @@ fun ManageBucketsDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun TaskDetailsDialog(
     task: Task,
@@ -1500,8 +1501,9 @@ fun TaskDetailsDialog(
                 // Multi-Assignee Picker
                 Column {
                     Text(t("Assigned Crew Members ({0}):", selectedMembers.size), style = MaterialTheme.typography.labelMedium)
-                    Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    // Wraps onto extra lines so every crew member stays reachable on large teams.
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         members.forEach { email ->
@@ -1520,7 +1522,12 @@ fun TaskDetailsDialog(
 
                 // Status Bucket
                 Text(t("Status Bucket"), style = MaterialTheme.typography.labelMedium)
-                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Wraps onto extra lines instead of scrolling sideways - a sideways-only row left
+                // buckets past the edge out of reach (no sideways mouse wheel on PC/web).
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     allBuckets.forEach { bucket ->
                         FilterChip(
                             selected = status == bucket,
