@@ -17,6 +17,7 @@ fun DocumentSnapshot.toProjectSafe(): Project {
             val envId: String = try { this.get("environmentId") } catch (_: Exception) { "" }
             val shareEnabled: Boolean = try { this.get("calendarShareEnabled") } catch (_: Exception) { false }
             val shareToken: String = try { this.get("calendarShareToken") } catch (_: Exception) { "" }
+            val isArchived: Boolean = try { this.get("archived") } catch (_: Exception) { false }
             Project(
                 id = this.id,
                 environmentId = envId,
@@ -27,7 +28,8 @@ fun DocumentSnapshot.toProjectSafe(): Project {
                 location = locationStr,
                 calendarShareEnabled = shareEnabled,
                 calendarShareToken = shareToken,
-                createdAt = created
+                createdAt = created,
+                archived = isArchived
             )
         } catch (_: Exception) {
             Project(id = this.id, name = "Project ${this.id.take(4)}")
@@ -212,6 +214,7 @@ fun com.djransom.crewsync.data.model.Project.toFirestoreMap(): Map<String, Any?>
     map["cardSizes"] = cardSizes
     map["calendarShareEnabled"] = calendarShareEnabled
     map["calendarShareToken"] = calendarShareToken
+    map["archived"] = archived
     return map
 }
 

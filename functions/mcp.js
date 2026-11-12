@@ -416,7 +416,7 @@ function buildServer(ctx) {
 
   // ---- projects ----------------------------------------------------------------------------
   reg("list_projects",
-    "List every project in the active workspace with task counts, location, and members.",
+    "List every project in the active workspace with task counts, location, and members. Archived projects are marked archived: true.",
     {},
     async () => {
       const [projects, tasks] = await Promise.all([loadProjects(ctx), loadTasks(ctx)]);
@@ -424,7 +424,7 @@ function buildServer(ctx) {
         const mine = tasks.filter((t) => t.projectId === p.id);
         const doneBucket = (p.buckets || []).slice(-1)[0];
         const open = mine.filter((t) => !/^(done|completed?)$/i.test(t.status) && t.status !== doneBucket).length;
-        return { id: p.id, name: p.name, location: p.location || undefined, openTasks: open, totalTasks: mine.length, members: p.members || [], buckets: p.buckets || [] };
+        return { id: p.id, name: p.name, archived: p.archived ? true : undefined, location: p.location || undefined, openTasks: open, totalTasks: mine.length, members: p.members || [], buckets: p.buckets || [] };
       });
       rows.sort((a, b) => b.totalTasks - a.totalTasks || a.name.localeCompare(b.name));
       return json(rows);

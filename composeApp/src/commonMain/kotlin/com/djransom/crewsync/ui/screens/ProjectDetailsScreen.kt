@@ -75,6 +75,7 @@ fun ProjectDetailsScreen(
     var showAddMemberDialog by remember { mutableStateOf(false) }
     var showProjectAlertDialog by remember { mutableStateOf(false) }
     var showEditProjectDialog by remember { mutableStateOf(false) }
+    var showDeleteProjectDialog by remember { mutableStateOf(false) }
     var isUploading by remember { mutableStateOf(false) }
     var currentFolderId by remember { mutableStateOf<String?>(null) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
@@ -276,10 +277,13 @@ fun ProjectDetailsScreen(
                         }
                     },
                     actions = {
-                        if (isAdmin && selectedTab == 0) {
+                        // The project's creator (team leader) can edit, archive and delete it, not just admins
+                        if (isLeader && selectedTab == 0) {
                             IconButton(onClick = { showEditProjectDialog = true }) {
                                 Icon(Icons.Default.Edit, contentDescription = t("Edit Project"))
                             }
+                        }
+                        if (isAdmin && selectedTab == 0) {
                             IconButton(onClick = { showProjectAlertDialog = true }) {
                                 Icon(Icons.Default.Warning, contentDescription = t("Send Alert"), tint = MaterialTheme.colorScheme.error)
                             }
@@ -492,11 +496,100 @@ fun ProjectDetailsScreen(
                             doc.update("ownerEmail" to edits.ownerEmail)
                             showEditProjectDialog = false
                         }
+                    },
+                    onArchiveToggle = {
+                        val archive = !(project?.archived ?: false)
+                        scope.launch {
+                            firestore.collection("projects").document(projectId).update("archived" to archive)
+                            showEditProjectDialog = false
+                            if (archive) onBack()
+                        }
+                    },
+                    onDeleteRequest = {
+                        showEditProjectDialog = false
+                        showDeleteProjectDialog = true
+                    }
+                )
+            }
+
+            if (showDeleteProjectDialog && project != null) {
+                DeleteProjectDialog(
+                    project = project!!,
+                    onDismiss = { showDeleteProjectDialog = false },
+                    onDeleted = {
+                        showDeleteProjectDialog = false
+                        onBack()
                     }
                 )
             }
         }
     }
+}
+
+/**
+ * Permanently deletes a project and everything in it (tasks, calendar, files, photos, notes, chat) through the
+ * deleteProject Cloud Function, which checks the caller made the project or is an admin. He has to type the
+ * project's name first so a real job can't go by accident.
+ */
+@Composable
+fun DeleteProjectDialog(project: Project, onDismiss: () -> Unit, onDeleted: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var typed by remember(project.id) { mutableStateOf("") }
+    var working by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    // Compare letters and digits only, so punctuation, extra spaces, smart quotes or keyboard autocorrect
+    // of things like "(duplicate, ok to remove)" can't keep the button disabled
+    fun normalize(s: String) = s.filter { it.isLetterOrDigit() }.lowercase()
+    val matches = normalize(project.name).let { it.isNotEmpty() && normalize(typed) == it }
+
+    AlertDialog(
+        onDismissRequest = { if (!working) onDismiss() },
+        title = { Text(t("Delete Project Permanently")) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(t("This deletes {0} and everything in it: tasks, calendar, files and photos, notes and chat. It can't be undone.", project.name))
+                Text(
+                    t("If you might need it again, archive it instead."),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray
+                )
+                TextField(
+                    value = typed,
+                    onValueChange = { typed = it; error = null },
+                    label = { Text(t("Type the project name to confirm")) },
+                    placeholder = { Text(project.name) },
+                    singleLine = true,
+                    enabled = !working,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(autoCorrectEnabled = false),
+                    supportingText = {
+                        if (typed.isNotBlank() && !matches) Text(t("Doesn't match \"{0}\" yet", project.name))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (working) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    working = true; error = null
+                    scope.launch {
+                        val problem = com.djransom.crewsync.util.deleteProjectForever(project.id)
+                        working = false
+                        if (problem == null) onDeleted() else error = problem
+                    }
+                },
+                enabled = matches && !working,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text(t("Delete Forever"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !working) { Text(t("Cancel")) }
+        }
+    )
 }
 
 @Composable
@@ -534,7 +627,13 @@ data class ProjectEdits(
 )
 
 @Composable
-fun EditProjectDialog(project: Project, onDismiss: () -> Unit, onConfirm: (ProjectEdits) -> Unit) {
+fun EditProjectDialog(
+    project: Project,
+    onDismiss: () -> Unit,
+    onConfirm: (ProjectEdits) -> Unit,
+    onArchiveToggle: () -> Unit = {},
+    onDeleteRequest: () -> Unit = {}
+) {
     var name by remember(project.id) { mutableStateOf(project.name) }
     var description by remember(project.id) { mutableStateOf(project.description) }
     var location by remember(project.id) { mutableStateOf(project.location) }
@@ -570,6 +669,25 @@ fun EditProjectDialog(project: Project, onDismiss: () -> Unit, onConfirm: (Proje
                 TextField(value = ownerName, onValueChange = { ownerName = it }, label = { Text(t("Owner Name")) }, modifier = Modifier.fillMaxWidth())
                 TextField(value = ownerPhone, onValueChange = { ownerPhone = it }, label = { Text(t("Owner Phone")) }, modifier = Modifier.fillMaxWidth())
                 TextField(value = ownerEmail, onValueChange = { ownerEmail = it }, label = { Text(t("Owner Email")) }, modifier = Modifier.fillMaxWidth())
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                Text(t("Manage Project"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(
+                    if (project.archived) t("This project is archived. Restore it to put it back on the dashboard.")
+                    else t("Archiving hides the project from the dashboard but keeps everything in it. You can restore it any time."),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray
+                )
+                OutlinedButton(onClick = onArchiveToggle, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (project.archived) t("Restore Project") else t("Archive Project"))
+                }
+                TextButton(
+                    onClick = onDeleteRequest,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(t("Delete Project Permanently…"))
+                }
             }
         },
         confirmButton = {

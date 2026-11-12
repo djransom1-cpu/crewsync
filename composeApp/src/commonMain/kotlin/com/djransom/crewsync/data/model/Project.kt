@@ -19,5 +19,8 @@ data class Project(
     val cardSizes: Map<String, String> = emptyMap(), // cardId to "Small" or "Large"
     val calendarShareEnabled: Boolean = false,
     val calendarShareToken: String = "", // the calendarFeed Cloud Function's only access control - see ShareUtils.kt
-    val createdAt: Long = 0L
+    val createdAt: Long = 0L,
+    // Archived projects drop off the dashboard (see "Show archived") but keep everything in them.
+    // Only the project's creator (teamLeaderId) or an admin is offered Archive/Restore and Delete.
+    val archived: Boolean = false
 )

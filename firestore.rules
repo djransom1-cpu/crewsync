@@ -110,7 +110,7 @@ service cloud.firestore {
     match /projects/{projectId} {
       allow read, update: if canAccessEnvironment(resource.data.environmentId);
       allow create: if inMyEnvironments(request.resource.data.environmentId);
-      allow delete: if isSuperAdmin(); // not exposed in the app UI today
+      allow delete: if isSuperAdmin(); // the app deletes projects through the deleteProject Cloud Function instead
 
       match /messages/{messageId} {
         allow read, create: if canAccessProject(projectId);
