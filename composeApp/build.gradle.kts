@@ -166,12 +166,16 @@ compose.desktop {
             includeAllModules = true
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Crewsync" // Changed from com.djransom.crewsync
-            packageVersion = "1.0.11"
+            packageVersion = "1.0.12"
             description = "Construction Crew Management"
             copyright = "© 2026 Crewsync Team"
             vendor = "Crewsync"
             
+            // The app's icon (orange sync ring and C, from the Android launcher art) for the installer,
+            // Start menu, desktop shortcut and the .exe; the window loads icon.png itself.
+            linux { iconFile.set(project.file("icon.png")) }
             windows {
+                iconFile.set(project.file("icon.ico"))
                 menu = true
                 shortcut = true
                 upgradeUuid = "da7d34a6-9606-4423-8a32-4e613657386d" // Permanent ID for updates
