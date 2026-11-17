@@ -52,6 +52,7 @@ import kotlinx.coroutines.launch
 import kotlin.time.Clock
 import com.djransom.crewsync.util.toProjectSafe
 import com.djransom.crewsync.util.toTaskSafe
+import com.djransom.crewsync.util.toDailyLogSafe
 import com.djransom.crewsync.util.toFirestoreMap
 import com.djransom.crewsync.util.parseColor
 import coil3.compose.AsyncImage
@@ -163,6 +164,12 @@ fun ProjectDetailsScreen(
         }
     }
     val messages by messagesFlow.collectAsState(initial = emptyList())
+
+    val dailyLogsFlow = remember(projectId) {
+        firestore.collection("projects").document(projectId).collection("dailyLogs").snapshots
+            .map { snap -> snap.documents.map { it.toDailyLogSafe() }.sortedByDescending { it.date } }
+    }
+    val dailyLogs by dailyLogsFlow.collectAsState(initial = emptyList())
 
     // rememberSaveable, not remember - the Activity gets torn down and recreated on rotation
     // (no configChanges override in the manifest), and a plain remember would silently reset
@@ -320,6 +327,7 @@ fun ProjectDetailsScreen(
                             messages = messages,
                             files = files,
                             notes = notes,
+                            dailyLogs = dailyLogs,
                             userMap = userMap,
                             userPicMap = userPicMap,
                             onMoveCard = { cardId, direction ->

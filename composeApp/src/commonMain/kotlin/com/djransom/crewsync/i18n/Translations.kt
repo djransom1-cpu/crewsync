@@ -3,6 +3,9 @@ package com.djransom.crewsync.i18n
 // Generated from the English wording used in t("…") calls. Keys are the English text exactly as written in the code.
 
 internal val translationsPl: Map<String, String> = mapOf(
+    "Nothing logged for today yet." to "Na dziś nic jeszcze nie zapisano.",
+    "Today: {0} item(s)" to "Dziś: pozycji: {0}",
+    "Last report: {0}" to "Ostatni raport: {0}",
     "No work logged" to "Brak zapisanych prac",
     "Weather notes" to "Uwagi o pogodzie",
     "Daily Log" to "Dziennik dzienny",
@@ -522,6 +525,9 @@ internal val translationsPl: Map<String, String> = mapOf(
 )
 
 internal val translationsNl: Map<String, String> = mapOf(
+    "Nothing logged for today yet." to "Vandaag nog niets gelogd.",
+    "Today: {0} item(s)" to "Vandaag: {0} item(s)",
+    "Last report: {0}" to "Laatste rapport: {0}",
     "No work logged" to "Geen werk gelogd",
     "Weather notes" to "Weernotities",
     "Daily Log" to "Dagrapport",
@@ -1041,6 +1047,9 @@ internal val translationsNl: Map<String, String> = mapOf(
 )
 
 internal val translationsFr: Map<String, String> = mapOf(
+    "Nothing logged for today yet." to "Rien de consigné pour aujourd'hui.",
+    "Today: {0} item(s)" to "Aujourd'hui : {0} élément(s)",
+    "Last report: {0}" to "Dernier rapport : {0}",
     "No work logged" to "Aucun travail consigné",
     "Weather notes" to "Notes météo",
     "Daily Log" to "Journal de chantier",
@@ -1560,6 +1569,9 @@ internal val translationsFr: Map<String, String> = mapOf(
 )
 
 internal val translationsDe: Map<String, String> = mapOf(
+    "Nothing logged for today yet." to "Für heute noch nichts erfasst.",
+    "Today: {0} item(s)" to "Heute: {0} Eintrag/Einträge",
+    "Last report: {0}" to "Letzter Bericht: {0}",
     "No work logged" to "Keine Arbeiten erfasst",
     "Weather notes" to "Wetternotizen",
     "Daily Log" to "Bautagebuch",
