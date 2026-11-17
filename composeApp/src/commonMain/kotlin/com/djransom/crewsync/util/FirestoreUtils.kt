@@ -318,3 +318,61 @@ fun DocumentSnapshot.toProjectFileSafe(): ProjectFile {
         }
     }
 }
+
+// ---- Daily logs (projects/{projectId}/dailyLogs/{date}) ----------------------------------------
+
+fun DailyLog.toFirestoreMap(): Map<String, Any?> {
+    val map = mutableMapOf<String, Any?>()
+    map["id"] = id
+    map["projectId"] = projectId
+    map["date"] = date
+    map["weather"] = weather
+    if (weatherReadings.isNotEmpty()) map["weatherReadings"] = weatherReadings
+    // Same empty-list rule as Task.toFirestoreMap(): GitLive's JS encoder can't take an empty
+    // array through the Any-typed path, and a missing key decodes back to emptyList() anyway.
+    if (crewOnSite.isNotEmpty()) map["crewOnSite"] = crewOnSite
+    if (workCompleted.isNotEmpty()) map["workCompleted"] = workCompleted
+    if (deliveriesInspections.isNotEmpty()) map["deliveriesInspections"] = deliveriesInspections
+    if (issuesDelays.isNotEmpty()) map["issuesDelays"] = issuesDelays
+    if (tomorrowPlan.isNotEmpty()) map["tomorrowPlan"] = tomorrowPlan
+    map["notes"] = notes
+    if (photos.isNotEmpty()) map["photos"] = photos
+    if (entries.isNotEmpty()) map["entries"] = entries
+    if (contributors.isNotEmpty()) map["contributors"] = contributors
+    map["createdBy"] = createdBy
+    map["createdAt"] = createdAt.toDouble()
+    map["updatedBy"] = updatedBy
+    map["updatedAt"] = updatedAt.toDouble()
+    map["pdfUrl"] = pdfUrl
+    map["pdfBuiltAt"] = pdfBuiltAt.toDouble()
+    return map
+}
+
+fun DocumentSnapshot.toDailyLogSafe(): DailyLog {
+    return try {
+        this.data<DailyLog>().copy(id = this.id, date = this.id)
+    } catch (_: Exception) {
+        fun str(k: String): String = try { this.get<String>(k) } catch (_: Exception) { "" }
+        fun strList(k: String): List<String> = try { this.get<List<String>>(k) } catch (_: Exception) { emptyList() }
+        fun long(k: String): Long = try { this.get<Double>(k).toLong() } catch (_: Exception) { try { this.get<Long>(k) } catch (_: Exception) { 0L } }
+        DailyLog(
+            id = this.id,
+            projectId = str("projectId"),
+            date = this.id,
+            weather = str("weather"),
+            crewOnSite = strList("crewOnSite"),
+            workCompleted = strList("workCompleted"),
+            deliveriesInspections = strList("deliveriesInspections"),
+            issuesDelays = strList("issuesDelays"),
+            tomorrowPlan = strList("tomorrowPlan"),
+            notes = str("notes"),
+            contributors = strList("contributors"),
+            createdBy = str("createdBy"),
+            createdAt = long("createdAt"),
+            updatedBy = str("updatedBy"),
+            updatedAt = long("updatedAt"),
+            pdfUrl = str("pdfUrl"),
+            pdfBuiltAt = long("pdfBuiltAt")
+        )
+    }
+}

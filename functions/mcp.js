@@ -40,6 +40,7 @@ const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/ser
 const { mcpAuthRouter } = require("@modelcontextprotocol/sdk/server/auth/router.js");
 const { requireBearerAuth } = require("@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js");
 const { buildProvider, hashKey, DEFAULT_TIMEZONE } = require("./oauth");
+const dailyReport = require("./dailyReport");
 
 // Legacy shared secret from the first connector build. Still accepted at the consent page and
 // mapped to the owner account, so existing sign-ins keep working after this deploy.
@@ -1009,6 +1010,104 @@ function buildServer(ctx) {
       toks.docs.forEach((d) => batch.delete(d.ref));
       await batch.commit();
       return text(`Revoked ${keys.size} access key(s) and ${toks.size} active login(s) for ${email}.`);
+    });
+
+  // ---- daily log ---------------------------------------------------------------------------
+  const sectionKeys = dailyReport.SECTIONS.map(([k]) => k);
+  const sectionDoc = "Sections: " + dailyReport.SECTIONS.map(([k, t]) => `${k} (${t})`).join(", ");
+  const resolveLogDate = (d) => {
+    if (!d || /^today$/i.test(d)) return dailyReport.todayIn(ctx.tz);
+    if (/^yesterday$/i.test(d)) { const t = new Date(Date.parse(dailyReport.todayIn(ctx.tz) + "T12:00:00Z") - 86400000); return t.toISOString().slice(0, 10); }
+    if (!dailyReport.isLogDate(d)) throw new ToolError(`Date must be YYYY-MM-DD, 'today' or 'yesterday' (got "${d}").`);
+    return d;
+  };
+  const logView = (log, projectName) => ({
+    project: projectName, date: log.date, dayOfWeek: new Date(log.date + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" }),
+    weather: dailyReport.weatherLine(log) || undefined,
+    weatherReadings: log.weatherReadings.length ? log.weatherReadings.map((r) => ({ when: dailyReport.SLOT_LABEL[r.slot] || r.slot, at: fmtDateTime(r.at, ctx.tz), tempF: r.tempF, conditions: r.conditions, windMph: r.windMph, precip: r.precip })) : undefined,
+    noWorkLogged: (!log.crewOnSite.length && !log.workCompleted.length && !log.deliveriesInspections.length && !log.issuesDelays.length && !log.tomorrowPlan.length && !log.notes && !log.photos.length) || undefined,
+    ...Object.fromEntries(dailyReport.SECTIONS.map(([k]) => [k, log[k]])),
+    notes: log.notes || undefined,
+    photos: log.photos.length ? log.photos.map((p) => ({ name: p.name, url: p.url })) : undefined,
+    contributors: log.contributors,
+    lastUpdated: log.updatedAt ? fmtDateTime(log.updatedAt, ctx.tz) : undefined,
+    pdfUrl: log.pdfUrl || undefined,
+    pdfIsCurrent: log.pdfUrl ? log.pdfBuiltAt >= log.updatedAt : undefined,
+    recentAdditions: log.entries.slice(-5).map((e) => ({ by: e.by, at: fmtDateTime(e.at, ctx.tz), source: e.source, text: e.text })),
+  });
+
+  reg("get_daily_log",
+    "The daily log / daily report for a project on one day: weather, crew & subs on site, work completed, deliveries & inspections, issues & delays, plan for tomorrow, notes, photos. Defaults to today.",
+    { project: z.string().describe("Project name or ID"), date: z.string().optional().describe("YYYY-MM-DD, 'today' (default) or 'yesterday'") },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const date = resolveLogDate(a.date);
+      const log = await dailyReport.getLog(ctx.db, p.id, date);
+      if (!log) return json({ project: p.name, date, empty: true, note: "No log for this day yet. Use add_to_daily_log to start one." });
+      return json(logView(log, p.name));
+    });
+
+  reg("list_daily_logs",
+    "Which days have a daily log for a project, newest first, with a one-line summary each. Use get_daily_log for the full day.",
+    { project: z.string().describe("Project name or ID"), from: z.string().optional().describe("YYYY-MM-DD"), to: z.string().optional().describe("YYYY-MM-DD"), limit: z.number().int().min(1).max(200).optional() },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const logs = await dailyReport.listLogs(ctx.db, p.id, { from: a.from, to: a.to, limit: a.limit || 60 });
+      return json({ project: p.name, count: logs.length, days: logs.map((l) => ({
+        date: l.date, weather: dailyReport.weatherLine(l) || undefined, noWorkLogged: (!l.crewOnSite.length && !l.workCompleted.length && !l.notes) || undefined,
+        summary: `${l.workCompleted.length} work item(s), ${l.crewOnSite.length} crew line(s), ${l.issuesDelays.length} issue(s), ${l.photos.length} photo(s)`,
+        contributors: l.contributors, pdf: l.pdfUrl ? (l.pdfBuiltAt >= l.updatedAt ? "current" : "stale") : "none",
+      })) });
+    });
+
+  reg("add_to_daily_log",
+    `Add to a project's daily log for a day (today by default) WITHOUT overwriting what's already there - lines are appended to the sections you give, duplicates skipped, and the raw text you were given is kept with your name on it. This is what Sierra and the morning planning session should use. Sort what the person said into sections yourself. ${sectionDoc}.`,
+    {
+      project: z.string().describe("Project name or ID"),
+      date: z.string().optional().describe("YYYY-MM-DD, 'today' (default) or 'yesterday'"),
+      crewOnSite: z.array(z.string()).optional().describe("e.g. 'JR + 2 helpers - roofing', 'Jeff, Ian, Owen - lanai'"),
+      workCompleted: z.array(z.string()).optional(),
+      deliveriesInspections: z.array(z.string()).optional(),
+      issuesDelays: z.array(z.string()).optional(),
+      tomorrowPlan: z.array(z.string()).optional(),
+      notes: z.string().optional().describe("Free text appended to the Notes section"),
+      weather: z.string().optional().describe("Weather NOTES in the person's words ('rained out at 1:30'). Readings at 7 AM / noon / 4 PM are recorded automatically; don't restate them here."),
+      rawText: z.string().optional().describe("What the person actually said, verbatim, so nothing is lost in the sorting"),
+      source: z.enum(["claude", "sierra", "app"]).optional().describe("Default claude"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const date = resolveLogDate(a.date);
+      const add = Object.fromEntries(sectionKeys.filter((k) => Array.isArray(a[k]) && a[k].length).map((k) => [k, a[k]]));
+      if (!Object.keys(add).length && !a.notes && !a.weather) throw new ToolError("Nothing to add — pass at least one section, notes, or weather.");
+      const { log, changed } = await dailyReport.upsertLog(ctx.db, { projectId: p.id, project: p, date, by: ctx.email, source: a.source || "claude", add, notes: a.notes, weather: a.weather, rawText: a.rawText });
+      return json({ added: changed, ...logView(log, p.name) });
+    });
+
+  reg("set_daily_log_section",
+    `Replace one whole section of a day's log with a new list of lines (use when the person asks to rewrite or remove items; add_to_daily_log is the normal way to add). ${sectionDoc}.`,
+    {
+      project: z.string(), date: z.string().optional(),
+      section: z.enum(sectionKeys), lines: z.array(z.string()).describe("The full new list; empty clears the section"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const date = resolveLogDate(a.date);
+      const { log } = await dailyReport.upsertLog(ctx.db, { projectId: p.id, project: p, date, by: ctx.email, source: "claude", replace: { [a.section]: a.lines } });
+      return json({ replaced: a.section, ...logView(log, p.name) });
+    });
+
+  reg("daily_report_pdf",
+    "Build (or rebuild) the formatted PDF of a day's daily log and return its link. The PDF is also filed under the project's Files tab in the 'Daily Reports' folder, so the crew can open it in the app. Use the link when the person wants to email or print the report.",
+    { project: z.string(), date: z.string().optional().describe("YYYY-MM-DD, 'today' (default) or 'yesterday'"), force: z.boolean().optional().describe("Rebuild even if the stored PDF is current") },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const date = resolveLogDate(a.date);
+      const log = (await dailyReport.getLog(ctx.db, p.id, date)) || dailyReport.normalizeLog(p.id, date, {});
+      if (!a.force && log.pdfUrl && log.pdfBuiltAt >= log.updatedAt) return json({ project: p.name, date, url: log.pdfUrl, rebuilt: false });
+      const names = await dailyReport.namesForEmails(ctx.db, [...log.contributors, log.createdBy, ctx.email]);
+      const { url, fileName } = await dailyReport.buildAndFilePdf(ctx.db, { projectId: p.id, project: p, log, names, builtBy: ctx.email });
+      return json({ project: p.name, date, url, fileName, rebuilt: true, emailSubject: `Daily Report - ${p.name} - ${date}` });
     });
 
   return server;

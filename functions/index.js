@@ -337,3 +337,8 @@ exports.deleteProject = onRequest({ timeoutSeconds: 540, memory: "512MiB" }, asy
 });
 
 exports.crewsyncMcp = require("./mcp").crewsyncMcp;
+
+// Daily log PDF for the app's Daily Log tab - see functions/dailyReport.js
+exports.dailyReportPdf = require("./dailyReport").dailyReportPdf;
+// 7 AM / noon / 4 PM site-time weather readings onto each project's daily log
+exports.recordSiteWeather = require("./dailyReport").recordSiteWeather;

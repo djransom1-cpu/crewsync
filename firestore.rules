@@ -139,6 +139,13 @@ service cloud.firestore {
           allow read, create, update, delete: if canAccessProject(projectId);
         }
       }
+
+      // Daily log: one document per day (the id is the date), written by anyone on the project.
+      // No delete from the app - a day's report is a record; admins can clear one in the console.
+      match /dailyLogs/{date} {
+        allow read, create, update: if canAccessProject(projectId);
+        allow delete: if isAdmin();
+      }
     }
 
     // ---------------- tasks / planner ----------------

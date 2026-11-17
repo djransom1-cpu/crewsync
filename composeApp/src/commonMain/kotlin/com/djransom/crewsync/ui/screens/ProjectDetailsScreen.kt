@@ -176,7 +176,8 @@ fun ProjectDetailsScreen(
         "Chat" to Icons.Default.Email,
         "Planner" to Icons.AutoMirrored.Filled.List,
         "Calendar" to Icons.Default.DateRange,
-        "Notes" to Icons.Default.Edit
+        "Notes" to Icons.Default.Edit,
+        "Daily Log" to Icons.Default.Assignment
     )
 
     val isSuperAdmin = userProfile?.role == "SuperAdmin" || userProfile?.role == "Admin"
@@ -405,6 +406,7 @@ fun ProjectDetailsScreen(
                             firstDayOfWeek = userProfile?.firstDayOfWeek ?: "Sunday"
                         )
                         6 -> NotesTab(projectId = projectId, notes = notes, currentUserEmail = auth.currentUser?.email ?: "")
+                        7 -> DailyLogTab(projectId = projectId, project = project!!, userMap = userMap, currentUserEmail = auth.currentUser?.email ?: "")
                     }
                 }
             }

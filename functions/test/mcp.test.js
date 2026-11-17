@@ -2,6 +2,20 @@
 const assert = require("assert");
 const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = require("@modelcontextprotocol/sdk/inMemory.js");
+// Offline stubs: no Firebase Storage, no network. The PDF is still really rendered by pdfkit.
+const saved = {};
+require("../dailyReport.js").storageBucket = () => ({ name: "test-bucket", file: (p) => ({ save: async (bytes) => { saved[p] = bytes; } }) });
+// Fake NWS + geocoder so the weather recorder can be exercised offline.
+let obsTempC = 1.1, obsText = "Light Rain";
+global.fetch = async (url) => {
+  const j = (o) => ({ ok: true, json: async () => o, arrayBuffer: async () => new ArrayBuffer(0) });
+  url = String(url);
+  if (url.includes("/geocode?")) return j({ lat: 44.4, lon: -86.1 });
+  if (url.includes("api.weather.gov/points/")) return j({ properties: { observationStations: "https://api.weather.gov/gridpoints/X/1,1/stations", forecastHourly: "https://api.weather.gov/gridpoints/X/1,1/forecast/hourly" } });
+  if (url.endsWith("/stations")) return j({ features: [{ id: "https://api.weather.gov/stations/KMBL", properties: { stationIdentifier: "KMBL" } }] });
+  if (url.endsWith("/observations/latest")) return j({ properties: { timestamp: new Date().toISOString(), temperature: { value: obsTempC }, windSpeed: { value: 24.1 }, textDescription: obsText, precipitationLastHour: { value: 0 } } });
+  return { ok: false };
+};
 const { buildServer, resolveContext, expandAppointment, parseDate, fmtDateTime } = require("../mcp.js");
 
 // ---- tiny Firestore fake -------------------------------------------------------------------
@@ -12,7 +26,7 @@ function makeDb() {
     id: path.split("/").pop(),
     path,
     async get() { const d = store.get(path); return { id: path.split("/").pop(), exists: !!d, data: () => (d ? JSON.parse(JSON.stringify(d)) : undefined) }; },
-    async set(data) { store.set(path, JSON.parse(JSON.stringify(data))); },
+    async set(data, opts) { const d = JSON.parse(JSON.stringify(data)); store.set(path, opts?.merge ? { ...(store.get(path) || {}), ...d } : d); },
     async update(patch) { const d = store.get(path); if (!d) throw new Error("no doc " + path); store.set(path, { ...d, ...JSON.parse(JSON.stringify(patch)) }); },
     async delete() { store.delete(path); },
     collection(name) { return colRef(path + "/" + name); },
@@ -34,6 +48,7 @@ function makeDb() {
   });
   return {
     collection: (name) => colRef(name),
+    async runTransaction(fn) { const tx = { get: (r) => r.get(), set: (r, d, o) => { ops.push(() => r.set(d, o)); }, update: (r, p) => { ops.push(() => r.update(p)); } }; const ops = []; const out = await fn(tx); for (const o of ops) await o(); return out; },
     batch() { const ops = []; return { update: (r, p) => ops.push(() => r.update(p)), delete: (r) => ops.push(() => r.delete()), async commit() { for (const o of ops) await o(); } }; },
     _store: store,
   };
@@ -46,7 +61,7 @@ async function main() {
   await db.collection("users").doc("u2").set({ email: "mike@example.com", name: "Mike", role: "Member", activeEnvironmentId: "env1", environmentIds: ["env1"] });
   await db.collection("environments").doc("env1").set({ name: "Ransom Carpentry" });
   // note the stale blank "id" field some real project docs carry - the doc id must win
-  await db.collection("projects").doc("pM").set({ id: "", environmentId: "env1", name: "Martin ", buckets: ["Not Started", "In Progress", "TOP Priority", "Orders", "Completed"], members: ["dan@example.com"] });
+  await db.collection("projects").doc("pM").set({ id: "", environmentId: "env1", name: "Martin ", location: "2676 Schaef Rd, Bear Lake, MI 49614", buckets: ["Not Started", "In Progress", "TOP Priority", "Orders", "Completed"], members: ["dan@example.com"] });
   await db.collection("projects").doc("pT").set({ environmentId: "env1", name: "test", buckets: ["Not Started", "Done"] });
   await db.collection("projects").doc("pT2").set({ environmentId: "env1", name: "Test", buckets: ["Not Started", "Done"] });
   // Weekly meeting Tue Oct 13 2026 9:00 AM Detroit
@@ -133,6 +148,45 @@ async function main() {
   const ctx2 = await resolveContext(db, { extra: { email: "mike@example.com" } });
   const s2 = buildServer(ctx2); const [c2, t2] = InMemoryTransport.createLinkedPair(); await s2.connect(t2); const cl2 = new Client({ name: "t", version: "0" }); await cl2.connect(c2);
   const rr = await cl2.callTool({ name: "create_access_key", arguments: { email: "mike@example.com" } }); assert(rr.isError);
+
+  // ---- daily log ----
+  r = await call("get_daily_log", { project: "Martin" }); assert.strictEqual(r.empty, true);
+  r = await call("add_to_daily_log", { project: "Martin", crewOnSite: ["JR + 2 helpers - roofing", "Jeff, Ian, Owen - lanai"], workCompleted: ["East side roof dried in"], rawText: "JR and two guys roofed, east side dried in, my guys were on the lanai", source: "sierra" });
+  assert.deepStrictEqual(r.added.sort(), ["crewOnSite", "workCompleted"]); assert.strictEqual(r.crewOnSite.length, 2); assert.strictEqual(r.contributors[0], "dan@example.com");
+  const today = r.date; assert.match(today, /^\d{4}-\d{2}-\d{2}$/);
+  r = await call("add_to_daily_log", { project: "Martin", workCompleted: ["east side roof dried in", "Lanai pocket door set"], issuesDelays: ["Waiting on meter can from Consumers"], notes: "Mike stopped by at 2." });
+  assert.strictEqual(r.workCompleted.length, 2, "dupe skipped case-insensitively"); assert.strictEqual(r.recentAdditions.length, 1);
+  r = await call("set_daily_log_section", { project: "Martin", section: "issuesDelays", lines: [] }); assert.deepStrictEqual(r.issuesDelays, []);
+  r = await call("get_daily_log", { project: "martin", date: today }); assert.strictEqual(r.notes, "Mike stopped by at 2."); assert.strictEqual(r.pdfUrl, undefined);
+  r = await call("list_daily_logs", { project: "Martin" }); assert.strictEqual(r.count, 1); assert.strictEqual(r.days[0].pdf, "none");
+  r = await call("daily_report_pdf", { project: "Martin" }); assert.strictEqual(r.rebuilt, true); assert(r.url.includes("daily_reports")); assert(r.fileName.startsWith("Daily Report - Martin - "));
+  const pdfBytes = saved[`projects/pM/daily_reports/${today}.pdf`]; assert(pdfBytes && pdfBytes.length > 1500, "pdf rendered"); assert.strictEqual(pdfBytes.slice(0, 4).toString(), "%PDF");
+  require("fs").writeFileSync(require("path").join(__dirname, "last-daily-report.pdf"), pdfBytes);
+  r = await call("daily_report_pdf", { project: "Martin" }); assert.strictEqual(r.rebuilt, false, "current pdf reused");
+  r = await call("list_files", { project: "Martin", folder: "Daily Reports" }); assert.strictEqual(r.count, 1);
+  r = await call("add_to_daily_log", { project: "Martin", tomorrowPlan: ["Pour patio - A Plus 8 AM"] });
+  r = await call("list_daily_logs", { project: "Martin" }); assert.strictEqual(r.days[0].pdf, "stale");
+  // ---- weather readings ----
+  const dr = require("../dailyReport.js");
+  const projDoc = { ...(await db.collection("projects").doc("pM").get()).data(), id: "pM" };
+  let w = await dr.recordWeatherForProject(db, projDoc, "morning"); assert.strictEqual(w.tempF, 34); assert.strictEqual(w.windMph, 15); assert.strictEqual(w.precip, true);
+  assert.strictEqual(db._store.get("projects/pM").siteGeo.lat, 44.4, "geocode cached on project");
+  obsTempC = 5; obsText = "Overcast";
+  w = await dr.recordWeatherForProject(db, projDoc, "midday"); assert.strictEqual(w.tempF, 41);
+  w = await dr.recordWeatherForProject(db, projDoc, "midday"); // same slot again replaces, not duplicates
+  // (the very first add_to_daily_log above already took a first-touch reading for the current slot, so 2 or 3 here)
+  r = await call("get_daily_log", { project: "Martin" }); assert(r.weatherReadings.length >= 2 && r.weatherReadings.length <= 3, "readings: " + r.weatherReadings.length);
+  assert(r.weather.includes("7 AM 34° light rain, 15 mph wind") && r.weather.includes("Noon 41° overcast"), r.weather);
+  assert.strictEqual(r.noWorkLogged, undefined);
+  r = await call("list_daily_logs", { project: "Martin" }); assert.strictEqual(r.days[0].pdf, "stale", "new reading makes the pdf stale");
+  // a weekend: weather only, nobody wrote anything
+  const sat = "2026-11-21"; await db.collection("projects").doc("pM").collection("dailyLogs").doc(sat).set({ weatherReadings: [{ slot: "morning", at: 1, tempF: 30, conditions: "Snow", windMph: 5, precip: true }], createdBy: "weather", createdAt: 1 });
+  r = await call("get_daily_log", { project: "Martin", date: sat }); assert.strictEqual(r.noWorkLogged, true); assert.strictEqual(r.weather, "7 AM 30° snow");
+  r = await call("add_to_daily_log", { project: "Martin", date: "2026-11-10", workCompleted: ["Backdated entry"] }); assert.strictEqual(r.weatherReadings, undefined, "no made-up weather for past days");
+  r = await call("daily_report_pdf", { project: "Martin", force: true }); require("fs").writeFileSync(require("path").join(__dirname, "last-daily-report.pdf"), saved[`projects/pM/daily_reports/${today}.pdf`]);
+
+  r = await call("add_to_daily_log", { project: "Martin", date: "11/17/2026", workCompleted: ["x"] }); assert(r.error && /YYYY-MM-DD/.test(r.error));
+  r = await call("add_to_daily_log", { project: "Martin" }); assert(r.error && /Nothing to add/.test(r.error));
 
   r = await call("delete_task", { task: newId }); assert(/Deleted/.test(r));
   console.log("ALL TESTS PASSED");
