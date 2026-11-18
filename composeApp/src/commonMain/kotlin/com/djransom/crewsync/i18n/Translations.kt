@@ -3,6 +3,7 @@ package com.djransom.crewsync.i18n
 // Generated from the English wording used in t("…") calls. Keys are the English text exactly as written in the code.
 
 internal val translationsPl: Map<String, String> = mapOf(
+    "{0} phase(s) behind" to "Opóźnione etapy: {0}",
     "Where we stand" to "Gdzie jesteśmy",
     "Next up" to "Następne",
     "On site" to "Na budowie",
@@ -733,6 +734,7 @@ internal val translationsPl: Map<String, String> = mapOf(
 )
 
 internal val translationsNl: Map<String, String> = mapOf(
+    "{0} phase(s) behind" to "{0} fase(n) achter",
     "Where we stand" to "Waar we staan",
     "Next up" to "Hierna",
     "On site" to "Op de bouw",
@@ -1463,6 +1465,7 @@ internal val translationsNl: Map<String, String> = mapOf(
 )
 
 internal val translationsFr: Map<String, String> = mapOf(
+    "{0} phase(s) behind" to "{0} phase(s) en retard",
     "Where we stand" to "Où nous en sommes",
     "Next up" to "À venir",
     "On site" to "Sur le chantier",
@@ -2193,6 +2196,7 @@ internal val translationsFr: Map<String, String> = mapOf(
 )
 
 internal val translationsDe: Map<String, String> = mapOf(
+    "{0} phase(s) behind" to "{0} Phase(n) im Verzug",
     "Where we stand" to "Wo wir stehen",
     "Next up" to "Als Nächstes",
     "On site" to "Auf der Baustelle",

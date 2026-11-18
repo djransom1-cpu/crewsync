@@ -38,6 +38,7 @@ fun ProjectHomeScreen(
     files: List<ProjectFile>,
     notes: List<Note>,
     dailyLogs: List<DailyLog> = emptyList(),
+    phases: List<SchedulePhase> = emptyList(),
     userMap: Map<String, String>,
     userPicMap: Map<String, String?>,
     onMoveCard: (String, Int) -> Unit,
@@ -49,6 +50,7 @@ fun ProjectHomeScreen(
     // default cardOrder.
     val cardOrder = (if ("Notes" in project.cardOrder) project.cardOrder else project.cardOrder + "Notes")
         .let { if ("Daily Log" in it) it else it + "Daily Log" } // same fallback for the Daily Log card
+        .let { if ("Schedule" in it) it else it + "Schedule" }   // and for the Schedule card
     val cardSizes = project.cardSizes
 
     LazyVerticalGrid(
@@ -107,6 +109,7 @@ fun ProjectHomeScreen(
                         "Files" -> 2
                         "Notes" -> 6
                         "Daily Log" -> 7
+                        "Schedule" -> 8
                         else -> 0
                     }
                     onNavigateToTab(index)
@@ -121,6 +124,7 @@ fun ProjectHomeScreen(
                     "Files" -> FilesSummaryCard(files)
                     "Notes" -> NotesSummaryCard(notes)
                     "Daily Log" -> DailyLogSummaryCard(dailyLogs, userMap)
+                    "Schedule" -> ScheduleSummaryCard(project, phases, tasks, appointments)
                 }
             }
         }
@@ -402,6 +406,47 @@ fun DailyLogSummaryCard(logs: List<DailyLog>, userMap: Map<String, String>) {
         }
         if (latest != null && latest.date != today) {
             Text(t("Last report: {0}", formatLogDate(latest.date)), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        }
+    }
+}
+
+/** The Schedule card: phases in progress with their percent, how many are behind, and the finish. */
+@Composable
+fun ScheduleSummaryCard(project: Project, phases: List<SchedulePhase>, tasks: List<Task>, appointments: List<Appointment>) {
+    val zone = TimeZone.currentSystemDefault()
+    val calendar = remember(project.workWeek, project.scheduleHolidays) { project.workCalendar() }
+    val s = remember(phases, tasks, appointments, calendar) {
+        buildTodaySnapshot(phases, tasks, appointments, emptyList(), calendar, scheduleToday(zone), Clock.System.now().toEpochMilliseconds(), zone)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (!s.hasSchedule) {
+            Text(t("No schedule yet."), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            return@Column
+        }
+        if (s.inProgress.isEmpty()) Text(t("No phases in progress."), style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+        s.inProgress.take(3).forEach { p ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(p.phase.name, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${p.percent}%", style = MaterialTheme.typography.labelSmall)
+            }
+            LinearProgressIndicator(
+                progress = { p.percent / 100f }, modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape),
+                color = phaseStatusColor(p.phase.status), trackColor = MaterialTheme.colorScheme.surfaceVariant, gapSize = 0.dp, drawStopIndicator = {}
+            )
+        }
+        if (s.inProgress.size > 3) Text(t("+{0} more", s.inProgress.size - 3), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        if (s.behindPhases.isNotEmpty()) {
+            Text(t("{0} phase(s) behind", s.behindPhases.size), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+        }
+        s.currentFinish?.let { finish ->
+            val slip = s.finishSlipDays
+            val slipText = when {
+                slip == null || slip == 0 -> t("On plan")
+                slip > 0 -> t("{0} working day(s) behind plan", slip)
+                else -> t("{0} working day(s) ahead of plan", -slip)
+            }
+            Text(t("Finish") + ": " + formatScheduleDay(finish) + " · " + slipText, style = MaterialTheme.typography.labelSmall,
+                color = if ((slip ?: 0) > 0) MaterialTheme.colorScheme.error else Color.Gray, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }

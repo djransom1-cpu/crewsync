@@ -357,6 +357,7 @@ fun ProjectDetailsScreen(
                             files = files,
                             notes = notes,
                             dailyLogs = dailyLogs,
+                            phases = schedulePhases.orEmpty(),
                             userMap = userMap,
                             userPicMap = userPicMap,
                             onMoveCard = { cardId, direction ->
