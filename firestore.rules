@@ -124,6 +124,11 @@ service cloud.firestore {
         allow read, create, update, delete: if canAccessProject(projectId);
       }
 
+      // Schedule phases (the Schedule tab): the same access as the site calendar's appointments.
+      match /schedulePhases/{phaseId} {
+        allow read, create, update, delete: if canAccessProject(projectId);
+      }
+
       match /files/{fileId} {
         allow read, create, delete: if canAccessProject(projectId);
 

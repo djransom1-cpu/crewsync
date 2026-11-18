@@ -98,7 +98,9 @@ kotlin {
             implementation(libs.mlkit.text.recognition)
         }
         commonTest.dependencies {
-            implementation(libs.junit)
+            // kotlin-test works on every target (plain junit is JVM-only) and runs on JUnit for
+            // the desktop and Android targets. Run with: gradlew :composeApp:desktopTest
+            implementation(kotlin("test"))
         }
         val androidUnitTest by getting {
             dependencies {
