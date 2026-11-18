@@ -36,3 +36,5 @@ actual suspend fun uploadFile(path: String, platformFile: Any): String {
 }
 
 actual suspend fun recognizeTextInImage(platformFile: Any): String = ""
+
+actual suspend fun readPickedFileText(platformFile: Any): String = (platformFile as File).readBytes().decodeToString()

@@ -77,3 +77,10 @@ private fun getFileName(context: android.content.Context, uri: Uri): String? {
     }
     return name
 }
+
+actual suspend fun readPickedFileText(platformFile: Any): String {
+    val uri = platformFile as Uri
+    val bytes = appContext?.contentResolver?.openInputStream(uri)?.use { it.readBytes() }
+        ?: throw Exception("Could not read file")
+    return bytes.decodeToString()
+}

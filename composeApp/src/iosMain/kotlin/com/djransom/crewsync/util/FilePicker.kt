@@ -49,3 +49,7 @@ actual suspend fun uploadFile(path: String, platformFile: Any): String {
 }
 
 actual suspend fun recognizeTextInImage(platformFile: Any): String = ""
+
+// The iPhone file picker above isn't built yet, so there is never a file to read.
+actual suspend fun readPickedFileText(platformFile: Any): String =
+    throw UnsupportedOperationException("Opening files isn't available on iPhone yet")

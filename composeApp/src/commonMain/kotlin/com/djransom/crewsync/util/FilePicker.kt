@@ -14,3 +14,9 @@ data class PickedFile(
 )
 
 expect suspend fun uploadFile(path: String, platformFile: Any): String
+
+/**
+ * The text of a file the person picked (with [rememberFilePickerLauncher]), read as UTF-8 - for
+ * a CSV import. Throws if it can't be read.
+ */
+expect suspend fun readPickedFileText(platformFile: Any): String

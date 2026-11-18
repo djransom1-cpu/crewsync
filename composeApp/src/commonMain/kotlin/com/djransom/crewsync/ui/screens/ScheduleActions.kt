@@ -14,6 +14,7 @@ import com.djransom.crewsync.data.model.PhaseStatus
 import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.data.model.Task
 import com.djransom.crewsync.util.AppointmentMove
+import com.djransom.crewsync.util.CsvPhaseRow
 import com.djransom.crewsync.util.PhaseLinkKind
 import com.djransom.crewsync.util.PhaseLinkOp
 import com.djransom.crewsync.util.PhaseMove
@@ -172,6 +173,40 @@ class ScheduleActions internal constructor(
                 "baselineEnd" to (phase.end?.toDouble() ?: FieldValue.delete),
                 *stamp()
             )
+        }
+    }
+
+    /**
+     * Saves the importable rows of a CSV import as new phases, at the bottom of the schedule in
+     * the order given. With [asBaseline] their dates are also recorded as the plan.
+     */
+    fun importPhases(rows: List<CsvPhaseRow>, asBaseline: Boolean) {
+        val todo = rows.filter { it.importable && it.start != null && it.end != null }
+        if (todo.isEmpty()) return
+        enqueue {
+            val zone = TimeZone.currentSystemDefault()
+            val time = now()
+            var order = phasesNow().maxOfOrNull { it.order } ?: 0.0
+            todo.chunked(400).forEach { chunk -> // a Firestore batch holds at most 500 writes
+                val batch = firestore.batch()
+                chunk.forEach { row ->
+                    val ref = phases.document
+                    val start = row.start!!.toLocalMidnightMillis(zone)
+                    val end = row.end!!.toLocalMidnightMillis(zone)
+                    order += 1.0
+                    batch.set(
+                        ref,
+                        SchedulePhase(
+                            id = ref.id, projectId = projectId, environmentId = environmentId,
+                            name = row.name.trim(), group = row.group.trim(), trade = row.trade.trim(), order = order,
+                            start = start, end = end, durationDays = row.durationDays, isMilestone = row.isMilestone,
+                            baselineStart = if (asBaseline) start else null, baselineEnd = if (asBaseline) end else null,
+                            createdAt = time, updatedAt = time, updatedBy = who()
+                        ).toFirestoreMap()
+                    )
+                }
+                batch.commit()
+            }
         }
     }
 

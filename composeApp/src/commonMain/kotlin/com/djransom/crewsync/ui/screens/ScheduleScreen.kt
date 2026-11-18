@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material3.*
@@ -153,6 +154,7 @@ fun ScheduleContent(
     var openPhaseId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingPhaseId by rememberSaveable { mutableStateOf<String?>(null) }
     var addingPhase by rememberSaveable { mutableStateOf(false) }
+    var importing by rememberSaveable { mutableStateOf(false) }
     var pendingEditId by remember { mutableStateOf<String?>(null) }
     // Phases the person has said "Not now" to marking done. Only for this visit to the tab: it asks again next time.
     var notNow by remember { mutableStateOf(emptySet<String>()) }
@@ -195,10 +197,18 @@ fun ScheduleContent(
         Box(modifier.fillMaxSize()) {
             ScheduleMessage(t("No schedule yet."), t("Phases will show here once the schedule is set up."))
             if (actions != null) {
-                Button(onClick = { addingPhase = true }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp)) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(t("Add phase"))
+                Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(onClick = { addingPhase = true }) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(t("Add phase"))
+                    }
+                    // Most schedules start as a spreadsheet: load the whole thing in one go.
+                    OutlinedButton(onClick = { importing = true }) {
+                        Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(t("Import CSV"))
+                    }
                 }
             }
         }
@@ -207,6 +217,7 @@ fun ScheduleContent(
             ScheduleToolbar(
                 view, onView = { viewName = it.name }, timeline = timelineState, onPresent = onPresent,
                 onAddPhase = if (actions != null) ({ addingPhase = true }) else null,
+                onImport = if (actions != null) ({ importing = true }) else null,
                 lookWeeks = lookWeeks, onLookWeeks = { lookWeeks = it },
                 lookByTrade = lookByTrade, onLookByTrade = { lookByTrade = it }
             )
@@ -285,7 +296,11 @@ fun ScheduleContent(
         }
     }
 
-    val dialogOpen = openPhaseId != null || editingPhaseId != null || addingPhase || shiftingPhaseId != null
+    if (importing && actions != null) {
+        ScheduleImportDialog(existingPhases = phases, calendar = calendar, actions = actions, onDismiss = { importing = false })
+    }
+
+    val dialogOpen = openPhaseId != null || editingPhaseId != null || addingPhase || shiftingPhaseId != null || importing
     LaunchedEffect(afterDialogs, dialogOpen) {
         val next = afterDialogs
         if (next != null && !dialogOpen) {
@@ -328,7 +343,7 @@ private fun ScheduleNotice(text: String, primary: Pair<String, () -> Unit>, seco
 @Composable
 private fun ScheduleToolbar(
     view: ScheduleView, onView: (ScheduleView) -> Unit, timeline: ScheduleTimelineState,
-    onPresent: (() -> Unit)?, onAddPhase: (() -> Unit)?,
+    onPresent: (() -> Unit)?, onAddPhase: (() -> Unit)?, onImport: (() -> Unit)?,
     lookWeeks: Int, onLookWeeks: (Int) -> Unit, lookByTrade: Boolean, onLookByTrade: (Boolean) -> Unit
 ) {
     Row(
@@ -350,6 +365,12 @@ private fun ScheduleToolbar(
             AssistChip(
                 onClick = onAddPhase, label = { Text(t("Add phase")) },
                 leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
+            )
+        }
+        if (onImport != null) {
+            AssistChip(
+                onClick = onImport, label = { Text(t("Import")) },
+                leadingIcon = { Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
             )
         }
         if (view == ScheduleView.Timeline) {

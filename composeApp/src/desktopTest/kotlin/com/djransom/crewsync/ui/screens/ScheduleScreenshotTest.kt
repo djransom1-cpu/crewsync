@@ -20,6 +20,7 @@ import com.djransom.crewsync.util.ScheduleSampleData
 import com.djransom.crewsync.util.TIMELINE_MONTHS_DAY_WIDTH
 import com.djransom.crewsync.util.ShiftPlan
 import com.djransom.crewsync.util.WorkCalendar
+import com.djransom.crewsync.util.parseScheduleCsv
 import com.djransom.crewsync.util.planCascade
 import com.djransom.crewsync.util.shiftedDates
 import com.djransom.crewsync.util.toLocalMidnightMillis
@@ -279,6 +280,29 @@ class ScheduleScreenshotTest {
     @Test
     fun calendarMonthWithPhasesHidden() = shot("calendar-month-no-phases", width = 1100, height = 760) {
         MonthView(data.day(2026, 11, 1), data.today, data.roofTasks, data.roofAppointments, DayOfWeek.SUNDAY, phases = emptyList()) {}
+    }
+
+    // ---- CSV import ----
+
+    /** The preview after picking a file: most of the Martin plan, one phase already on the schedule, and two rows with problems. */
+    @Test
+    fun importPreview() = shot("schedule-import-preview", width = 520, height = 980) {
+        val csv = parseScheduleCsv(
+            """
+            Name,Start,Finish,Group
+            Roof complete,9/21/2026,10/15/2026,Exterior / Site
+            Siding,9/21/2026,11/15/2026,Exterior / Site
+            Electrical service,10/5/2026,10/9/2026,Rough trades
+            Mechanical & plumbing,10/15/2026,11/19/2026,Rough trades
+            Insulation,11/19/2026,12/4/2026,Interior
+            Drywall,12/4/2026,1/4/2027,Interior
+            Painting,3/20/2027,1/9/2027,Interior
+            Trim & cabinets,Jan 23 2027,someday,Interior
+            Finish MEP,3/15/2027,4/5/2027,Closeout
+            """.trimIndent(),
+            existingNames = listOf("Roof complete"), calendar = thanksgiving, dayFirstByDefault = false
+        )
+        ScheduleImportPreview(csv, "Martin schedule.csv", asBaseline = true, onAsBaseline = {}, modifier = Modifier.padding(24.dp))
     }
 
     private fun shot(name: String, width: Int, height: Int, density: Float = 1f, content: @Composable () -> Unit) {
