@@ -247,3 +247,17 @@ android {
 dependencies {
     debugImplementation(compose.uiTooling)
 }
+
+// Opens the Schedule tab in a window of its own with built-in sample data: no sign-in and no real
+// project. For rehearsing presentation mode on the meeting-room screen (see ScheduleDemo.kt).
+//     gradlew :composeApp:scheduleDemo
+// -PdemoArgs="--capture some.png" runs the automatic full-screen check instead.
+tasks.register<JavaExec>("scheduleDemo") {
+    group = "application"
+    description = "Shows the schedule and its presentation mode with sample data."
+    val desktopTest = kotlin.jvm("desktop").compilations.getByName("test")
+    dependsOn("desktopTestClasses")
+    classpath(desktopTest.output.allOutputs, desktopTest.runtimeDependencyFiles)
+    mainClass.set("com.djransom.crewsync.ScheduleDemoKt")
+    args = (project.findProperty("demoArgs") as String?)?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
+}

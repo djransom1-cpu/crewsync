@@ -9,10 +9,12 @@ import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.i18n.I18n
 import com.djransom.crewsync.util.ScheduleSampleData
 import com.djransom.crewsync.util.TIMELINE_MONTHS_DAY_WIDTH
 import com.djransom.crewsync.util.WorkCalendar
+import com.djransom.crewsync.util.toLocalMidnightMillis
 import org.jetbrains.skia.EncodedImageFormat
 import java.io.File
 import kotlin.test.Test
@@ -97,9 +99,49 @@ class ScheduleScreenshotTest {
         PhaseCardBody(roof, thanksgiving, data.roofTasks, data.roofAppointments, data.today, data.zone, Modifier.padding(24.dp))
     }
 
-    private fun shot(name: String, width: Int, height: Int, content: @Composable () -> Unit) {
+    // ---- presentation mode (the meeting-room screen) ----
+
+    @Composable
+    private fun Presentation(phases: List<SchedulePhase> = data.martinInProgress, timeline: ScheduleTimelineState? = null) {
+        if (timeline == null) {
+            SchedulePresentationContent("Martin", phases, data.roofTasks, data.roofAppointments, thanksgiving, onClose = {}, zone = data.zone, today = data.today)
+        } else {
+            SchedulePresentationContent("Martin", phases, data.roofTasks, data.roofAppointments, thanksgiving, onClose = {}, zone = data.zone, today = data.today, timelineState = timeline)
+        }
+    }
+
+    /** What the room sees when Present is pressed: full HD, two weeks back to twelve weeks ahead. */
+    @Test
+    fun presentationFullHd() = shot("schedule-presentation-1920", width = 1920, height = 1080) { Presentation() }
+
+    /** The same with the finish two working weeks late, so the slip figure in the header has something to say. */
+    @Test
+    fun presentationWithALateFinish() {
+        val late = data.martinInProgress.map {
+            if (it.name == "Finish MEP") it.copy(start = data.day(2027, 3, 29).toLocalMidnightMillis(data.zone), end = data.day(2027, 4, 19).toLocalMidnightMillis(data.zone)) else it
+        }
+        val timeline = ScheduleTimelineState().apply { fit() }
+        shot("schedule-presentation-1920-late", width = 1920, height = 1080) { Presentation(late, timeline) }
+    }
+
+    /** A laptop screen at 150% Windows scaling: the same pixels, everything half as big again. */
+    @Test
+    fun presentationScaledLaptop() = shot("schedule-presentation-laptop-150", width = 1920, height = 1080, density = 1.5f) { Presentation() }
+
+    /** A phone turned on its side. */
+    @Test
+    fun presentationOnAPhone() = shot("schedule-presentation-phone", width = 800, height = 360) { Presentation() }
+
+    /** The tap card at the size presentation mode shows it. */
+    @Test
+    fun presentationPhaseCard() = shot("schedule-presentation-card", width = 672, height = 800, density = PHASE_CARD_LARGE_SCALE) {
+        val roof = data.martinInProgress.first { it.name == "Roof complete" }
+        PhaseCardBody(roof, thanksgiving, data.roofTasks, data.roofAppointments, data.today, data.zone, Modifier.padding(24.dp))
+    }
+
+    private fun shot(name: String, width: Int, height: Int, density: Float = 1f, content: @Composable () -> Unit) {
         I18n.init("en")
-        val scene = ImageComposeScene(width = width, height = height, density = Density(1f)) {
+        val scene = ImageComposeScene(width = width, height = height, density = Density(density)) {
             MaterialTheme { Surface(modifier = Modifier.fillMaxSize()) { content() } }
         }
         try {

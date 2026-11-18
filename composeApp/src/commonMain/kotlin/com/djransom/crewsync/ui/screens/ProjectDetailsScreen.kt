@@ -176,6 +176,9 @@ fun ProjectDetailsScreen(
     // this back to tab 0 (Dashboard), kicking users off whatever tab - Calendar, Files, etc. -
     // they were actually on.
     var selectedTab by rememberSaveable { mutableStateOf(0) }
+    // The schedule's presentation mode (the meeting-room view). Saveable for the same reason as
+    // the tab: turning a phone to landscape rebuilds the Activity.
+    var presentingSchedule by rememberSaveable { mutableStateOf(false) }
     val tabs = listOf(
         "Home" to Icons.Default.Home,
         "Team" to Icons.Default.Person,
@@ -247,7 +250,13 @@ fun ProjectDetailsScreen(
         }
     }
 
-    ModalNavigationDrawer(
+    if (presentingSchedule && project != null) {
+        // Takes over the whole window: no drawer, no top bar, nothing to tap by mistake.
+        ScheduleTab(
+            projectId = projectId, project = project!!, tasks = tasks, appointments = appointments,
+            presenting = true, onPresentingChange = { presentingSchedule = it }
+        )
+    } else ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet {
@@ -419,7 +428,10 @@ fun ProjectDetailsScreen(
                         )
                         6 -> NotesTab(projectId = projectId, notes = notes, currentUserEmail = auth.currentUser?.email ?: "")
                         7 -> DailyLogTab(projectId = projectId, project = project!!, userMap = userMap, currentUserEmail = auth.currentUser?.email ?: "")
-                        8 -> ScheduleTab(projectId = projectId, project = project!!, tasks = tasks, appointments = appointments)
+                        8 -> ScheduleTab(
+                            projectId = projectId, project = project!!, tasks = tasks, appointments = appointments,
+                            presenting = false, onPresentingChange = { presentingSchedule = it }
+                        )
                     }
                 }
             }

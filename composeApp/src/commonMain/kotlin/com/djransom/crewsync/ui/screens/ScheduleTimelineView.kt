@@ -42,7 +42,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.data.model.Task
 import com.djransom.crewsync.i18n.I18n
@@ -56,6 +58,7 @@ import com.djransom.crewsync.util.TimelineBar
 import com.djransom.crewsync.util.TimelineFit
 import com.djransom.crewsync.util.TimelineSpan
 import com.djransom.crewsync.util.WorkCalendar
+import com.djransom.crewsync.util.around
 import com.djransom.crewsync.util.endDate
 import com.djransom.crewsync.util.fit
 import com.djransom.crewsync.util.lastPhaseEnd
@@ -74,15 +77,54 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-// Row and header heights. The name column on the left and the bars on the right are two separate
-// pieces that scroll together, so they must agree on these exactly.
-// The header is three strips: month names, the week columns' dates, and a thin one for the today marker.
-private val TIMELINE_MONTH_BAND = 24.dp
-private val TIMELINE_WEEK_BAND = 22.dp
-private val TIMELINE_HEADER_HEIGHT = 54.dp
-private val TIMELINE_ROW_HEIGHT = 40.dp
-private val TIMELINE_GROUP_HEIGHT = 30.dp
 private val TODAY_RED = Color(0xFFD32F2F)
+
+/**
+ * The timeline's sizes. [Standard] is what the Schedule tab uses; [presentation] is the
+ * meeting-room version with taller rows, thicker bars, bigger lettering and stronger lines. The
+ * name column on the left and the bars on the right are two separate pieces that scroll
+ * together, so both read their heights from here and can't drift apart.
+ */
+@Immutable
+class TimelineStyle(
+    val rowHeight: Dp,
+    val groupHeight: Dp,
+    val monthBand: Dp,      // the header is three strips: month names...
+    val weekBand: Dp,       // ...the week columns' dates...
+    val markerStrip: Dp,    // ...and a thin one the today pointer sits in
+    val barHeight: Dp,
+    val ghostHeight: Dp,
+    val nameWidth: Dp?,     // null: 240dp on a wide window, 132dp on a phone
+    val nameSize: TextUnit,
+    val groupSize: TextUnit,
+    val monthSize: TextUnit,
+    val weekSize: TextUnit,
+    val trackAlpha: Float,  // how strongly the not-yet-done part of a bar is tinted
+    val todayWidth: Dp,
+    val strong: Boolean     // high contrast: darker grid lines, lettering and ghost bars
+) {
+    val headerHeight: Dp get() = monthBand + weekBand + markerStrip
+
+    companion object {
+        val Standard = TimelineStyle(
+            rowHeight = 40.dp, groupHeight = 30.dp, monthBand = 24.dp, weekBand = 22.dp, markerStrip = 8.dp,
+            barHeight = 18.dp, ghostHeight = 28.dp, nameWidth = null,
+            nameSize = 14.sp, groupSize = 14.sp, monthSize = 14.sp, weekSize = 12.sp,
+            trackAlpha = 0.30f, todayWidth = 2.dp, strong = false
+        )
+
+        /** Everything scaled from the row height, which presentation mode picks to fill the screen. */
+        fun presentation(rowHeight: Dp, nameWidth: Dp): TimelineStyle {
+            val lettering = (rowHeight.value * 0.42f).coerceIn(16f, 26f).sp
+            return TimelineStyle(
+                rowHeight = rowHeight, groupHeight = rowHeight * 0.72f, monthBand = 38.dp, weekBand = 32.dp, markerStrip = 12.dp,
+                barHeight = rowHeight * 0.56f, ghostHeight = rowHeight * 0.84f, nameWidth = nameWidth,
+                nameSize = lettering, groupSize = lettering, monthSize = 22.sp, weekSize = 17.sp,
+                trackAlpha = 0.55f, todayWidth = 4.dp, strong = true
+            )
+        }
+    }
+}
 
 /**
  * Where the timeline is looking: how wide a day is drawn and how far it's scrolled. Kept outside
@@ -101,6 +143,7 @@ class ScheduleTimelineState {
     // yet, so it would be clamped to the old one. It waits here for the next frame instead.
     internal var pendingLeftDay by mutableStateOf<Int?>(null)
     internal var fitRequested by mutableStateOf(false)
+    internal var aroundRequested by mutableStateOf<Pair<Int, Int>?>(null)
     internal var positioned = false
     internal var leftDayNow: () -> Int = { 0 }
 
@@ -111,7 +154,16 @@ class ScheduleTimelineState {
     }
 
     /** Frame today through the last phase. Carried out by the timeline, which knows how wide its window is. */
-    fun fit() { fitRequested = true }
+    fun fit() {
+        positioned = true
+        fitRequested = true
+    }
+
+    /** Frame [weeksBack] whole weeks before this week through [weeksAhead] after it - what presentation mode opens on. */
+    fun showAroundToday(weeksBack: Int, weeksAhead: Int) {
+        positioned = true
+        aroundRequested = weeksBack to weeksAhead
+    }
 
     internal fun apply(fit: TimelineFit) {
         dayWidth = fit.dayWidth
@@ -125,8 +177,8 @@ fun rememberScheduleTimelineState(): ScheduleTimelineState = remember { Schedule
 /**
  * The schedule as a Gantt chart: phase names down the left, the calendar across the top in week
  * columns, one bar per phase coloured by status with the done part filled in, a diamond for a
- * milestone, a faint outline behind each bar showing where the original plan (the baseline) put
- * it, and a red line for today.
+ * milestone, a faint outline behind a bar that has moved showing where the original plan (the
+ * baseline) put it, and a red line for today.
  *
  * Everything to the right of the names is one Canvas. Scrolling just slides it - nothing is
  * redrawn or re-laid-out while it moves - which is what keeps it smooth with a few dozen phases
@@ -140,6 +192,7 @@ fun ScheduleTimeline(
     state: ScheduleTimelineState,
     onPhaseClick: (SchedulePhase) -> Unit,
     modifier: Modifier = Modifier,
+    style: TimelineStyle = TimelineStyle.Standard,
     zone: TimeZone = TimeZone.currentSystemDefault(),
     today: LocalDate = scheduleToday(zone)
 ) {
@@ -154,28 +207,29 @@ fun ScheduleTimeline(
     val working = remember(span, calendar) { BooleanArray(span.days) { calendar.isWorkingDay(span.first.plus(it, DateTimeUnit.DAY)) } }
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
+    val scheme = MaterialTheme.colorScheme
     val colors = TimelineColors(
-        surface = MaterialTheme.colorScheme.surface,
-        band = MaterialTheme.colorScheme.surfaceVariant,
-        grid = MaterialTheme.colorScheme.outlineVariant,
-        offDay = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.045f),
-        ghost = MaterialTheme.colorScheme.onSurface,
-        text = MaterialTheme.colorScheme.onSurfaceVariant
+        surface = scheme.surface,
+        band = scheme.surfaceVariant,
+        grid = if (style.strong) scheme.outline.copy(alpha = 0.55f) else scheme.outlineVariant,
+        offDay = scheme.onSurface.copy(alpha = if (style.strong) 0.06f else 0.045f),
+        ghost = scheme.onSurface,
+        text = if (style.strong) scheme.onSurface else scheme.onSurfaceVariant
     )
-    val monthStyle = MaterialTheme.typography.labelLarge.copy(color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-    val weekStyle = MaterialTheme.typography.labelMedium.copy(color = colors.text)
+    val monthStyle = MaterialTheme.typography.labelLarge.copy(color = scheme.onSurface, fontWeight = FontWeight.SemiBold, fontSize = style.monthSize, lineHeight = style.monthSize * 1.3f)
+    val weekStyle = MaterialTheme.typography.labelMedium.copy(color = colors.text, fontSize = style.weekSize, lineHeight = style.weekSize * 1.3f)
     val language = I18n.current
     val headerLabels = remember(span, measurer, monthStyle, weekStyle, density, language) { TimelineHeaderLabels(span, measurer, monthStyle, weekStyle) }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val nameWidth = if (maxWidth >= 720.dp) 240.dp else 132.dp
+        val nameWidth = style.nameWidth ?: if (maxWidth >= 720.dp) 240.dp else 132.dp
         val viewportWidth = (maxWidth - nameWidth).coerceAtLeast(1.dp)
-        val viewportHeight = (maxHeight - TIMELINE_HEADER_HEIGHT).coerceAtLeast(1.dp)
+        val viewportHeight = (maxHeight - style.headerHeight).coerceAtLeast(1.dp)
         // One Canvas can only be so many pixels wide; stay well inside that however far someone zooms.
         val widestDay = with(density) { (30_000f / span.days).toDp().value }
         val dayWidth = min(state.dayWidth, widestDay).dp
         val chartWidth = max((dayWidth * span.days).value, viewportWidth.value).dp
-        val rowsHeight = rows.fold(0.dp) { sum, row -> sum + rowHeight(row) }
+        val rowsHeight = rows.fold(0.dp) { sum, row -> sum + rowHeight(row, style) }
         val chartHeight = max(rowsHeight.value, viewportHeight.value).dp
         val dayPx = with(density) { dayWidth.toPx() }
 
@@ -194,6 +248,13 @@ fun ScheduleTimeline(
                 state.fitRequested = false
             }
         }
+        val around = state.aroundRequested
+        LaunchedEffect(around) {
+            if (around != null) {
+                state.apply(span.around(today, around.first, around.second, viewportWidth.value))
+                state.aroundRequested = null
+            }
+        }
         val pending = state.pendingLeftDay
         LaunchedEffect(pending, dayPx) {
             if (pending != null) {
@@ -205,13 +266,13 @@ fun ScheduleTimeline(
 
         Column(Modifier.fillMaxSize()) {
             // ---- calendar header: months over weeks ----------------------------------------------
-            Row(Modifier.fillMaxWidth().height(TIMELINE_HEADER_HEIGHT)) {
+            Row(Modifier.fillMaxWidth().height(style.headerHeight)) {
                 Box(Modifier.width(nameWidth).fillMaxHeight().background(colors.surface).drawBehind { drawEdges(colors.grid, right = true, bottom = true) })
                 Box(Modifier.weight(1f).fillMaxHeight().clipToBounds().horizontalScroll(state.horizontal)) {
-                    Canvas(Modifier.size(chartWidth, TIMELINE_HEADER_HEIGHT)) {
+                    Canvas(Modifier.size(chartWidth, style.headerHeight)) {
                         // Reading the scroll position here redraws just this strip as it moves, which is
                         // what lets a month's name ride along the left edge while that month is on screen.
-                        drawTimelineHeader(span, headerLabels, dayPx, today, colors, scrollX = state.horizontal.value.toFloat())
+                        drawTimelineHeader(span, headerLabels, dayPx, today, colors, style, scrollX = state.horizontal.value.toFloat())
                     }
                 }
             }
@@ -222,7 +283,7 @@ fun ScheduleTimeline(
                         .drawBehind { drawEdges(colors.grid, right = true) }
                         .verticalScroll(state.vertical)
                 ) {
-                    rows.forEach { row -> TimelineNameCell(row, colors, onPhaseClick) }
+                    rows.forEach { row -> TimelineNameCell(row, colors, style, onPhaseClick) }
                 }
                 Box(
                     Modifier.weight(1f).fillMaxHeight().clipToBounds()
@@ -231,13 +292,13 @@ fun ScheduleTimeline(
                         .horizontalScroll(state.horizontal)
                 ) {
                     Canvas(
-                        Modifier.size(chartWidth, chartHeight).pointerInput(rows, bars, dayPx) {
+                        Modifier.size(chartWidth, chartHeight).pointerInput(rows, bars, dayPx, style) {
                             detectTapGestures { tap ->
-                                phaseAt(tap, rows, bars, dayPx, slop = 10.dp.toPx(), rowHeightPx = { rowHeight(it).toPx() })?.let(onPhaseClick)
+                                phaseAt(tap, rows, bars, dayPx, slop = 10.dp.toPx(), rowHeightPx = { rowHeight(it, style).toPx() })?.let(onPhaseClick)
                             }
                         }
                     ) {
-                        drawTimelineBody(span, rows, bars, working, dayPx, dayWidth, today, colors)
+                        drawTimelineBody(span, rows, bars, working, dayPx, dayWidth, today, colors, style)
                     }
                 }
             }
@@ -252,15 +313,18 @@ private class TimelineColors(val surface: Color, val band: Color, val grid: Colo
 /** Everything needed to draw one phase's row, worked out once rather than on every frame. */
 private class PhaseBarDraw(val current: TimelineBar?, val baseline: TimelineBar?, val isMilestone: Boolean, val color: Color, val percent: Int)
 
-private fun phaseBar(phase: SchedulePhase, span: TimelineSpan, tasksById: Map<String, Task>, zone: TimeZone) = PhaseBarDraw(
-    current = span.bar(phase.startDate(zone), phase.endDate(zone)),
-    // The ghost is only worth drawing where the phase has moved off its plan; on plan, it would sit exactly under the bar.
-    baseline = span.bar(phase.baselineStart?.let { millisToLocalDate(it, zone) }, phase.baselineEnd?.let { millisToLocalDate(it, zone) })
-        .takeIf { it != span.bar(phase.startDate(zone), phase.endDate(zone)) },
-    isMilestone = phase.isMilestone,
-    color = phaseStatusColor(phase.status),
-    percent = phase.percentShown(phase.linkedTasks(tasksById)).coerceIn(0, 100)
-)
+private fun phaseBar(phase: SchedulePhase, span: TimelineSpan, tasksById: Map<String, Task>, zone: TimeZone): PhaseBarDraw {
+    val current = span.bar(phase.startDate(zone), phase.endDate(zone))
+    val baseline = span.bar(phase.baselineStart?.let { millisToLocalDate(it, zone) }, phase.baselineEnd?.let { millisToLocalDate(it, zone) })
+    return PhaseBarDraw(
+        current = current,
+        // The ghost is only worth drawing where the phase has moved off its plan; on plan, it would sit exactly under the bar.
+        baseline = baseline.takeIf { it != current },
+        isMilestone = phase.isMilestone,
+        color = phaseStatusColor(phase.status),
+        percent = phase.percentShown(phase.linkedTasks(tasksById)).coerceIn(0, 100)
+    )
+}
 
 /**
  * The header's wording, measured once. It doesn't change as the timeline scrolls or zooms - only
@@ -274,33 +338,44 @@ private class TimelineHeaderLabels(span: TimelineSpan, measurer: TextMeasurer, m
     val monthBrief: List<TextLayoutResult> = months.map { measurer.measure(monthShort(it.month), monthStyle, maxLines = 1) }
     val weekLong: List<TextLayoutResult> = weeks.map { measurer.measure(monthDay(it.monthNumber, it.dayOfMonth), weekStyle, maxLines = 1) }
     val weekDayOnly: List<TextLayoutResult> = weeks.map { measurer.measure(it.dayOfMonth.toString(), weekStyle, maxLines = 1) }
+    // Every week column gets the same form of label, so it's the widest one that has to fit.
+    val weekLongWidth: Int = weekLong.maxOfOrNull { it.size.width } ?: 0
+    val weekDayOnlyWidth: Int = weekDayOnly.maxOfOrNull { it.size.width } ?: 0
 }
 
-private fun rowHeight(row: ScheduleRow): Dp = if (row is ScheduleRow.GroupHead) TIMELINE_GROUP_HEIGHT else TIMELINE_ROW_HEIGHT
+private fun rowHeight(row: ScheduleRow, style: TimelineStyle): Dp = if (row is ScheduleRow.GroupHead) style.groupHeight else style.rowHeight
 
 @Composable
-private fun TimelineNameCell(row: ScheduleRow, colors: TimelineColors, onPhaseClick: (SchedulePhase) -> Unit) {
+private fun TimelineNameCell(row: ScheduleRow, colors: TimelineColors, style: TimelineStyle, onPhaseClick: (SchedulePhase) -> Unit) {
+    val side = if (style.strong) 20.dp else 12.dp
     when (row) {
         is ScheduleRow.GroupHead -> Box(
-            Modifier.fillMaxWidth().height(TIMELINE_GROUP_HEIGHT).background(colors.band).padding(horizontal = 12.dp),
+            Modifier.fillMaxWidth().height(style.groupHeight).background(colors.band).padding(horizontal = side),
             contentAlignment = Alignment.CenterStart
         ) {
-            Text(row.name.ifEmpty { t("Other") }, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                row.name.ifEmpty { t("Other") },
+                style = MaterialTheme.typography.titleSmall.copy(fontSize = style.groupSize, lineHeight = style.groupSize * 1.2f),
+                fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
         }
         is ScheduleRow.PhaseLine -> Row(
-            Modifier.fillMaxWidth().height(TIMELINE_ROW_HEIGHT)
+            Modifier.fillMaxWidth().height(style.rowHeight)
                 .drawBehind { drawEdges(colors.grid.copy(alpha = 0.5f), bottom = true) }
                 .clickable { onPhaseClick(row.phase) }
-                .padding(horizontal = 12.dp),
+                .padding(horizontal = side),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (row.phase.isMilestone) {
-                Box(Modifier.padding(end = 8.dp).size(9.dp).rotate(45f).background(phaseStatusColor(row.phase.status)))
+                Box(Modifier.padding(end = 8.dp).size((style.nameSize.value * 0.65f).dp).rotate(45f).background(phaseStatusColor(row.phase.status)))
             }
             Text(
                 row.phase.name.ifBlank { t("(unnamed)") },
-                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = MaterialTheme.typography.bodySmall.lineHeight),
-                maxLines = 2, overflow = TextOverflow.Ellipsis
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = style.nameSize, lineHeight = style.nameSize * 1.15f),
+                fontWeight = if (style.strong) FontWeight.Medium else null,
+                // Two lines while the row is tall enough to hold them; otherwise one, cut off with an ellipsis.
+                maxLines = if (style.rowHeight.value >= style.nameSize.value * 2.6f) 2 else 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -313,39 +388,42 @@ private fun DrawScope.drawEdges(color: Color, right: Boolean = false, bottom: Bo
 }
 
 private fun DrawScope.drawTimelineHeader(
-    span: TimelineSpan, labels: TimelineHeaderLabels, dayPx: Float, today: LocalDate, colors: TimelineColors, scrollX: Float
+    span: TimelineSpan, labels: TimelineHeaderLabels, dayPx: Float, today: LocalDate, colors: TimelineColors, style: TimelineStyle, scrollX: Float
 ) {
-    val monthBand = TIMELINE_MONTH_BAND.toPx()
-    val weekBand = TIMELINE_WEEK_BAND.toPx()
+    val monthBand = style.monthBand.toPx()
+    val weekBand = style.weekBand.toPx()
     val line = 1.dp.toPx()
-    val pad = 6.dp.toPx()
+    val pad = (if (style.strong) 10.dp else 6.dp).toPx()
     drawRect(colors.surface)
     // Months along the top: the full name while there's room, shorter as the timeline is squeezed.
     labels.months.forEachIndexed { i, m ->
         val x = m.offsetDays * dayPx
         val width = m.lengthDays * dayPx
         drawRect(colors.grid, Offset(x, 0f), Size(line, size.height))
+        val room = width - 2 * pad
         val label = when {
-            width >= 150.dp.toPx() -> labels.monthLong[i]
-            width >= 76.dp.toPx() -> labels.monthMedium[i]
-            width >= 34.dp.toPx() -> labels.monthBrief[i]
+            labels.monthLong[i].size.width <= room -> labels.monthLong[i]
+            labels.monthMedium[i].size.width <= room -> labels.monthMedium[i]
+            labels.monthBrief[i].size.width <= room -> labels.monthBrief[i]
             else -> return@forEachIndexed
         }
         // The name stays at the left edge of the window for as long as any of its month is showing.
         val left = max(x, scrollX).coerceAtMost(x + width - label.size.width - 2 * pad)
-        if (left >= x) drawText(label, topLeft = Offset(left + pad, (monthBand - label.size.height) / 2))
+        drawText(label, topLeft = Offset(left + pad, (monthBand - label.size.height) / 2))
     }
     drawRect(colors.grid.copy(alpha = 0.6f), Offset(0f, monthBand), Size(size.width, line))
     // Weeks underneath: a tick at each Monday, labelled with its date while the columns are wide enough.
     val weekPx = dayPx * 7
     if (weekPx >= 12.dp.toPx()) {
+        val form = when {
+            labels.weekLongWidth + 2 * pad <= weekPx -> labels.weekLong
+            labels.weekDayOnlyWidth + 1.5f * pad <= weekPx -> labels.weekDayOnly
+            else -> null
+        }
         labels.weeks.forEachIndexed { i, monday ->
             val x = span.offsetOf(monday) * dayPx
             drawRect(colors.grid.copy(alpha = 0.6f), Offset(x, monthBand), Size(line, size.height - monthBand))
-            if (weekPx >= 26.dp.toPx()) {
-                val label = if (weekPx >= 60.dp.toPx()) labels.weekLong[i] else labels.weekDayOnly[i]
-                drawText(label, topLeft = Offset(x + pad, monthBand + (weekBand - label.size.height) / 2))
-            }
+            if (form != null) drawText(form[i], topLeft = Offset(x + pad, monthBand + (weekBand - form[i].size.height) / 2))
         }
     }
     drawRect(colors.grid, Offset(0f, size.height - line), Size(size.width, line))
@@ -353,7 +431,7 @@ private fun DrawScope.drawTimelineHeader(
     if (today in span) {
         val x = (span.offsetOf(today) + 0.5f) * dayPx
         val top = monthBand + weekBand
-        val half = 5.5.dp.toPx()
+        val half = style.markerStrip.toPx() * 0.7f
         val pointer = Path().apply { moveTo(x - half, top); lineTo(x + half, top); lineTo(x, size.height); close() }
         drawPath(pointer, TODAY_RED)
     }
@@ -361,7 +439,7 @@ private fun DrawScope.drawTimelineHeader(
 
 private fun DrawScope.drawTimelineBody(
     span: TimelineSpan, rows: List<ScheduleRow>, bars: List<PhaseBarDraw?>, working: BooleanArray,
-    dayPx: Float, dayWidth: Dp, today: LocalDate, colors: TimelineColors
+    dayPx: Float, dayWidth: Dp, today: LocalDate, colors: TimelineColors, style: TimelineStyle
 ) {
     val line = 1.dp.toPx()
     // Weekends and holidays, shaded while a day is wide enough to tell apart.
@@ -381,22 +459,23 @@ private fun DrawScope.drawTimelineBody(
     }
     span.months.forEach { m -> drawRect(colors.grid, Offset(m.offsetDays * dayPx, 0f), Size(line, size.height)) }
 
-    val rowH = TIMELINE_ROW_HEIGHT.toPx()
-    val groupH = TIMELINE_GROUP_HEIGHT.toPx()
+    val rowH = style.rowHeight.toPx()
+    val groupH = style.groupHeight.toPx()
     var y = 0f
     rows.forEachIndexed { index, row ->
         if (row is ScheduleRow.GroupHead) {
             drawRect(colors.band, Offset(0f, y), Size(size.width, groupH))
             y += groupH
         } else {
-            bars[index]?.let { drawPhaseBar(it, dayPx, centerY = y + rowH / 2, colors) }
+            bars[index]?.let { drawPhaseBar(it, dayPx, centerY = y + rowH / 2, colors, style) }
             drawRect(colors.grid.copy(alpha = 0.5f), Offset(0f, y + rowH - line), Size(size.width, line))
             y += rowH
         }
     }
     if (today in span) {
         val x = (span.offsetOf(today) + 0.5f) * dayPx
-        drawRect(TODAY_RED, Offset(x - line, 0f), Size(2.dp.toPx(), size.height))
+        val w = style.todayWidth.toPx()
+        drawRect(TODAY_RED, Offset(x - w / 2, 0f), Size(w, size.height))
     }
 }
 
@@ -405,42 +484,45 @@ private fun DrawScope.drawTimelineBody(
  * shows above and below even when the bar covers it end to end), then the bar itself in its
  * status colour - pale for the whole length, solid for the part that's done.
  */
-private fun DrawScope.drawPhaseBar(bar: PhaseBarDraw, dayPx: Float, centerY: Float, colors: TimelineColors) {
+private fun DrawScope.drawPhaseBar(bar: PhaseBarDraw, dayPx: Float, centerY: Float, colors: TimelineColors, style: TimelineStyle) {
+    val ghostFill = colors.ghost.copy(alpha = if (style.strong) 0.14f else 0.10f)
+    val ghostEdge = colors.ghost.copy(alpha = if (style.strong) 0.70f else 0.46f)
+    val ghostStroke = Stroke(width = (if (style.strong) 2.dp else 1.dp).toPx())
     if (bar.isMilestone) {
-        bar.baseline?.let { drawDiamond(Offset((it.offsetDays + 0.5f) * dayPx, centerY), 12.dp.toPx(), colors.ghost.copy(alpha = 0.12f), outline = colors.ghost.copy(alpha = 0.46f)) }
-        bar.current?.let { drawDiamond(Offset((it.offsetDays + 0.5f) * dayPx, centerY), 8.5.dp.toPx(), bar.color, outline = null) }
+        bar.baseline?.let { drawDiamond(Offset((it.offsetDays + 0.5f) * dayPx, centerY), style.ghostHeight.toPx() * 0.43f, ghostFill, ghostEdge, ghostStroke) }
+        bar.current?.let { drawDiamond(Offset((it.offsetDays + 0.5f) * dayPx, centerY), style.barHeight.toPx() * 0.47f, bar.color, null, ghostStroke) }
         return
     }
     val minWidth = 3.dp.toPx()
     bar.baseline?.let { b ->
-        val h = 28.dp.toPx()
+        val h = style.ghostHeight.toPx()
         val topLeft = Offset(b.offsetDays * dayPx, centerY - h / 2)
         val ghostSize = Size(max(b.lengthDays * dayPx, minWidth), h)
-        val corner = CornerRadius(7.dp.toPx())
-        drawRoundRect(colors.ghost.copy(alpha = 0.10f), topLeft, ghostSize, corner)
-        drawRoundRect(colors.ghost.copy(alpha = 0.46f), topLeft, ghostSize, corner, style = Stroke(width = 1.dp.toPx()))
+        val corner = CornerRadius(h * 0.25f)
+        drawRoundRect(ghostFill, topLeft, ghostSize, corner)
+        drawRoundRect(ghostEdge, topLeft, ghostSize, corner, style = ghostStroke)
     }
     bar.current?.let { c ->
-        val h = 18.dp.toPx()
+        val h = style.barHeight.toPx()
         val left = c.offsetDays * dayPx
         val width = max(c.lengthDays * dayPx, minWidth)
         val rect = Rect(left, centerY - h / 2, left + width, centerY + h / 2)
-        val shape = Path().apply { addRoundRect(RoundRect(rect, CornerRadius(5.dp.toPx()))) }
+        val shape = Path().apply { addRoundRect(RoundRect(rect, CornerRadius(h * 0.28f))) }
         clipPath(shape) {
             drawRect(colors.surface, rect.topLeft, rect.size)                       // so the baseline doesn't show through the pale part
-            drawRect(bar.color.copy(alpha = 0.30f), rect.topLeft, rect.size)
+            drawRect(bar.color.copy(alpha = style.trackAlpha), rect.topLeft, rect.size)
             if (bar.percent > 0) drawRect(bar.color, rect.topLeft, Size(width * bar.percent / 100f, h))
         }
     }
 }
 
-private fun DrawScope.drawDiamond(center: Offset, half: Float, fill: Color, outline: Color?) {
+private fun DrawScope.drawDiamond(center: Offset, half: Float, fill: Color, outline: Color?, stroke: Stroke) {
     val path = Path().apply {
         moveTo(center.x, center.y - half); lineTo(center.x + half, center.y)
         lineTo(center.x, center.y + half); lineTo(center.x - half, center.y); close()
     }
     drawPath(path, fill)
-    if (outline != null) drawPath(path, outline, style = Stroke(width = 1.dp.toPx()))
+    if (outline != null) drawPath(path, outline, style = stroke)
 }
 
 /** The phase whose bar (or milestone) is under a tap, allowing a fingertip of slop either side. Null for a tap on empty calendar. */

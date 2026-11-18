@@ -3,6 +3,9 @@ package com.djransom.crewsync.i18n
 // Generated from the English wording used in t("…") calls. Keys are the English text exactly as written in the code.
 
 internal val translationsPl: Map<String, String> = mapOf(
+    "Present" to "Prezentuj",
+    "Phases done" to "Ukończone etapy",
+    "Working days of slip at finish" to "Dni robocze opóźnienia na końcu",
     "Timeline" to "Oś czasu",
     "Weeks" to "Tygodnie",
     "Months" to "Miesiące",
@@ -560,6 +563,9 @@ internal val translationsPl: Map<String, String> = mapOf(
 )
 
 internal val translationsNl: Map<String, String> = mapOf(
+    "Present" to "Presenteren",
+    "Phases done" to "Fasen klaar",
+    "Working days of slip at finish" to "Werkdagen vertraging bij oplevering",
     "Timeline" to "Tijdlijn",
     "Weeks" to "Weken",
     "Months" to "Maanden",
@@ -1117,6 +1123,9 @@ internal val translationsNl: Map<String, String> = mapOf(
 )
 
 internal val translationsFr: Map<String, String> = mapOf(
+    "Present" to "Présenter",
+    "Phases done" to "Phases terminées",
+    "Working days of slip at finish" to "Jours ouvrés de retard à la fin",
     "Timeline" to "Chronologie",
     "Weeks" to "Semaines",
     "Months" to "Mois",
@@ -1674,6 +1683,9 @@ internal val translationsFr: Map<String, String> = mapOf(
 )
 
 internal val translationsDe: Map<String, String> = mapOf(
+    "Present" to "Präsentieren",
+    "Phases done" to "Phasen erledigt",
+    "Working days of slip at finish" to "Arbeitstage Verzug am Ende",
     "Timeline" to "Zeitachse",
     "Weeks" to "Wochen",
     "Months" to "Monate",

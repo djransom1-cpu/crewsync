@@ -1,6 +1,7 @@
 package com.djransom.crewsync.util
 
 import com.djransom.crewsync.data.model.Appointment
+import com.djransom.crewsync.data.model.PhaseStatus
 import com.djransom.crewsync.data.model.SchedulePhase
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
@@ -171,3 +172,46 @@ fun SchedulePhase.nextLinkedAppointment(
 
 private fun timeOfDayMinutes(millis: Long, zone: TimeZone): Int =
     Instant.fromEpochMilliseconds(millis).toLocalDateTime(zone).let { it.hour * 60 + it.minute }
+
+// ---- Presentation mode -------------------------------------------------------------------------
+
+/**
+ * What presentation mode opens on: [weeksBack] whole weeks before this week through [weeksAhead]
+ * weeks after it, filling a window [viewportWidth] dp wide. The left edge is a Monday so the week
+ * columns start cleanly. If the schedule begins later than that, the left edge is its first week.
+ */
+fun TimelineSpan.around(today: LocalDate, weeksBack: Int, weeksAhead: Int, viewportWidth: Float): TimelineFit {
+    val from = today.weekStart().minus(weeksBack * 7, DateTimeUnit.DAY)
+    val shown = ((weeksBack + weeksAhead) * 7).coerceAtLeast(7)
+    val dayWidth = (viewportWidth / shown).coerceIn(TIMELINE_MIN_DAY_WIDTH, TIMELINE_MAX_DAY_WIDTH)
+    return TimelineFit(dayWidth, offsetOf(from).coerceIn(0, days - 1))
+}
+
+/**
+ * The numbers on the presentation header: how many phases are done and in progress, and where
+ * the finish stands against the plan. The finish is the latest end date of any phase; the planned
+ * finish is the latest baseline end. [finishSlipDays] is the working days between them (positive
+ * is late) and is null until at least one phase has both a date and a baseline. The connector
+ * reports the same figures from list_schedule (scheduleTotals in functions/mcp.js).
+ */
+data class ScheduleTotals(
+    val total: Int,
+    val done: Int,
+    val inProgress: Int,
+    val plannedFinish: LocalDate?,
+    val currentFinish: LocalDate?,
+    val finishSlipDays: Int?
+)
+
+fun scheduleTotals(phases: List<SchedulePhase>, calendar: WorkCalendar, zone: TimeZone = TimeZone.currentSystemDefault()): ScheduleTotals {
+    val current = phases.mapNotNull { it.end }.maxOrNull()?.let { millisToLocalDate(it, zone) }
+    val planned = phases.mapNotNull { it.baselineEnd }.maxOrNull()?.let { millisToLocalDate(it, zone) }
+    return ScheduleTotals(
+        total = phases.size,
+        done = phases.count { it.status == PhaseStatus.DONE },
+        inProgress = phases.count { it.status == PhaseStatus.IN_PROGRESS },
+        plannedFinish = planned,
+        currentFinish = current,
+        finishSlipDays = if (planned != null && current != null) calendar.workingDaysBetween(planned, current) else null
+    )
+}

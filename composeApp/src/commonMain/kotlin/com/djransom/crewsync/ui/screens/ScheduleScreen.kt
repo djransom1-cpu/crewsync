@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.FitScreen
+import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -54,7 +55,8 @@ import kotlinx.datetime.TimeZone
  * The Schedule tab: the project's phases (Roofing, Insulation, Drywall...) banded by group, in
  * schedule order, as a timeline (Gantt chart - see ScheduleTimelineView.kt) or as a list with
  * each phase's dates, working days, status and percent complete. Tapping a phase in either opens
- * its card (SchedulePhaseCard.kt).
+ * its card (SchedulePhaseCard.kt). The Present button opens presentation mode
+ * (SchedulePresentation.kt): the same timeline on its own, full-screen, for the meeting room.
  *
  * Read-only for now - phases are loaded and changed through the connector. [ScheduleTab] does the
  * Firestore listening; [ScheduleContent] and everything under it draw whatever they are handed
@@ -62,7 +64,14 @@ import kotlinx.datetime.TimeZone
  * ScheduleScreenshotTest).
  */
 @Composable
-fun ScheduleTab(projectId: String, project: Project, tasks: List<Task>, appointments: List<Appointment>) {
+fun ScheduleTab(
+    projectId: String,
+    project: Project,
+    tasks: List<Task>,
+    appointments: List<Appointment>,
+    presenting: Boolean = false,
+    onPresentingChange: (Boolean) -> Unit = {}
+) {
     val firestore = Firebase.firestore
     var loadError by remember(projectId) { mutableStateOf<String?>(null) }
     val phasesFlow: Flow<List<SchedulePhase>?> = remember(projectId) {
@@ -76,10 +85,19 @@ fun ScheduleTab(projectId: String, project: Project, tasks: List<Task>, appointm
 
     val error = loadError
     val loaded = phases
+    // Presentation mode has no menu or back arrow of its own, so never leave someone in it looking at an error.
+    LaunchedEffect(error, presenting) { if (error != null && presenting) onPresentingChange(false) }
     when {
         error != null -> ScheduleMessage(t("Couldn't load the schedule: {0}", error))
         loaded == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        else -> ScheduleContent(phases = loaded, tasks = tasks, appointments = appointments, calendar = calendar)
+        presenting -> SchedulePresentationScreen(
+            projectName = project.name, phases = loaded, tasks = tasks, appointments = appointments, calendar = calendar,
+            onClose = { onPresentingChange(false) }
+        )
+        else -> ScheduleContent(
+            phases = loaded, tasks = tasks, appointments = appointments, calendar = calendar,
+            onPresent = { onPresentingChange(true) }
+        )
     }
 }
 
@@ -100,7 +118,8 @@ fun ScheduleContent(
     zone: TimeZone = TimeZone.currentSystemDefault(),
     today: LocalDate = scheduleToday(zone),
     initialView: ScheduleView = ScheduleView.Timeline,
-    timelineState: ScheduleTimelineState = rememberScheduleTimelineState()
+    timelineState: ScheduleTimelineState = rememberScheduleTimelineState(),
+    onPresent: (() -> Unit)? = null
 ) {
     if (phases.isEmpty()) {
         ScheduleMessage(t("No schedule yet."), t("Phases will show here once the schedule is set up."), modifier)
@@ -112,7 +131,7 @@ fun ScheduleContent(
     var openPhaseId by rememberSaveable { mutableStateOf<String?>(null) }
 
     Column(modifier = modifier.fillMaxSize()) {
-        ScheduleToolbar(view, onView = { viewName = it.name }, timeline = timelineState)
+        ScheduleToolbar(view, onView = { viewName = it.name }, timeline = timelineState, onPresent = onPresent)
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         when (view) {
             ScheduleView.Timeline -> ScheduleTimeline(
@@ -129,7 +148,7 @@ fun ScheduleContent(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ScheduleToolbar(view: ScheduleView, onView: (ScheduleView) -> Unit, timeline: ScheduleTimelineState) {
+private fun ScheduleToolbar(view: ScheduleView, onView: (ScheduleView) -> Unit, timeline: ScheduleTimelineState, onPresent: (() -> Unit)?) {
     Row(
         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -137,6 +156,13 @@ private fun ScheduleToolbar(view: ScheduleView, onView: (ScheduleView) -> Unit, 
     ) {
         FilterChip(selected = view == ScheduleView.Timeline, onClick = { onView(ScheduleView.Timeline) }, label = { Text(t("Timeline")) })
         FilterChip(selected = view == ScheduleView.List, onClick = { onView(ScheduleView.List) }, label = { Text(t("List")) })
+        // Presentation mode: the schedule on its own, full-screen, for the meeting-room screen.
+        if (onPresent != null) {
+            AssistChip(
+                onClick = onPresent, label = { Text(t("Present")) },
+                leadingIcon = { Icon(Icons.Default.Slideshow, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
+            )
+        }
         if (view == ScheduleView.Timeline) {
             Spacer(Modifier.width(12.dp))
             FilterChip(

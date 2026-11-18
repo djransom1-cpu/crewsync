@@ -7,15 +7,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import com.djransom.crewsync.data.model.Appointment
 import com.djransom.crewsync.data.model.SchedulePhase
@@ -53,15 +56,25 @@ fun PhaseCardDialog(
     appointments: List<Appointment>,
     today: LocalDate,
     zone: TimeZone,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    large: Boolean = false
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = onDismiss) { Text(t("Close")) } },
-        title = { PhaseCardTitle(phase) },
-        text = { PhaseCardBody(phase, calendar, tasks, appointments, today, zone, Modifier.verticalScroll(rememberScrollState())) }
-    )
+    // On the meeting-room screen the same card is simply drawn bigger: the lettering, the spacing
+    // and the dialog itself are all scaled up together.
+    val density = LocalDensity.current
+    val scale = if (large) PHASE_CARD_LARGE_SCALE else 1f
+    CompositionLocalProvider(LocalDensity provides Density(density.density * scale, density.fontScale)) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            confirmButton = { TextButton(onClick = onDismiss) { Text(t("Close")) } },
+            title = { PhaseCardTitle(phase) },
+            text = { PhaseCardBody(phase, calendar, tasks, appointments, today, zone, Modifier.verticalScroll(rememberScrollState())) }
+        )
+    }
 }
+
+/** How much bigger the card is drawn in presentation mode. */
+const val PHASE_CARD_LARGE_SCALE = 1.6f
 
 @Composable
 fun PhaseCardTitle(phase: SchedulePhase) {
