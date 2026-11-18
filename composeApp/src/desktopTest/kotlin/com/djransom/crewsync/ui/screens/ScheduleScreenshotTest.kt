@@ -32,6 +32,13 @@ import org.jetbrains.skia.EncodedImageFormat
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertTrue
+import kotlin.test.assertEquals
+import androidx.compose.foundation.ScrollState
+import com.djransom.crewsync.data.model.ChecklistGroup
+import com.djransom.crewsync.data.model.ChecklistItem
+import com.djransom.crewsync.data.model.DailyLog
+import com.djransom.crewsync.data.model.WeatherReading
+import com.djransom.crewsync.util.buildTodaySnapshot
 
 /**
  * Draws the Schedule tab off-screen with the Martin-shaped sample data and saves each picture as
@@ -330,6 +337,49 @@ class ScheduleScreenshotTest {
             notes = listOf("Wed Nov 11: Weekly meeting with the owner.")
         )
         WeeklyReportBody(report, onEdit = {}, modifier = Modifier.padding(12.dp))
+    }
+
+    // ---- Today ----
+
+    private val todayTasks = data.roofTasks + listOf(
+        Task(id = "tTop", title = "Order windows", status = "TOP Priority", dueDate = data.day(2026, 11, 20).toLocalMidnightMillis(data.zone),
+            checklistGroups = listOf(ChecklistGroup("g", "Order", listOf(ChecklistItem("a", "Confirm sizes with Pella"), ChecklistItem("b", "Send deposit"))))),
+        Task(id = "tPunch", title = "Punch walk", status = "Not Started",
+            checklistGroups = listOf(ChecklistGroup("g", "Punch", (1..40).map { ChecklistItem("p$it", "Punch item $it") }))),
+        Task(id = "tLate", title = "Septic permit", status = "In Progress", dueDate = data.day(2026, 11, 13).toLocalMidnightMillis(data.zone))
+    )
+    private val todayLogs = listOf(
+        DailyLog(id = "2026-11-17", date = "2026-11-17", crewOnSite = listOf("NACE crew (6)", "D & W Mechanical"),
+            workCompleted = listOf("NACE - roof sheathing on the north side", "D & W Mechanical - plumbing rough-in"),
+            issuesDelays = listOf("Confirm the gas line test before the pour"), tomorrowPlan = listOf("A+ Concrete - pour the patio slab")),
+        DailyLog(id = "2026-11-18", date = "2026-11-18", weatherReadings = listOf(WeatherReading(slot = "morning", tempF = 34, conditions = "Clear")))
+    )
+    private val todaySnapshot get() = buildTodaySnapshot(
+        data.martinInProgress, todayTasks, data.roofAppointments, todayLogs, thanksgiving, data.today,
+        data.today.toLocalMidnightMillis(data.zone) + 12 * 3_600_000L, data.zone
+    )
+
+    /** The Today view on a phone: collapsible cards, To do showing 15 then "N more". */
+    @Test
+    fun todayOnAPhone() = shot("schedule-today-phone", width = 400, height = 2200) {
+        TodaySnapshotView("Martin", "Traverse City, MI", todaySnapshot, data.zone, onToggleItem = { _, _, _, _ -> }, onPhaseClick = {}, lookUpWeather = false)
+    }
+
+    /** The Today view across a 1920x1080 screen in three columns. Nothing may run off the bottom. */
+    @Test
+    fun todayFullHd() {
+        val states = List(3) { ScrollState(0) }
+        shot("schedule-today-1920", width = 1920, height = 1080) {
+            TodaySnapshotBig(todaySnapshot, "Traverse City, MI", data.zone, lookUpWeather = false, scrollStates = states)
+        }
+        states.forEachIndexed { i, s -> assertEquals(0, s.maxValue, "column ${i + 1} runs off the bottom of a 1920x1080 screen by ${s.maxValue}px") }
+    }
+
+    /** Presentation mode switched to Today, as the room sees it. */
+    @Test
+    fun presentationToday() = shot("schedule-presentation-today-1920", width = 1920, height = 1080) {
+        SchedulePresentationContent("Martin", data.martinInProgress, todayTasks, data.roofAppointments, thanksgiving, onClose = {},
+            zone = data.zone, today = data.today, logs = todayLogs, location = "Traverse City, MI", initialShowToday = true, lookUpWeather = false)
     }
 
     private fun shot(name: String, width: Int, height: Int, density: Float = 1f, content: @Composable () -> Unit) {

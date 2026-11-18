@@ -19,7 +19,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.djransom.crewsync.data.model.Appointment
 import com.djransom.crewsync.data.model.DailyLog
+import com.djransom.crewsync.data.model.SchedulePhase
+import com.djransom.crewsync.data.model.Task
 import com.djransom.crewsync.data.model.DailyLogSections
 import com.djransom.crewsync.data.model.Project
 import com.djransom.crewsync.data.model.ProjectFile
@@ -52,17 +55,27 @@ fun DailyLogTab(
     projectId: String,
     project: Project,
     userMap: Map<String, String>,
-    currentUserEmail: String
+    currentUserEmail: String,
+    // For the Today view: the project's schedule, task cards, calendar and logs.
+    phases: List<SchedulePhase> = emptyList(),
+    tasks: List<Task> = emptyList(),
+    appointments: List<Appointment> = emptyList(),
+    logs: List<DailyLog> = emptyList()
 ) {
     // Daily: one day's log, as before. Weekly: the week's report built from those logs (WeeklyReportScreen.kt).
-    var weekly by rememberSaveable { mutableStateOf(false) }
+    // Today: where the project stands and what's next (TodaySnapshotView.kt).
+    var mode by rememberSaveable { mutableStateOf("daily") }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = !weekly, onClick = { weekly = false }, label = { Text(t("Daily")) })
-            FilterChip(selected = weekly, onClick = { weekly = true }, label = { Text(t("Weekly")) })
+            FilterChip(selected = mode == "daily", onClick = { mode = "daily" }, label = { Text(t("Daily")) })
+            FilterChip(selected = mode == "weekly", onClick = { mode = "weekly" }, label = { Text(t("Weekly")) })
+            FilterChip(selected = mode == "today", onClick = { mode = "today" }, label = { Text(t("Today")) })
         }
-        if (weekly) WeeklyReportView(projectId, project, currentUserEmail, Modifier.weight(1f))
-        else DailyLogDayView(projectId, project, userMap, currentUserEmail, Modifier.weight(1f))
+        when (mode) {
+            "weekly" -> WeeklyReportView(projectId, project, currentUserEmail, Modifier.weight(1f))
+            "today" -> TodaySnapshotTab(project, phases, tasks, appointments, logs, remember(project.workWeek, project.scheduleHolidays) { project.workCalendar() }, Modifier.weight(1f))
+            else -> DailyLogDayView(projectId, project, userMap, currentUserEmail, Modifier.weight(1f))
+        }
     }
 }
 

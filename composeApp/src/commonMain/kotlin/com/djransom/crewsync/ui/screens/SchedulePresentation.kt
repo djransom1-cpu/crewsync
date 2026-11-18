@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.djransom.crewsync.data.model.Appointment
+import com.djransom.crewsync.data.model.DailyLog
 import com.djransom.crewsync.data.model.PhaseStatus
 import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.data.model.Task
@@ -39,6 +40,8 @@ import com.djransom.crewsync.util.formatScheduleDay
 import com.djransom.crewsync.util.scheduleRows
 import com.djransom.crewsync.util.scheduleToday
 import com.djransom.crewsync.util.scheduleTotals
+import com.djransom.crewsync.util.buildTodaySnapshot
+import kotlin.time.Clock
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.isoDayNumber
@@ -65,7 +68,9 @@ fun SchedulePresentationScreen(
     tasks: List<Task>,
     appointments: List<Appointment>,
     calendar: WorkCalendar,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    logs: List<DailyLog> = emptyList(),
+    location: String = ""
 ) {
     FullScreenHost(onExit = onClose) {
         val focus = remember { FocusRequester() }
@@ -78,7 +83,7 @@ fun SchedulePresentationScreen(
                 .focusRequester(focus)
                 .focusable()
         ) {
-            SchedulePresentationContent(projectName, phases, tasks, appointments, calendar, onClose)
+            SchedulePresentationContent(projectName, phases, tasks, appointments, calendar, onClose, logs = logs, location = location)
         }
     }
 }
@@ -94,9 +99,18 @@ fun SchedulePresentationContent(
     onClose: () -> Unit,
     zone: TimeZone = TimeZone.currentSystemDefault(),
     today: LocalDate = scheduleToday(zone),
-    timelineState: ScheduleTimelineState = remember { ScheduleTimelineState().apply { showAroundToday(PRESENTATION_WEEKS_BACK, PRESENTATION_WEEKS_AHEAD) } }
+    timelineState: ScheduleTimelineState = remember { ScheduleTimelineState().apply { showAroundToday(PRESENTATION_WEEKS_BACK, PRESENTATION_WEEKS_AHEAD) } },
+    logs: List<DailyLog> = emptyList(),
+    location: String = "",
+    initialShowToday: Boolean = false,
+    lookUpWeather: Boolean = true
 ) {
     val totals = remember(phases, calendar, zone) { scheduleTotals(phases, calendar, zone) }
+    // The meeting-room screen shows either the timeline or Today (TodaySnapshotView.kt).
+    var showToday by rememberSaveable { mutableStateOf(initialShowToday) }
+    val snapshot = remember(phases, tasks, appointments, logs, calendar, today) {
+        buildTodaySnapshot(phases, tasks, appointments, logs, calendar, today, Clock.System.now().toEpochMilliseconds(), zone)
+    }
     val rows = remember(phases) { scheduleRows(phases) }
     var openPhaseId by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -120,10 +134,13 @@ fun SchedulePresentationContent(
                         projectName = projectName, today = today, totals = totals, compact = compact,
                         onShowAhead = { timelineState.showAroundToday(PRESENTATION_WEEKS_BACK, PRESENTATION_WEEKS_AHEAD) },
                         onFit = { timelineState.fit() },
-                        onClose = onClose
+                        onClose = onClose,
+                        showToday = showToday, onShowToday = { showToday = it }
                     )
                     HorizontalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.outline)
-                    BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                    if (showToday) {
+                        TodaySnapshotBig(snapshot, location, zone, Modifier.weight(1f), onPhaseClick = { openPhaseId = it.id }, lookUpWeather = lookUpWeather)
+                    } else BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                         // Rows are made as tall as they can be while every phase still fits on the screen,
                         // within limits: never smaller than the normal timeline, never comically large.
                         val phaseRows = rows.count { it is ScheduleRow.PhaseLine }.coerceAtLeast(1)
@@ -150,7 +167,8 @@ fun SchedulePresentationContent(
 @Composable
 private fun PresentationHeader(
     projectName: String, today: LocalDate, totals: ScheduleTotals, compact: Boolean,
-    onShowAhead: () -> Unit, onFit: () -> Unit, onClose: () -> Unit
+    onShowAhead: () -> Unit, onFit: () -> Unit, onClose: () -> Unit,
+    showToday: Boolean = false, onShowToday: (Boolean) -> Unit = {}
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Row(
@@ -192,8 +210,15 @@ private fun PresentationHeader(
         }
         Spacer(Modifier.width(if (compact) 4.dp else 16.dp))
         val iconSize = if (compact) 24.dp else 32.dp
-        IconButton(onClick = onShowAhead) { Icon(Icons.Default.Today, contentDescription = t("Today"), modifier = Modifier.size(iconSize)) }
-        IconButton(onClick = onFit) { Icon(Icons.Default.FitScreen, contentDescription = t("Fit"), modifier = Modifier.size(iconSize)) }
+        // Switch between the timeline and Today.
+        FilterChip(selected = !showToday, onClick = { onShowToday(false) }, label = { Text(t("Timeline")) })
+        Spacer(Modifier.width(8.dp))
+        FilterChip(selected = showToday, onClick = { onShowToday(true) }, label = { Text(t("Today")) })
+        Spacer(Modifier.width(8.dp))
+        if (!showToday) {
+            IconButton(onClick = onShowAhead) { Icon(Icons.Default.Today, contentDescription = t("Back to today"), modifier = Modifier.size(iconSize)) }
+            IconButton(onClick = onFit) { Icon(Icons.Default.FitScreen, contentDescription = t("Fit"), modifier = Modifier.size(iconSize)) }
+        }
         IconButton(onClick = onClose) { Icon(Icons.Default.Close, contentDescription = t("Close"), modifier = Modifier.size(iconSize)) }
     }
 }

@@ -270,7 +270,7 @@ fun ProjectDetailsScreen(
         ScheduleTab(
             projectId = projectId, project = project!!, tasks = tasks, appointments = appointments,
             phases = schedulePhases, loadError = scheduleLoadError, actions = null,
-            presenting = true, onPresentingChange = { presentingSchedule = it }
+            presenting = true, onPresentingChange = { presentingSchedule = it }, logs = dailyLogs
         )
     } else ModalNavigationDrawer(
         drawerState = drawerState,
@@ -449,13 +449,16 @@ fun ProjectDetailsScreen(
                             scheduleActions = if (isLeader) scheduleActions else null, workCalendar = project!!.workCalendar()
                         )
                         6 -> NotesTab(projectId = projectId, notes = notes, currentUserEmail = auth.currentUser?.email ?: "")
-                        7 -> DailyLogTab(projectId = projectId, project = project!!, userMap = userMap, currentUserEmail = auth.currentUser?.email ?: "")
+                        7 -> DailyLogTab(
+                            projectId = projectId, project = project!!, userMap = userMap, currentUserEmail = auth.currentUser?.email ?: "",
+                            phases = schedulePhases.orEmpty(), tasks = tasks, appointments = appointments, logs = dailyLogs
+                        )
                         8 -> ScheduleTab(
                             projectId = projectId, project = project!!, tasks = tasks, appointments = appointments,
                             phases = schedulePhases, loadError = scheduleLoadError,
                             // Same rule as the site calendar: the project's leader (or an admin) edits the schedule.
                             actions = if (isLeader) scheduleActions else null,
-                            presenting = false, onPresentingChange = { presentingSchedule = it }
+                            presenting = false, onPresentingChange = { presentingSchedule = it }, logs = dailyLogs
                         )
                     }
                 }

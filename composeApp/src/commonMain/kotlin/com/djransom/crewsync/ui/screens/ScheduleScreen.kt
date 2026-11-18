@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.djransom.crewsync.data.model.Appointment
 import com.djransom.crewsync.data.model.Contact
+import com.djransom.crewsync.data.model.DailyLog
 import com.djransom.crewsync.data.model.PhaseStatus
 import com.djransom.crewsync.data.model.Project
 import com.djransom.crewsync.data.model.SchedulePhase
@@ -88,7 +89,8 @@ fun ScheduleTab(
     loadError: String?,
     actions: ScheduleActions?,          // null: read-only
     presenting: Boolean = false,
-    onPresentingChange: (Boolean) -> Unit = {}
+    onPresentingChange: (Boolean) -> Unit = {},
+    logs: List<DailyLog> = emptyList()
 ) {
     val calendar = remember(project.workWeek, project.scheduleHolidays) { project.workCalendar() }
     // The workspace's contacts: for picking who's doing a phase, and for tap-to-call.
@@ -109,18 +111,18 @@ fun ScheduleTab(
         phases == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         presenting -> SchedulePresentationScreen(
             projectName = project.name, phases = phases, tasks = tasks, appointments = appointments, calendar = calendar,
-            onClose = { onPresentingChange(false) }
+            onClose = { onPresentingChange(false) }, logs = logs, location = project.location
         )
         else -> ScheduleContent(
             phases = phases, tasks = tasks, appointments = appointments, calendar = calendar,
             onPresent = { onPresentingChange(true) },
-            actions = actions, contacts = contacts, projectId = projectId
+            actions = actions, contacts = contacts, projectId = projectId, project = project, logs = logs
         )
     }
 }
 
 /** The ways the Schedule tab shows the phases: the timeline, the list, and the look-ahead (ScheduleLookAheadView.kt). */
-enum class ScheduleView { Timeline, List, LookAhead }
+enum class ScheduleView { Timeline, List, LookAhead, Today }
 
 /**
  * The schedule with its toolbar: Timeline, List or Look-ahead; for the timeline the zoom (weeks or
@@ -143,7 +145,9 @@ fun ScheduleContent(
     contacts: List<Contact> = emptyList(),
     projectId: String = "",
     initialLookWeeks: Int = 2,
-    initialLookByTrade: Boolean = false
+    initialLookByTrade: Boolean = false,
+    project: Project? = null,              // for the Today view
+    logs: List<DailyLog> = emptyList()
 ) {
     var viewName by rememberSaveable { mutableStateOf(initialView.name) }
     val view = ScheduleView.entries.firstOrNull { it.name == viewName } ?: ScheduleView.Timeline
@@ -251,6 +255,9 @@ fun ScheduleContent(
                     phases = phases, tasks = tasks, appointments = appointments, weeks = lookWeeks, byTrade = lookByTrade,
                     today = today, zone = zone, onPhaseClick = { openPhaseId = it.id }
                 )
+                ScheduleView.Today -> if (project != null) {
+                    TodaySnapshotTab(project, phases, tasks, appointments, logs, calendar, onPhaseClick = { openPhaseId = it.id })
+                }
             }
         }
     }
@@ -354,6 +361,7 @@ private fun ScheduleToolbar(
         FilterChip(selected = view == ScheduleView.Timeline, onClick = { onView(ScheduleView.Timeline) }, label = { Text(t("Timeline")) })
         FilterChip(selected = view == ScheduleView.List, onClick = { onView(ScheduleView.List) }, label = { Text(t("List")) })
         FilterChip(selected = view == ScheduleView.LookAhead, onClick = { onView(ScheduleView.LookAhead) }, label = { Text(t("Look-ahead")) })
+        FilterChip(selected = view == ScheduleView.Today, onClick = { onView(ScheduleView.Today) }, label = { Text(t("Today")) })
         // Presentation mode: the schedule on its own, full-screen, for the meeting-room screen.
         if (onPresent != null) {
             AssistChip(
