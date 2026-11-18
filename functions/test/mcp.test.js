@@ -1,5 +1,6 @@
 // Local smoke test: in-memory Firestore fake + in-memory MCP client against buildServer().
 const assert = require("assert");
+const { FieldValue } = require("firebase-admin/firestore");
 const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
 const { InMemoryTransport } = require("@modelcontextprotocol/sdk/inMemory.js");
 // Offline stubs: no Firebase Storage, no network. The PDF is still really rendered by pdfkit.
@@ -27,7 +28,8 @@ function makeDb() {
     path,
     async get() { const d = store.get(path); return { id: path.split("/").pop(), exists: !!d, data: () => (d ? JSON.parse(JSON.stringify(d)) : undefined) }; },
     async set(data, opts) { const d = JSON.parse(JSON.stringify(data)); store.set(path, opts?.merge ? { ...(store.get(path) || {}), ...d } : d); },
-    async update(patch) { const d = store.get(path); if (!d) throw new Error("no doc " + path); store.set(path, { ...d, ...JSON.parse(JSON.stringify(patch)) }); },
+    // FieldValue.delete() removes the field, as it does in real Firestore
+    async update(patch) { const d = store.get(path); if (!d) throw new Error("no doc " + path); const next = { ...d }; for (const [k, v] of Object.entries(patch)) { if (v instanceof FieldValue) { assert(v.isEqual(FieldValue.delete()), "only FieldValue.delete() is faked"); delete next[k]; } else if (v !== undefined) next[k] = JSON.parse(JSON.stringify(v)); } store.set(path, next); },
     async delete() { store.delete(path); },
     collection(name) { return colRef(path + "/" + name); },
   });
@@ -49,7 +51,7 @@ function makeDb() {
   return {
     collection: (name) => colRef(name),
     async runTransaction(fn) { const tx = { get: (r) => r.get(), set: (r, d, o) => { ops.push(() => r.set(d, o)); }, update: (r, p) => { ops.push(() => r.update(p)); } }; const ops = []; const out = await fn(tx); for (const o of ops) await o(); return out; },
-    batch() { const ops = []; return { update: (r, p) => ops.push(() => r.update(p)), delete: (r) => ops.push(() => r.delete()), async commit() { for (const o of ops) await o(); } }; },
+    batch() { const ops = []; return { set: (r, d, o) => ops.push(() => r.set(d, o)), update: (r, p) => ops.push(() => r.update(p)), delete: (r) => ops.push(() => r.delete()), async commit() { for (const o of ops) await o(); } }; },
     _store: store,
   };
 }
@@ -84,6 +86,62 @@ async function main() {
   assert.strictEqual(fmtDateTime(parseDate("2026-10-21T13:00:00Z", tz), tz), "Wed 2026-10-21 9:00 AM");
   assert.strictEqual(fmtDateTime(parseDate("2026-10-21", tz), tz), "Wed 2026-10-21 12:00 AM");
   console.log("date/recurrence helpers ok");
+
+  // ---- schedule: working-day math (the same cases as the app's ScheduleDatesTest.kt) ----
+  const sch = require("../schedule.js");
+  const D = sch.isoToDay;
+  const cal = sch.workCalendar({});
+  assert.strictEqual(sch.fmtDay(D("2026-12-04")), "Fri 2026-12-04");
+  assert.strictEqual(sch.isoToDay("2026-02-31"), null, "not a real date");
+  assert.strictEqual(sch.isoToDay("12/04/2026"), null);
+  assert.strictEqual(cal.addWorkingDays(D("2026-12-04"), 1), D("2026-12-07"), "Friday + 1 is Monday");
+  assert.strictEqual(cal.addWorkingDays(D("2026-12-07"), -1), D("2026-12-04"), "Monday - 1 is Friday");
+  assert.strictEqual(cal.addWorkingDays(D("2026-12-05"), 0), D("2026-12-07"), "a Saturday snaps forward to Monday");
+  assert.strictEqual(cal.durationDays(D("2026-09-21"), D("2026-10-15")), 19);
+  assert.strictEqual(cal.endForDuration(D("2026-12-04"), 3), D("2026-12-08"), "Fri, Mon, Tue");
+  assert.strictEqual(cal.startForDuration(D("2026-12-08"), 3), D("2026-12-04"));
+  assert.strictEqual(cal.endForDuration(D("2026-09-25"), 1), D("2026-09-25"), "a one-day milestone ends the day it starts");
+  assert.strictEqual(cal.workingDaysBetween(D("2026-10-15"), D("2026-12-11")), 41, "the Roof complete slip");
+  const thanksgiving = sch.workCalendar({ scheduleHolidays: ["2026-11-26", "2026-11-27", "not a date"] });
+  assert.deepStrictEqual(thanksgiving.holidays, ["2026-11-26", "2026-11-27"]);
+  assert.strictEqual(thanksgiving.workingDaysBetween(D("2026-10-15"), D("2026-12-11")), 39);
+  assert.strictEqual(thanksgiving.workingDaysBetween(D("2026-12-11"), D("2026-10-15")), -39, "counting back undoes counting forward");
+  assert.strictEqual(thanksgiving.addWorkingDays(D("2026-11-25"), 1), D("2026-11-30"), "the Wednesday before Thanksgiving + 1 is the Monday after");
+  assert.deepStrictEqual(sch.workCalendar({ workWeek: [] }).workWeek, [1, 2, 3, 4, 5], "an empty work week falls back to Monday-Friday");
+  assert.strictEqual(sch.workCalendar({ workWeek: [1, 2, 3, 4, 5, 6] }).addWorkingDays(D("2026-12-04"), 1), D("2026-12-05"), "a six-day week works Saturday");
+  // a phase with missing or wrong-typed fields still reads (the same cases as SchedulePhaseParsingTest.kt)
+  let ph = sch.normalizePhase("p1", {});
+  assert.strictEqual(ph.status, "Not started"); assert.strictEqual(ph.percentMode, "auto"); assert.strictEqual(ph.start, null); assert.strictEqual(ph.end, null); assert.deepStrictEqual(ph.taskIds, []); assert.deepStrictEqual(ph.predecessors, []);
+  ph = sch.normalizePhase("p6", {
+    id: "stale", name: 42, start: "next Tuesday", end: "1796446800000", baselineEnd: 1796446800000.0, status: "  in   PROGRESS ", percentMode: "Manual", percentComplete: 140, durationDays: -3, isMilestone: "yes", notes: null,
+    predecessors: [{ phaseId: "roof", type: "SS", lagDays: -2.0 }, { phaseId: "siding" }, { phaseId: "septic", type: "finish" }, { type: "FS", lagDays: 3 }, { phaseId: "p6" }, { phaseId: "roof", lagDays: 9 }, "not a predecessor", null],
+    taskIds: ["t1", 7, null, "", "t2", "t1"], appointmentIds: { a: 1 },
+  });
+  assert.strictEqual(ph.id, "p6", "the document id wins"); assert.strictEqual(ph.name, ""); assert.strictEqual(ph.start, null); assert.strictEqual(ph.end, 1796446800000); assert.strictEqual(ph.baselineEnd, 1796446800000);
+  assert.strictEqual(ph.status, "In progress"); assert.strictEqual(ph.percentMode, "manual"); assert.strictEqual(ph.percentComplete, 100); assert.strictEqual(ph.durationDays, 0); assert.strictEqual(ph.isMilestone, false); assert.strictEqual(ph.notes, "");
+  assert.deepStrictEqual(ph.predecessors, [{ phaseId: "roof", type: "SS", lagDays: -2 }, { phaseId: "siding", type: "FS", lagDays: 0 }, { phaseId: "septic", type: "FS", lagDays: 0 }]);
+  assert.deepStrictEqual(ph.taskIds, ["t1", "t2"]); assert.deepStrictEqual(ph.appointmentIds, []);
+  const emptyPhase = sch.phaseWriteMap({ id: "p9", name: "Painting", predecessors: [], taskIds: [], appointmentIds: [], start: null, color: "" });
+  for (const k of ["predecessors", "taskIds", "appointmentIds", "start", "end", "baselineStart", "baselineEnd", "color"]) assert(!(k in emptyPhase), k + " is left out when empty");
+  assert.strictEqual(emptyPhase.status, "Not started"); assert.strictEqual(emptyPhase.percentMode, "auto");
+  // percent from linked tasks: ticked items over all items; a task with no checklist counts as one item
+  assert.strictEqual(sch.autoPercent([]), null);
+  assert.strictEqual(sch.autoPercent([{ status: "Completed" }, { status: "In Progress", checklistGroups: [{ items: [{ isDone: true }, { isDone: false }, { isDone: false }] }] }]), 50);
+  assert.strictEqual(sch.percentOf({ status: "Done", percentMode: "auto", percentComplete: 10 }, []), 100);
+  assert.strictEqual(sch.percentOf({ status: "In progress", percentMode: "manual", percentComplete: 65 }, [{ status: "Completed" }]), 65);
+  // late: past the start and not started, or past the end and not done
+  assert.strictEqual(sch.isLate({ status: "Not started", startDay: D("2026-11-02"), endDay: D("2026-11-20") }, D("2026-11-03")), true);
+  assert.strictEqual(sch.isLate({ status: "In progress", startDay: D("2026-11-02"), endDay: D("2026-11-20") }, D("2026-11-20")), false);
+  assert.strictEqual(sch.isLate({ status: "In progress", startDay: D("2026-11-02"), endDay: D("2026-11-20") }, D("2026-11-21")), true);
+  assert.strictEqual(sch.isLate({ status: "Done", startDay: D("2026-11-02"), endDay: D("2026-11-20") }, D("2027-01-01")), false);
+  // a loop in the predecessors is found
+  const chain = [{ id: "a", predecessors: [] }, { id: "b", predecessors: [{ phaseId: "a" }] }, { id: "c", predecessors: [{ phaseId: "b" }] }];
+  assert.deepStrictEqual(sch.findLoop(chain, "a", ["c"]), ["a", "c", "b", "a"]);
+  assert.strictEqual(sch.findLoop(chain, "c", ["a"]), null);
+  // stored dates and calendar days convert both ways, across the November clock change
+  const { msToDay, dayToMs } = require("../mcp.js");
+  assert.strictEqual(dayToMs(D("2026-11-02"), tz), zonedToUtc(2026, 11, 2, 0, 0, 0, tz)); assert.strictEqual(msToDay(dayToMs(D("2026-11-01"), tz), tz), D("2026-11-01")); assert.strictEqual(msToDay(dayToMs(D("2027-03-14"), tz), tz), D("2027-03-14"));
+  console.log("schedule math ok");
 
   const ctx = await resolveContext(db, { extra: { email: "dan@example.com", timezone: tz } });
   assert.strictEqual(ctx.envId, "env1");
@@ -187,6 +245,192 @@ async function main() {
 
   r = await call("add_to_daily_log", { project: "Martin", date: "11/17/2026", workCompleted: ["x"] }); assert(r.error && /YYYY-MM-DD/.test(r.error));
   r = await call("add_to_daily_log", { project: "Martin" }); assert(r.error && /Nothing to add/.test(r.error));
+
+  // ---- schedule tools ----
+  const phaseDocs = () => [...db._store].filter(([k]) => k.startsWith("projects/pM/schedulePhases/")).map(([, v]) => v);
+  const phaseDoc = (name) => phaseDocs().find((d) => d.name === name);
+  r = await call("list_schedule", { project: "Martin" }); assert.strictEqual(r.count, 0); assert(/No schedule yet/.test(r.note)); assert.deepStrictEqual(r.workWeek, ["Mon", "Tue", "Wed", "Thu", "Fri"]);
+  // The Martin schedule as planned on Sep 21, 2026
+  const martin = [
+    { group: "Exterior / Site", name: "Exterior walls at chimney", start: "2026-09-25", milestone: true },
+    { group: "Exterior / Site", name: "Roof complete", start: "2026-09-21", end: "2026-10-15" },
+    { group: "Exterior / Site", name: "Siding", start: "2026-09-21", end: "2026-11-15" },
+    { group: "Exterior / Site", name: "Septic & grading", start: "2026-10-15", end: "2026-11-15" },
+    { group: "Exterior / Site", name: "Remaining concrete", start: "2026-11-01", end: "2026-11-15" },
+    { group: "Rough trades", name: "Electrical service", start: "2026-10-05", end: "2026-10-09" },
+    { group: "Rough trades", name: "Mechanical & plumbing", start: "2026-10-15", end: "2026-11-19" },
+    { group: "Rough trades", name: "Electrical rough-in", start: "2026-10-29", end: "2026-11-19" },
+    { group: "Interior", name: "Insulation", start: "2026-11-19", end: "2026-12-04" },
+    { group: "Interior", name: "Drywall", start: "2026-12-04", end: "2027-01-04" },
+    { group: "Interior", name: "Tile & flooring", start: "2027-01-04", end: "2027-01-23" },
+    { group: "Interior", name: "Painting", start: "2027-01-09", end: "2027-03-20" },
+    { group: "Interior", name: "Trim & cabinets", start: "2027-01-23", end: "2027-03-05" },
+    { group: "Closeout", name: "Finish MEP", start: "2027-03-15", end: "2027-04-05" },
+  ];
+
+  // import: a dry run shows what would be created and saves nothing
+  r = await call("import_schedule", { project: "Martin", rows: martin, asBaseline: true, dryRun: true });
+  assert.strictEqual(r.dryRun, true); assert.strictEqual(r.saved, false); assert.strictEqual(r.wouldCreate, 14); assert.strictEqual(r.asBaseline, true); assert.strictEqual(r.problems, undefined);
+  assert.deepStrictEqual(r.phases[1], { name: "Roof complete", group: "Exterior / Site", start: "Mon 2026-09-21", end: "Thu 2026-10-15", workingDays: 19 });
+  assert.strictEqual(r.phases[0].milestone, true); assert.strictEqual(r.phases[0].end, "Fri 2026-09-25"); assert.strictEqual(r.phases[0].workingDays, 1);
+  assert.strictEqual(phaseDocs().length, 0, "a dry run saves nothing");
+  // ... and lists every row that has a problem
+  r = await call("import_schedule", { project: "Martin", dryRun: true, rows: [
+    { name: "Good", start: "2026-12-01", durationDays: 3 }, { name: "No end", start: "2026-12-01" }, { name: "Backwards", start: "2026-12-10", end: "2026-12-01" },
+    { name: "good", start: "2026-12-01", end: "2026-12-02" }, { name: "Bad date", start: "12/01/2026", end: "2026-12-02" }, { name: "Undated" }, { name: " ", start: "2026-12-01", end: "2026-12-02" }, { name: "Bad status", start: "2026-12-01", end: "2026-12-02", status: "Cancelled" },
+  ] });
+  assert.strictEqual(r.wouldCreate, 1); assert.strictEqual(r.phases[0].end, "Thu 2026-12-03"); assert.strictEqual(r.problems.length, 7, JSON.stringify(r.problems));
+  assert(/^Row 2 \(No end\): .*also needs an end/.test(r.problems[0])); assert(/^Row 3 \(Backwards\): .*before the start/.test(r.problems[1])); assert(/^Row 4 \(good\): Same name/.test(r.problems[2]));
+  assert(/^Row 5 \(Bad date\): .*YYYY-MM-DD/.test(r.problems[3])); assert(/^Row 6 \(Undated\): No dates/.test(r.problems[4])); assert(/^Row 7: No name/.test(r.problems[5])); assert(/^Row 8 \(Bad status\): .*not a phase status/.test(r.problems[6]));
+  // a real import with one bad row saves nothing at all
+  r = await call("import_schedule", { project: "Martin", rows: [...martin, { name: "No end", start: "2026-12-01" }] });
+  assert(r.error && /Nothing was saved/.test(r.error) && /Row 15 \(No end\)/.test(r.error), r.error); assert.strictEqual(phaseDocs().length, 0);
+  // the real import, with the plan recorded as the baseline
+  r = await call("import_schedule", { project: "martin", rows: martin, asBaseline: true });
+  assert.strictEqual(r.created, 14); assert.strictEqual(r.baselineSet, true); assert.strictEqual(r.phases.length, 14); assert.strictEqual(phaseDocs().length, 14);
+  assert.deepStrictEqual(r.totals.finish, { planned: "Mon 2027-04-05", current: "Mon 2027-04-05", slipDays: 0 });
+  // stored the way the app stores it: local-midnight epoch ms, the same keys as SchedulePhase.toFirestoreMap()
+  const roofDoc = phaseDoc("Roof complete");
+  assert.strictEqual(roofDoc.start, zonedToUtc(2026, 9, 21, 0, 0, 0, tz)); assert.strictEqual(roofDoc.end, zonedToUtc(2026, 10, 15, 0, 0, 0, tz));
+  assert.strictEqual(roofDoc.baselineStart, roofDoc.start); assert.strictEqual(roofDoc.baselineEnd, roofDoc.end); assert.strictEqual(roofDoc.durationDays, 19);
+  assert.strictEqual(roofDoc.projectId, "pM"); assert.strictEqual(roofDoc.environmentId, "env1"); assert.strictEqual(roofDoc.group, "Exterior / Site"); assert.strictEqual(roofDoc.order, 2);
+  assert.strictEqual(roofDoc.status, "Not started"); assert.strictEqual(roofDoc.percentMode, "auto"); assert.strictEqual(roofDoc.isMilestone, false); assert.strictEqual(roofDoc.updatedBy, "dan@example.com"); assert(roofDoc.id && roofDoc.createdAt > 0);
+  assert(!("taskIds" in roofDoc) && !("appointmentIds" in roofDoc) && !("predecessors" in roofDoc) && !("color" in roofDoc), "empty lists and a blank colour are not written");
+  assert.strictEqual(phaseDoc("Exterior walls at chimney").isMilestone, true);
+  // running the same import again adds nothing
+  r = await call("import_schedule", { project: "Martin", rows: martin, asBaseline: true }); assert.strictEqual(r.created, 0); assert.strictEqual(r.skippedAlreadyOnSchedule.length, 14); assert.strictEqual(phaseDocs().length, 14);
+
+  // list_schedule
+  r = await call("list_schedule", { project: "Martin" });
+  assert.strictEqual(r.count, 14); assert.deepStrictEqual(r.phases.map((x) => x.name), martin.map((x) => x.name), "kept in the order given");
+  let roof = r.phases.find((x) => x.name === "Roof complete");
+  assert.strictEqual(roof.start, "Mon 2026-09-21"); assert.strictEqual(roof.end, "Thu 2026-10-15"); assert.strictEqual(roof.workingDays, 19); assert.strictEqual(roof.baselineEnd, "Thu 2026-10-15");
+  assert.strictEqual(roof.slipDays, 0); assert.strictEqual(roof.status, "Not started"); assert.strictEqual(roof.percent, 0); assert.strictEqual(roof.linkedTasks, 0); assert.strictEqual(roof.linkedAppointments, 0);
+  assert.strictEqual(r.phases.find((x) => x.name === "Siding").end, "Sun 2026-11-15", "a planned date that falls on a weekend is kept as given");
+  assert.strictEqual(r.totals.notStarted, 14); assert.strictEqual(r.totals.done, 0);
+  r = await call("list_schedule", { project: "Martin", from: "2026-12-01", to: "2026-12-31" }); assert.deepStrictEqual(r.phases.map((x) => x.name), ["Insulation", "Drywall"], "a date window");
+  assert.deepStrictEqual(r.window, { from: "Tue 2026-12-01", to: "Thu 2026-12-31" }); assert.strictEqual(r.totals.notStarted, 14, "totals are for the whole schedule");
+
+  // the slip test from the plan: Roof complete's end moves to Dec 11 and the baseline stays at Oct 15
+  r = await call("update_phase", { project: "Martin", phase: "roof complete", end: "2026-12-11", status: "in progress" });
+  assert.deepStrictEqual([...r.updated].sort(), ["end", "status"]); assert.strictEqual(r.start, "Mon 2026-09-21"); assert.strictEqual(r.end, "Fri 2026-12-11"); assert.strictEqual(r.workingDays, 60);
+  assert.strictEqual(r.baselineStart, "Mon 2026-09-21"); assert.strictEqual(r.baselineEnd, "Thu 2026-10-15"); assert.strictEqual(r.slipDays, 41); assert.strictEqual(r.status, "In progress"); assert.strictEqual(r.updatedBy, "dan@example.com");
+  assert.strictEqual(phaseDoc("Roof complete").baselineEnd, roofDoc.baselineEnd, "the baseline never moves on an update"); assert.strictEqual(phaseDoc("Roof complete").createdAt, roofDoc.createdAt);
+  // with Thanksgiving off the same slip is two working days shorter, and the stored lengths follow
+  r = await call("update_project", { project: "Martin", scheduleHolidays: ["2026-11-27", "2026-11-26", "2026-11-26"] });
+  assert.deepStrictEqual(r.scheduleHolidays, ["2026-11-26", "2026-11-27"]); assert.deepStrictEqual(r.workWeek, ["Mon", "Tue", "Wed", "Thu", "Fri"]);
+  r = await call("update_project", { project: "Martin", scheduleHolidays: ["Thanksgiving"] }); assert(r.error && /YYYY-MM-DD/.test(r.error));
+  r = await call("list_schedule", { project: "Martin" }); roof = r.phases.find((x) => x.name === "Roof complete");
+  assert.strictEqual(roof.slipDays, 39); assert.strictEqual(roof.workingDays, 58); assert.deepStrictEqual(r.holidays, ["2026-11-26", "2026-11-27"]); assert.strictEqual(r.totals.inProgress, 1);
+  assert.strictEqual(phaseDoc("Roof complete").durationDays, 58, "stored length kept in step with the calendar"); assert.strictEqual(phaseDoc("Insulation").durationDays, 10);
+
+  // create: start + working days, a predecessor with an overlap, a contact found by name
+  r = await call("create_phase", { project: "Martin", name: "Final inspection", group: "Closeout", start: "2027-04-02", durationDays: 3, predecessors: [{ phase: "finish mep", lagDays: -1 }], trade: "Inspection", contact: "a plus", notes: "Call the county a week ahead" });
+  assert.strictEqual(r.created, true); assert.strictEqual(r.start, "Fri 2027-04-02"); assert.strictEqual(r.end, "Tue 2027-04-06"); assert.strictEqual(r.workingDays, 3); assert.strictEqual(r.group, "Closeout"); assert.strictEqual(r.project, "Martin");
+  assert.strictEqual(r.contact, "A Plus Concrete"); assert.strictEqual(r.contactLinked, true); assert.strictEqual(r.trade, "Inspection"); assert.strictEqual(r.notes, "Call the county a week ahead");
+  assert.deepStrictEqual(r.predecessors.map((x) => [x.name, x.type, x.lagDays, x.end]), [["Finish MEP", "FS", -1, "Mon 2027-04-05"]]);
+  assert.strictEqual(r.baselineEnd, undefined); assert.strictEqual(r.slipDays, undefined, "no baseline until set_baseline");
+  const inspectionId = r.id; assert.strictEqual(phaseDoc("Final inspection").order, 15, "a new phase goes to the bottom");
+  r = await call("create_phase", { project: "Martin", name: "final inspection", start: "2027-04-02", durationDays: 1 }); assert(r.error && /already exists/.test(r.error));
+  r = await call("create_phase", { project: "Martin", name: "Punch list", start: "2027-04-07" }); assert(r.error && /also needs an end/.test(r.error));
+  r = await call("create_phase", { project: "Martin", name: "Punch list", start: "2027-04-07", end: "2027-04-01" }); assert(r.error && /before the start/.test(r.error));
+  r = await call("create_phase", { project: "Martin", name: "Punch list", start: "April 7", durationDays: 2 }); assert(r.error && /YYYY-MM-DD/.test(r.error));
+  r = await call("create_phase", { project: "Martin", name: "Punch list", start: "2027-04-07", durationDays: 2, predecessors: [{ phase: "No such phase" }] }); assert(r.error && /No phase found/.test(r.error));
+  assert.strictEqual(phaseDocs().length, 15, "a refused create saves nothing");
+  // end + working days works the start out backwards; a name that is not a contact is kept as text; a typed percent is manual
+  r = await call("create_phase", { project: "Martin", name: "Punch list", end: "2027-04-16", durationDays: 5, contact: "Somebody New", status: "on hold", percentComplete: 20 });
+  assert.strictEqual(r.start, "Mon 2027-04-12"); assert.strictEqual(r.contact, "Somebody New"); assert.strictEqual(r.contactLinked, false); assert.strictEqual(r.status, "On hold"); assert.strictEqual(r.percent, 20); assert.strictEqual(r.percentMode, "manual");
+  r = await call("create_phase", { project: "Martin", name: "Owner walk-through", end: "2027-04-19", milestone: true }); assert.strictEqual(r.milestone, true); assert.strictEqual(r.start, "Mon 2027-04-19"); assert.strictEqual(r.end, "Mon 2027-04-19"); assert.strictEqual(r.workingDays, 1);
+  r = await call("create_phase", { project: "Martin", name: "Landscaping" }); assert.strictEqual(r.created, true); assert.strictEqual(r.start, undefined, "a phase with no dates yet is allowed");
+  r = await call("list_schedule", { project: "Martin" }); assert.strictEqual(r.count, 18); assert.strictEqual(r.phases[17].name, "Landscaping");
+  assert.deepStrictEqual(r.totals.finish, { planned: "Mon 2027-04-05", current: "Mon 2027-04-19", slipDays: 10 }, "slip at the finish");
+
+  // update: a new start alone moves the phase and keeps its length; a new length moves the end
+  r = await call("update_phase", { project: "Martin", phase: inspectionId, start: "2027-04-08" }); assert.strictEqual(r.start, "Thu 2027-04-08"); assert.strictEqual(r.end, "Mon 2027-04-12"); assert.strictEqual(r.workingDays, 3);
+  r = await call("update_phase", { project: "Martin", phase: inspectionId, durationDays: 1 }); assert.strictEqual(r.start, "Thu 2027-04-08"); assert.strictEqual(r.end, "Thu 2027-04-08");
+  r = await call("update_phase", { project: "Martin", phase: "Owner walk-through", start: "2027-04-20" }); assert.strictEqual(r.end, "Tue 2027-04-20", "a milestone stays one day");
+  r = await call("update_phase", { project: "Martin", phase: "Punch list", percentMode: "auto", contact: "", color: "#FF9800", order: 0.5, group: "Closeout", trade: "NACE" });
+  assert.strictEqual(r.percentMode, "auto"); assert.strictEqual(r.contact, undefined); assert.strictEqual(r.color, "#FF9800"); assert.strictEqual(r.group, "Closeout"); assert.strictEqual(r.trade, "NACE");
+  r = await call("list_schedule", { project: "Martin" }); assert.strictEqual(r.phases[0].name, "Punch list", "order moves a phase");
+  r = await call("update_phase", { project: "Martin", phase: "Punch list", color: "", clearDates: true }); assert.strictEqual(r.start, undefined); assert.strictEqual(r.end, undefined); assert.strictEqual(r.color, undefined);
+  assert(!("start" in phaseDoc("Punch list")) && !("end" in phaseDoc("Punch list")) && !("color" in phaseDoc("Punch list")), "cleared fields are removed, not blanked");
+  r = await call("update_phase", { project: "Martin", phase: "Punch list", status: "Cancelled" }); assert(r.error && /not a phase status/.test(r.error));
+  r = await call("update_phase", { project: "Martin", phase: "Punch list" }); assert(r.error && /Nothing to update/.test(r.error));
+  r = await call("update_phase", { project: "Martin", phase: "Punch list", name: "Siding" }); assert(r.error && /already named/.test(r.error));
+  r = await call("update_phase", { project: "Martin", phase: "ing", notes: "x" }); assert(r.error && /several phases/.test(r.error), "an ambiguous name asks for more");
+  r = await call("update_phase", { project: "Martin", phase: "Punch list", name: "Punch-out" }); assert.strictEqual(r.name, "Punch-out");
+
+  // predecessors: Drywall waits for Insulation, so Insulation can't be made to wait for Drywall
+  r = await call("update_phase", { project: "Martin", phase: "Drywall", predecessors: [{ phase: "Insulation", lagDays: -1 }] }); assert.deepStrictEqual(r.predecessors.map((x) => [x.name, x.end]), [["Insulation", "Fri 2026-12-04"]]);
+  r = await call("update_phase", { project: "Martin", phase: "Tile & flooring", predecessors: [{ phase: "Drywall", type: "SS", lagDays: 5 }] });
+  r = await call("update_phase", { project: "Martin", phase: "Insulation", predecessors: [{ phase: "Tile & flooring" }] });
+  assert(r.error && /Insulation waits for Tile & flooring waits for Drywall waits for Insulation/.test(r.error), r.error); assert(!("predecessors" in phaseDoc("Insulation")));
+  r = await call("update_phase", { project: "Martin", phase: "Drywall", predecessors: [{ phase: "Drywall" }] }); assert(r.error && /own predecessor/.test(r.error));
+  r = await call("get_phase", { project: "Martin", phase: "Drywall" }); assert.deepStrictEqual(r.successors.map((x) => [x.name, x.type, x.lagDays]), [["Tile & flooring", "SS", 5]]);
+  r = await call("list_schedule", { project: "Martin" }); assert.deepStrictEqual(r.phases.find((x) => x.name === "Drywall").predecessors, ["Insulation (FS, lag -1)"]);
+
+  // ---- linking: stored on the phase; the task and appointment documents are never written ----
+  r = await call("create_task", { project: "Martin", title: "Roof tear-off", status: "In Progress", checklists: [{ title: "Steps", items: ["Strip", "Deck repair", "Dry in", "Shingle"] }] }); const tearOff = r.id;
+  r = await call("set_checklist_item", { task: tearOff, item: "Strip", done: true });
+  r = await call("create_task", { project: "Martin", title: "Order ridge vent", status: "Completed" }); const ridge = r.id;
+  const taskBefore = JSON.stringify(db._store.get("tasks/" + tearOff)), apptBefore = JSON.stringify(db._store.get("projects/pM/appointments/a1"));
+  r = await call("link_to_phase", { project: "Martin", phase: "Roof complete", tasks: ["roof tear-off", ridge], appointments: ["Weekly Meeting"] });
+  assert.deepStrictEqual(r.linked, { tasks: ["Roof tear-off", "Order ridge vent"], appointments: ["Weekly Meeting"] }); assert.strictEqual(r.linkedTasks, 2); assert.strictEqual(r.linkedAppointments, 1);
+  assert.strictEqual(r.percent, 40, "1 of 4 items ticked plus a completed task with no checklist = 2 of 5");
+  assert.strictEqual(r.tasks[0].checklist, "1/4 done"); assert.strictEqual(r.appointments[0].title, "Weekly Meeting");
+  assert.strictEqual(JSON.stringify(db._store.get("tasks/" + tearOff)), taskBefore, "linking does not write the task"); assert.strictEqual(JSON.stringify(db._store.get("projects/pM/appointments/a1")), apptBefore, "or the appointment");
+  assert.deepStrictEqual(phaseDoc("Roof complete").taskIds, [tearOff, ridge]); assert.deepStrictEqual(phaseDoc("Roof complete").appointmentIds, ["a1"]);
+  // get_task and list_appointments now say which phase
+  r = await call("get_task", { task: tearOff }); assert.strictEqual(r.phaseId, roofDoc.id); assert.strictEqual(r.phase, "Roof complete"); assert.strictEqual(r.checklist, "1/4 done");
+  r = await call("get_task", { task: "Roofing" }); assert.strictEqual(r.phase, undefined, "a task on no phase reads as before"); assert.strictEqual(r.checklists[0].items.length, 2);
+  r = await call("list_appointments", { project: "Martin", afterDate: "2026-10-19", beforeDate: "2026-10-31" }); assert.strictEqual(r.count, 2); assert.strictEqual(r.appointments[0].phase, "Roof complete"); assert.strictEqual(r.appointments[0].phaseId, roofDoc.id); assert.strictEqual(r.appointments[0].start, "Tue 2026-10-20 9:00 AM");
+  // the link survives a whole-task save, which is why it is not kept on the task
+  r = await call("update_task", { task: tearOff, description: "Start on the east side" }); r = await call("get_task", { task: tearOff }); assert.strictEqual(r.phase, "Roof complete");
+  // linking again changes nothing; a task is on at most one phase, so linking it elsewhere moves it
+  r = await call("link_to_phase", { project: "Martin", phase: "Roof complete", tasks: [tearOff] }); assert.strictEqual(r.linkedTasks, 2);
+  r = await call("link_to_phase", { project: "Martin", phase: "Siding", tasks: [ridge] }); assert.deepStrictEqual(r.movedFrom, ["Roof complete"]); assert.strictEqual(r.linkedTasks, 1); assert.strictEqual(r.percent, 100);
+  r = await call("get_phase", { project: "Martin", phase: "Roof complete" }); assert.strictEqual(r.linkedTasks, 1); assert.strictEqual(r.percent, 25);
+  r = await call("link_to_phase", { project: "Martin", phase: "Siding", tasks: ["No such task"] }); assert(r.error && /No task found/.test(r.error));
+  r = await call("link_to_phase", { project: "Martin", phase: "Siding" }); assert(r.error && /Pass tasks/.test(r.error));
+  // a typed percent overrides the checklists; auto goes back to them; Done is always 100
+  r = await call("update_phase", { project: "Martin", phase: "Roof complete", percentComplete: 80 }); assert.strictEqual(r.percent, 80); assert.strictEqual(r.percentMode, "manual");
+  r = await call("update_phase", { project: "Martin", phase: "Roof complete", percentMode: "auto" }); assert.strictEqual(r.percent, 25);
+  r = await call("update_phase", { project: "Martin", phase: "Roof complete", status: "Done" }); assert.strictEqual(r.percent, 100); assert.strictEqual(r.late, undefined);
+  // unlink: from whichever phase it is on; a deleted task's id can still be cleaned off
+  r = await call("unlink_from_phase", { project: "Martin", tasks: [ridge] }); assert.deepStrictEqual(r, { unlinked: 1, from: ["Siding"] });
+  assert(!("taskIds" in phaseDoc("Siding")), "an emptied list is removed, never stored empty");
+  r = await call("unlink_from_phase", { project: "Martin", tasks: [ridge] }); assert(/Nothing to unlink/.test(r), String(r));
+  r = await call("unlink_from_phase", { project: "Martin", phase: "Siding", tasks: [tearOff] }); assert(/none of those are on "Siding"/.test(r), String(r)); assert.deepStrictEqual(phaseDoc("Roof complete").taskIds, [tearOff]);
+  r = await call("link_to_phase", { project: "Martin", phase: "Siding", tasks: [ridge] });
+  r = await call("delete_task", { task: ridge });
+  r = await call("get_phase", { project: "Martin", phase: "Siding" }); assert.strictEqual(r.linkedTasks, 0); assert.deepStrictEqual(r.missingTaskIds, [ridge]);
+  r = await call("unlink_from_phase", { project: "Martin", tasks: [ridge] }); assert.strictEqual(r.unlinked, 1);
+
+  // ---- baseline: the original plan is not overwritten unless asked ----
+  r = await call("set_baseline", { project: "Martin" });
+  assert.deepStrictEqual([...r.baselineSet].sort(), ["Final inspection", "Owner walk-through"]); assert.strictEqual(r.keptExistingBaseline.length, 14); assert.deepStrictEqual([...r.skippedNoDates].sort(), ["Landscaping", "Punch-out"]);
+  r = await call("get_phase", { project: "Martin", phase: "Roof complete" }); assert.strictEqual(r.baselineEnd, "Thu 2026-10-15"); assert.strictEqual(r.slipDays, 39);
+  r = await call("get_phase", { project: "Martin", phase: "Final inspection" }); assert.strictEqual(r.baselineEnd, "Thu 2027-04-08"); assert.strictEqual(r.slipDays, 0);
+  r = await call("set_baseline", { project: "Martin", phases: ["Roof complete"], overwrite: true }); assert.deepStrictEqual(r.baselineSet, ["Roof complete"]); assert.strictEqual(r.keptExistingBaseline, undefined);
+  r = await call("get_phase", { project: "Martin", phase: "Roof complete" }); assert.strictEqual(r.baselineEnd, "Fri 2026-12-11"); assert.strictEqual(r.slipDays, 0);
+  r = await call("set_baseline", { project: "pT" }); assert(r.error && /no schedule phases/.test(r.error));
+
+  // ---- delete: the phase goes, its tasks and appointments stay, and nothing is left waiting on it ----
+  r = await call("delete_phase", { project: "Martin", phase: "Insulation" }); assert(/Deleted phase "Insulation"/.test(r) && /predecessor of: Drywall/.test(r), String(r));
+  r = await call("get_phase", { project: "Martin", phase: "Drywall" }); assert.deepStrictEqual(r.predecessors, []); assert(!("predecessors" in phaseDoc("Drywall")));
+  r = await call("delete_phase", { project: "Martin", phase: "Roof complete" }); assert(/Its 1 linked task\(s\) and 1 linked appointment\(s\) are kept/.test(r), String(r));
+  assert(db._store.has("tasks/" + tearOff) && db._store.has("projects/pM/appointments/a1"), "the linked records survive");
+  r = await call("get_task", { task: tearOff }); assert.strictEqual(r.phase, undefined); assert.strictEqual(r.phaseId, undefined);
+  r = await call("list_appointments", { project: "Martin", afterDate: "2026-10-19", beforeDate: "2026-10-31" }); assert.strictEqual(r.appointments[0].phase, undefined);
+  r = await call("get_phase", { project: "Martin", phase: "Roof complete" }); assert(r.error && /No phase found/.test(r.error));
+  // nothing these tools wrote holds an empty list (the web app's encoder can't take one)
+  for (const d of phaseDocs()) for (const [k, v] of Object.entries(d)) assert(!(Array.isArray(v) && v.length === 0), `${d.name}.${k} is an empty list`);
+  r = await call("list_schedule", { project: "Martin" }); assert.strictEqual(r.count, 16);
+  // a hand-made phase with almost nothing in it still lists
+  await db.collection("projects").doc("pT").collection("schedulePhases").doc("bare").set({ name: "Bare", end: "soon", status: 7 });
+  r = await call("list_schedule", { project: "pT" }); assert.strictEqual(r.count, 1); assert.deepStrictEqual(r.phases[0], { id: "bare", name: "Bare", status: "Not started", percent: 0, linkedTasks: 0, linkedAppointments: 0 });
+  r = await call("delete_task", { task: tearOff });
+  console.log("schedule tools ok");
 
   r = await call("delete_task", { task: newId }); assert(/Deleted/.test(r));
   console.log("ALL TESTS PASSED");
