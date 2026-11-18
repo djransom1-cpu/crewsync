@@ -47,6 +47,7 @@ import kotlin.time.Clock
  * The printable/emailable report is a PDF laid out server-side (functions/dailyReport.js) so it
  * looks identical from every platform; Print and Email both make sure the PDF is current first.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DailyLogTab(
     projectId: String,
@@ -80,6 +81,7 @@ fun DailyLogTab(
     var weatherText by remember { mutableStateOf("") }
     var dirty by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf<String?>(null) } // "save" | "pdf" | "photo" | null
+    var photoToRemove by remember { mutableStateOf<ProjectFile?>(null) }
 
     fun seedFrom(log: DailyLog) {
         sectionText = DailyLogSections.ordered.associate { (key, _) -> key to DailyLogSections.linesOf(log, key).joinToString("\n") }
@@ -247,18 +249,26 @@ fun DailyLogTab(
                 if (baseLog.photos.isNotEmpty()) {
                     Text(t("Photos"), style = MaterialTheme.typography.titleMedium)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(baseLog.photos) { photo ->
-                            Card(modifier = Modifier.size(110.dp).clickable { openUrl(photo.url) }) {
-                                if (photo.name.lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".png") || it.endsWith(".webp") || it.endsWith(".heic") }) {
-                                    AsyncImage(model = photo.url, contentDescription = photo.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)))
-                                } else {
-                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Icon(Icons.Default.Description, null)
-                                            Text(photo.name, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                        items(baseLog.photos, key = { it.id.ifBlank { it.url } }) { photo ->
+                            Box(modifier = Modifier.size(110.dp)) {
+                                Card(modifier = Modifier.fillMaxSize().clickable { openUrl(photo.url) }) {
+                                    if (photo.name.lowercase().let { it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".png") || it.endsWith(".webp") || it.endsWith(".heic") }) {
+                                        AsyncImage(model = photo.url, contentDescription = photo.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)))
+                                    } else {
+                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Icon(Icons.Default.Description, null)
+                                                Text(photo.name, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                                            }
                                         }
                                     }
                                 }
+                                // Remove-from-log button in the corner; the file itself stays in storage.
+                                FilledTonalIconButton(
+                                    onClick = { photoToRemove = photo },
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(2.dp).size(26.dp),
+                                    enabled = busy == null
+                                ) { Icon(Icons.Default.Close, contentDescription = t("Remove from log"), modifier = Modifier.size(14.dp)) }
                             }
                         }
                     }
@@ -276,6 +286,25 @@ fun DailyLogTab(
                 Spacer(Modifier.height(24.dp))
             }
         }
+    }
+
+    photoToRemove?.let { photo ->
+        AlertDialog(
+            onDismissRequest = { photoToRemove = null },
+            title = { Text(t("Remove from log?")) },
+            text = { Text(t("\"{0}\" will be taken off this day's report. The file itself is kept.", photo.name)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    photoToRemove = null
+                    scope.launch {
+                        busy = "photo"
+                        save(assembled().copy(photos = baseLog.photos.filterNot { it.id == photo.id && it.url == photo.url }))
+                        busy = null
+                    }
+                }) { Text(t("Remove")) }
+            },
+            dismissButton = { TextButton(onClick = { photoToRemove = null }) { Text(t("Cancel")) } }
+        )
     }
 
     if (showDatePicker) {
