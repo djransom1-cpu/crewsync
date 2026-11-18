@@ -184,7 +184,11 @@ fun ProjectDetailsScreen(
         "Planner" to Icons.AutoMirrored.Filled.List,
         "Calendar" to Icons.Default.DateRange,
         "Notes" to Icons.Default.Edit,
-        "Daily Log" to Icons.Default.Assignment
+        "Daily Log" to Icons.Default.Assignment,
+        // New tabs go on the END of this list: the Home screen's cards jump to tabs by their
+        // position here (see ProjectHomeScreen), so inserting one in the middle would send
+        // every card after it to the wrong tab.
+        "Schedule" to Icons.Default.Timeline
     )
 
     val isSuperAdmin = userProfile?.role == "SuperAdmin" || userProfile?.role == "Admin"
@@ -415,6 +419,7 @@ fun ProjectDetailsScreen(
                         )
                         6 -> NotesTab(projectId = projectId, notes = notes, currentUserEmail = auth.currentUser?.email ?: "")
                         7 -> DailyLogTab(projectId = projectId, project = project!!, userMap = userMap, currentUserEmail = auth.currentUser?.email ?: "")
+                        8 -> ScheduleTab(projectId = projectId, project = project!!, tasks = tasks)
                     }
                 }
             }

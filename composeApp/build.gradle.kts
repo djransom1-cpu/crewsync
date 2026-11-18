@@ -102,6 +102,14 @@ kotlin {
             // the desktop and Android targets. Run with: gradlew :composeApp:desktopTest
             implementation(kotlin("test"))
         }
+        val desktopTest by getting {
+            dependencies {
+                // Test only: lets GitLiveDecodingTest call the decoder inside the Firestore library
+                // directly. The app reaches it through DocumentSnapshot.data() and get(), which
+                // need a live document.
+                implementation(libs.firebase.common.internal)
+            }
+        }
         val androidUnitTest by getting {
             dependencies {
                 implementation(libs.junit)

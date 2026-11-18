@@ -425,9 +425,29 @@ fun DocumentSnapshot.toSchedulePhaseSafe(): SchedulePhase {
         // The typed decode is all-or-nothing: one field of the wrong type (a date typed in as
         // text, a null where a string belongs) fails the whole document. Rather than drop the
         // phase off the schedule, rebuild it field by field and default whatever can't be read.
-        schedulePhaseFromFields(this.id) { key -> try { this.get<Any?>(key) } catch (_: Exception) { null } }
+        schedulePhaseFromFields(this.id) { key -> loosePhaseField(key) }
     }
 }
+
+/**
+ * One field of a phase document read on its own, or null if it's missing or can't be read.
+ * Each field has to be asked for as a definite type - the Firestore library can't hand back
+ * "whatever is there" (get<Any?> has no serializer and always throws) - so numbers are read as
+ * numbers, lists as lists and everything else as text. The library is forgiving within a type
+ * (a number stored as text still reads as a number); see GitLiveDecodingTest for exactly what
+ * it accepts.
+ */
+private fun DocumentSnapshot.loosePhaseField(key: String): Any? = when (key) {
+    "predecessors" -> tryGet<List<PhasePredecessor>>(key)
+    "taskIds", "appointmentIds" -> tryGet<List<String>>(key)
+    "isMilestone" -> tryGet<Boolean>(key)
+    "order", "start", "end", "durationDays", "percentComplete",
+    "baselineStart", "baselineEnd", "createdAt", "updatedAt" -> tryGet<Double>(key)
+    else -> tryGet<String>(key)
+}
+
+private inline fun <reified T> DocumentSnapshot.tryGet(key: String): T? =
+    try { this.get<T?>(key) } catch (_: Exception) { null }
 
 /**
  * Builds a phase from loose fields, tolerating anything missing or of the wrong type: numbers
