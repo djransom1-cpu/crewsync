@@ -43,10 +43,10 @@ const NWS_USER_AGENT = "(Crewsync daily log, github.com/djransom1-cpu/crewsync)"
 
 function isLogDate(s) { return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s + "T00:00:00Z")); }
 
-/** "YYYY-MM-DD" for right now in `tz`. */
-function todayIn(tz) {
+/** "YYYY-MM-DD" for right now in `tz` (or for the moment `atMs`, when given). */
+function todayIn(tz, atMs) {
   const p = {};
-  for (const x of new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date())) p[x.type] = x.value;
+  for (const x of new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(atMs ?? Date.now()))) p[x.type] = x.value;
   return `${p.year}-${p.month}-${p.day}`;
 }
 
@@ -381,6 +381,17 @@ async function buildAndFilePdf(db, { projectId, project, log, names, builtBy }) 
   const bytes = await renderPdf({ project, log, names, builtBy });
   const fileName = `${safeName(`Daily Report - ${project.name} - ${log.date}`)}.pdf`;
   const storagePath = `projects/${projectId}/daily_reports/${log.date}.pdf`;
+  const { url } = await fileProjectPdf(db, { projectId, bytes, storagePath, fileName, folderName: DAILY_REPORTS_FOLDER, builtBy });
+  await logRef(db, projectId, log.date).set({ pdfUrl: url, pdfBuiltAt: Date.now() }, { merge: true });
+  return { url, fileName };
+}
+
+/**
+ * Stores a project's PDF and files it in the Files tab under [folderName] (creating the folder
+ * the first time, and replacing the earlier copy of the same file). Shared by the daily and the
+ * weekly report. Returns { url }.
+ */
+async function fileProjectPdf(db, { projectId, bytes, storagePath, fileName, folderName, builtBy }) {
   const bucket = module.exports.storageBucket();
   const token = crypto.randomUUID();
   await bucket.file(storagePath).save(bytes, {
@@ -389,22 +400,20 @@ async function buildAndFilePdf(db, { projectId, project, log, names, builtBy }) 
   });
   const url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`;
 
-  // File it under Files → "Daily Reports" (create the folder once; replace the day's entry).
+  // File it under Files → the report's folder (create the folder once; replace the earlier entry).
   const projRef = db.collection("projects").doc(projectId);
   const folders = await projRef.collection("folders").get();
-  let folder = folders.docs.find((d) => (d.data().name || "").trim().toLowerCase() === DAILY_REPORTS_FOLDER.toLowerCase());
+  let folder = folders.docs.find((d) => (d.data().name || "").trim().toLowerCase() === folderName.toLowerCase());
   if (!folder) {
     const fref = projRef.collection("folders").doc();
-    await fref.set({ id: fref.id, projectId, name: DAILY_REPORTS_FOLDER, parentFolderId: null, color: "#1F3A5F", createdAt: Date.now() });
+    await fref.set({ id: fref.id, projectId, name: folderName, parentFolderId: null, color: "#1F3A5F", createdAt: Date.now() });
     folder = { id: fref.id };
   }
   const files = await projRef.collection("files").where("folderId", "==", folder.id).get();
   const existing = files.docs.find((d) => d.data().name === fileName);
   const fileDoc = { name: fileName, url, folderId: folder.id, uploadedBy: builtBy || "crewsync", uploadedAt: Date.now() };
   if (existing) await existing.ref.set({ ...fileDoc, id: existing.id }); else { const r = projRef.collection("files").doc(); await r.set({ ...fileDoc, id: r.id }); }
-
-  await logRef(db, projectId, log.date).set({ pdfUrl: url, pdfBuiltAt: Date.now() }, { merge: true });
-  return { url, fileName };
+  return { url };
 }
 
 async function namesForEmails(db, emails) {
@@ -463,4 +472,4 @@ const dailyReportPdf = onRequest({ timeoutSeconds: 120, memory: "512MiB" }, asyn
 });
 
 // Overridable so the offline test suite can swap in a fake bucket.
-module.exports = { storageBucket: () => getStorage().bucket(), dailyReportPdf, recordSiteWeather, recordWeatherForProject, weatherLine, readingSummary, SLOT_LABEL, SECTIONS, isLogDate, todayIn, getLog, listLogs, upsertLog, buildAndFilePdf, namesForEmails, normalizeLog, renderPdf, fetchWeather };
+module.exports = { storageBucket: () => getStorage().bucket(), dailyReportPdf, recordSiteWeather, recordWeatherForProject, weatherLine, readingSummary, SLOT_LABEL, SECTIONS, isLogDate, todayIn, getLog, listLogs, upsertLog, buildAndFilePdf, namesForEmails, normalizeLog, renderPdf, fetchWeather, fileProjectPdf, safeName };

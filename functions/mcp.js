@@ -43,6 +43,7 @@ const { mcpAuthRouter } = require("@modelcontextprotocol/sdk/server/auth/router.
 const { requireBearerAuth } = require("@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js");
 const { buildProvider, hashKey, DEFAULT_TIMEZONE } = require("./oauth");
 const dailyReport = require("./dailyReport");
+const weeklyReport = require("./weeklyReport");
 const schedule = require("./schedule");
 
 // Legacy shared secret from the first connector build. Still accepted at the consent page and
@@ -2010,6 +2011,95 @@ function buildServer(ctx) {
       const names = await dailyReport.namesForEmails(ctx.db, [...log.contributors, log.createdBy, ctx.email]);
       const { url, fileName } = await dailyReport.buildAndFilePdf(ctx.db, { projectId: p.id, project: p, log, names, builtBy: ctx.email });
       return json({ project: p.name, date, url, fileName, rebuilt: true, emailSubject: `Daily Report - ${p.name} - ${date}` });
+    });
+
+  // ---- weekly report (see weeklyReport.js) ----------------------------------------------------
+  const resolveWeek = (d) => weeklyReport.weekStartOf(resolveLogDate(d));
+  const weeklyView = (r, projectName) => cleanForWrite({
+    project: projectName, week: `${weeklyReport.shortDay(r.weekStart)} to ${weeklyReport.shortDay(r.weekEnd)}`, weekStart: r.weekStart,
+    status: r.status, edited: r.edited || undefined,
+    daysLogged: r.daysLogged.map(weeklyReport.shortDay), summary: r.summary,
+    weather: r.weather, precipDays: r.precipDays || undefined, crew: r.crew, subsOnSite: r.subsOnSite,
+    workCompleted: r.workCompleted, deliveriesInspections: r.deliveriesInspections,
+    issues: r.issues.map((x) => cleanForWrite({ text: x.text, status: x.status, since: x.firstSeen ? weeklyReport.shortDay(x.firstSeen) : undefined })),
+    nextWeek: r.nextWeek, photos: r.photos, notes: r.notes,
+    lastBuilt: r.builtAt ? fmtDateTime(r.builtAt, ctx.tz) : undefined, lastUpdated: r.updatedAt ? fmtDateTime(r.updatedAt, ctx.tz) : undefined,
+    pdfUrl: r.pdfUrl || undefined, pdfIsCurrent: r.pdfUrl ? weeklyReport.pdfIsCurrent(r) : undefined,
+  });
+  const weekDoc = "Any date in the week, as YYYY-MM-DD, 'today' (default) or 'yesterday'. Weeks run Monday to Sunday.";
+
+  reg("list_weekly_reports",
+    "Which weeks have a weekly report for a project, newest first: the week, Draft or Final, whether someone edited it, the summary, and whether its PDF is current.",
+    { project: z.string().describe("Project name or ID"), from: z.string().optional().describe("YYYY-MM-DD"), to: z.string().optional().describe("YYYY-MM-DD") },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const list = await weeklyReport.listWeekly(ctx.db, p.id, { from: a.from, to: a.to });
+      return json({ project: p.name, count: list.length, weeks: list.map((r) => cleanForWrite({
+        weekStart: r.weekStart, week: `${weeklyReport.shortDay(r.weekStart)} to ${weeklyReport.shortDay(r.weekEnd)}`, status: r.status, edited: r.edited || undefined,
+        daysLogged: r.daysLogged.length, summary: r.summary, pdf: r.pdfUrl ? (weeklyReport.pdfIsCurrent(r) ? "current" : "stale") : "none",
+      })) });
+    });
+
+  reg("get_weekly_report",
+    "The weekly report for the week containing a date: the summary, weather, crew and subs on site, work completed by who did it, deliveries and inspections, issues (open or cleared), next week, photos and notes.",
+    { project: z.string().describe("Project name or ID"), date: z.string().optional().describe(weekDoc) },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const weekStart = resolveWeek(a.date);
+      const r = await weeklyReport.getWeekly(ctx.db, p.id, weekStart);
+      if (!r) return json({ project: p.name, weekStart, empty: true, note: "No weekly report for that week yet. Use build_weekly_report to make one from the daily logs." });
+      return json(weeklyView(r, p.name));
+    });
+
+  reg("build_weekly_report",
+    "Build (or rebuild) the weekly report for the week containing a date from that week's daily logs, as a Draft. A report someone has edited, or marked Final, is left as it is unless force is true - ask the person before forcing, because it replaces their edits. A forced rebuild goes back to Draft.",
+    { project: z.string().describe("Project name or ID"), date: z.string().optional().describe(weekDoc), force: z.boolean().optional().describe("Rebuild over edits or a Final report") },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const weekStart = resolveWeek(a.date);
+      const r = await weeklyReport.buildAndSaveWeekly(ctx.db, { project: p, weekStart, by: ctx.email, force: !!a.force, tz: ctx.tz });
+      if (!r.built) {
+        return json({ built: false, reason: r.reason, note: `Left as it is because it's ${r.reason === "final" ? "marked Final" : "been edited"}. Pass force: true to rebuild over it - ask the person first.`, ...weeklyView(r.report, p.name) });
+      }
+      return json({ built: true, ...weeklyView(r.report, p.name) });
+    });
+
+  reg("set_weekly_report_section",
+    "Replace one section of a weekly report with new wording - for example rewrite the summary, or fix who did a piece of work. Marks the report as edited, so the Saturday run won't rebuild over it. Sections: summary (text); weather, crew, subsOnSite, deliveriesInspections, nextWeek, notes (lines); workCompleted (groups of who + lines); issues (text + open or cleared); status (text: Draft or Final). Pass the whole new section; an empty list clears it.",
+    {
+      project: z.string().describe("Project name or ID"),
+      date: z.string().optional().describe(weekDoc),
+      section: z.enum(["summary", "weather", "crew", "subsOnSite", "workCompleted", "deliveriesInspections", "issues", "nextWeek", "notes", "status"]),
+      text: z.string().optional().describe("For summary, or status (Draft / Final)"),
+      lines: z.array(z.string()).optional().describe("For weather, crew, subsOnSite, deliveriesInspections, nextWeek, notes"),
+      groups: z.array(z.object({ who: z.string(), lines: z.array(z.string()) })).optional().describe("For workCompleted"),
+      issues: z.array(z.object({ text: z.string(), status: z.enum(["open", "cleared"]), firstSeen: z.string().optional().describe("YYYY-MM-DD") })).optional().describe("For issues"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const weekStart = resolveWeek(a.date);
+      const value = a.section === "summary" || a.section === "status" ? a.text
+        : a.section === "workCompleted" ? a.groups
+        : a.section === "issues" ? a.issues
+        : a.lines;
+      if (value === undefined) throw new ToolError(`Pass ${a.section === "summary" || a.section === "status" ? "text" : a.section === "workCompleted" ? "groups" : a.section === "issues" ? "issues" : "lines"} for the ${a.section} section.`);
+      let r;
+      try { r = await weeklyReport.setWeeklySection(ctx.db, { projectId: p.id, weekStart, section: a.section, value, by: ctx.email }); } catch (e) { throw new ToolError(e.message); }
+      return json({ updated: a.section, ...weeklyView(r, p.name) });
+    });
+
+  reg("weekly_report_pdf",
+    "Build (or rebuild) the formatted PDF of a weekly report and return its link, plus an email subject and body. The PDF is filed under the project's Files tab in the 'Weekly Reports' folder. Builds the report from the logs first if the week has none yet.",
+    { project: z.string().describe("Project name or ID"), date: z.string().optional().describe(weekDoc), force: z.boolean().optional().describe("Rebuild the PDF even if the stored one is current") },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const weekStart = resolveWeek(a.date);
+      let r = await weeklyReport.getWeekly(ctx.db, p.id, weekStart);
+      if (!r) r = (await weeklyReport.buildAndSaveWeekly(ctx.db, { project: p, weekStart, by: ctx.email, tz: ctx.tz })).report;
+      const emailSubject = `Weekly Report - ${p.name} - week of ${weeklyReport.weekRange(weekStart)}`;
+      if (!a.force && weeklyReport.pdfIsCurrent(r)) return json({ project: p.name, weekStart, url: r.pdfUrl, rebuilt: false, emailSubject, emailBody: weeklyReport.weeklyPlainText(r, p.name) });
+      const { url, fileName } = await weeklyReport.buildAndFileWeeklyPdf(ctx.db, { project: p, report: r, builtBy: ctx.email });
+      return json({ project: p.name, weekStart, url, fileName, rebuilt: true, emailSubject, emailBody: weeklyReport.weeklyPlainText({ ...r, pdfUrl: url }, p.name) });
     });
 
   return server;

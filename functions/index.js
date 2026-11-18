@@ -342,3 +342,8 @@ exports.crewsyncMcp = require("./mcp").crewsyncMcp;
 exports.dailyReportPdf = require("./dailyReport").dailyReportPdf;
 // 7 AM / noon / 4 PM site-time weather readings onto each project's daily log
 exports.recordSiteWeather = require("./dailyReport").recordSiteWeather;
+
+// Weekly report from the daily logs - see functions/weeklyReport.js. The app calls weeklyReport;
+// buildWeeklyReports drafts each active project's report on Saturday at 7 AM Eastern.
+exports.weeklyReport = require("./weeklyReport").weeklyReport;
+exports.buildWeeklyReports = require("./weeklyReport").buildWeeklyReports;

@@ -5,6 +5,9 @@ import com.djransom.crewsync.data.model.PhasePredecessor
 import com.djransom.crewsync.data.model.PhaseStatus
 import com.djransom.crewsync.data.model.PredecessorType
 import com.djransom.crewsync.data.model.SchedulePhase
+import com.djransom.crewsync.data.model.WeeklyIssue
+import com.djransom.crewsync.data.model.WeeklyReport
+import com.djransom.crewsync.data.model.WeeklyWorkGroup
 import dev.gitlive.firebase.internal.decode
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -90,5 +93,32 @@ class GitLiveDecodingTest {
             listOf(PhasePredecessor("roof", PredecessorType.SS, -2), PhasePredecessor("siding")),
             decode<List<PhasePredecessor>?>(listOf(mapOf("phaseId" to "roof", "type" to "SS", "lagDays" to -2.0), mapOf("phaseId" to "siding")))
         )
+    }
+
+    // ---- a weekly report as functions/weeklyReport.js writes it ----
+
+    @Test
+    fun aWeeklyReportWrittenByTheServerDecodes() {
+        val stored: Map<String, Any?> = mapOf(
+            "weekStart" to "2026-11-09", "weekEnd" to "2026-11-15",
+            "daysLogged" to listOf("2026-11-09", "2026-11-11"),
+            "summary" to "2 days logged, 6 crew at peak.",
+            "weather" to listOf("Mon Nov 9: 34°-41°F, light rain"), "precipDays" to 1L,
+            "crew" to listOf("Mon Nov 9: NACE 6"), "subsOnSite" to listOf("D & W Mechanical"),
+            "workCompleted" to listOf(mapOf("who" to "NACE", "lines" to listOf("framed the lanai walls (Mon, Wed)"))),
+            "issues" to listOf(mapOf("text" to "Roof leak", "firstSeen" to "2026-11-13", "status" to "open")),
+            "photos" to listOf(mapOf("date" to "2026-11-09", "name" to "p1.jpg", "url" to "https://example.com/p1.jpg")),
+            "status" to "Draft", "edited" to false,
+            "builtAt" to 1_795_000_000_000L, "createdAt" to 1_795_000_000_000L, "updatedAt" to 1_795_000_000_000L, "updatedBy" to "weekly-run",
+            "somethingNewer" to "ignored"
+        )
+        val report = decode<WeeklyReport>(stored)
+        assertEquals("2026-11-09", report.weekStart)
+        assertEquals(1, report.precipDays)
+        assertEquals(listOf(WeeklyWorkGroup("NACE", listOf("framed the lanai walls (Mon, Wed)"))), report.workCompleted)
+        assertEquals(listOf(WeeklyIssue("Roof leak", "2026-11-13", "open")), report.issues)
+        assertEquals("p1.jpg", report.photos.single().name)
+        assertEquals(emptyList(), report.nextWeek, "a section with nothing in it isn't written, and reads as empty")
+        assertEquals("", report.pdfUrl)
     }
 }

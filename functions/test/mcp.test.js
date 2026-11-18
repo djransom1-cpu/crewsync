@@ -615,6 +615,150 @@ async function main() {
   }
   console.log("look-ahead ok");
 
+  // ---- weekly report: the week of Mon Nov 9 - Sun Nov 15, 2026 ----
+  {
+    const wr = require("../weeklyReport.js");
+    // who did it: real lines from the Martin log, against the workspace's subcontractor contacts
+    const contacts = [
+      { type: "Subcontractor", name: "Andy", company: "D & W Mechanical" },
+      { type: "Subcontractor", name: "Rich / Karla Arntson", company: "A+ Concrete" },
+      { type: "Subcontractor", name: "Jared Pratt", company: "NACE" },          // the crew's own entry: never a sub
+      { type: "Subcontractor", name: "Adam Aldridge", company: "" },
+    ];
+    const who = wr.makeWho(contacts, "NACE");
+    const whoOf = (line) => { const w = who(wr.splitLabel(line).label); return w.crew ? (w.explicit ? "crew (named)" : "crew") : w.name; };
+    assert.deepStrictEqual([
+      "NACE crew (14): Dan (Site Supervisor), Michael, Jeff, Alex",
+      "D&W - Plumbing & HVAC",
+      "A+ Concrete",
+      "Alex, Miguel, Miguel - roof plywood and weathering in",
+      "Ian, Owen, Adam and Adam's father - screened-in porch deck boards",
+      "D&W Plumbing, Heating & Cooling - mechanical crew",
+      "A Plus - pouring the patio",
+      "A+ Concrete (critical path) - mobilized and set perimeter forms",
+      "MI Metal Roofers - measuring",
+    ].map(whoOf), ["crew (named)", "D & W Mechanical", "A+ Concrete", "crew", "crew", "D & W Mechanical", "A+ Concrete", "A+ Concrete", "MI Metal Roofers"]);
+    assert.deepStrictEqual([
+      "NACE crew (14): Dan, Michael", "Alex, Miguel, Miguel - roof", "Ian, Owen, Adam and Adam's father - porch", "JR + 2 helpers - roofing", "NACE (5)", "NACE crew",
+    ].map((l) => wr.headcount(l, "NACE")), [14, 3, 4, 3, 5, null]);
+    assert.strictEqual(wr.weekStartOf("2026-11-15"), "2026-11-09", "Sunday belongs to the week that started Monday");
+    assert.strictEqual(wr.weekStartOf("2026-11-16"), "2026-11-16");
+    assert.strictEqual(wr.weekRange("2026-11-30"), "Nov 30 - Dec 6, 2026");
+
+    const W = "Weekly Test";
+    r = await call("create_project", { name: W }); const wId = r.id;
+    await call("create_contact", { name: "Andy", company: "D & W Mechanical", type: "Subcontractor" });
+    await call("create_contact", { name: "Jared Pratt", company: "NACE", type: "Subcontractor" });
+    const putLog = (date, data) => db.collection("projects").doc(wId).collection("dailyLogs").doc(date).set({ createdBy: "dan@example.com", updatedAt: 1, ...data });
+    const photo = (n) => ({ id: "ph" + n, name: `p${n}.jpg`, url: `https://example.com/p${n}.jpg` });
+    await putLog("2026-11-09", {
+      crewOnSite: ["NACE crew (6): Dan, Jeff, Alex, Ian, Owen, Jake", "D&W - plumbing rough-in"],
+      workCompleted: ["NACE - framed the lanai walls", "D&W - started plumbing rough-in"],
+      issuesDelays: ["Waiting on meter can from Consumers"],
+      weatherReadings: [{ slot: "morning", at: 1, tempF: 34, conditions: "Light Rain", windMph: 5, precip: true }, { slot: "midday", at: 2, tempF: 41, conditions: "Overcast", windMph: 8, precip: false }],
+      photos: [photo(1), photo(2)],
+    });
+    // Tuesday Nov 10: no log at all
+    await putLog("2026-11-11", {
+      crewOnSite: ["Jeff, Ian and Owen - lanai", "A+ Concrete - forms"],
+      workCompleted: ["NACE - Framed the lanai walls.", "A Plus - set the patio forms"],
+      issuesDelays: ["Waiting on meter can from Consumers"], deliveriesInspections: ["Drywall delivered"],
+      notes: "Weekly meeting with the owner.", photos: [photo(3)],
+    });
+    await putLog("2026-11-12", {
+      crewOnSite: ["D&W Plumbing, Heating & Cooling - mechanical crew", "MI Metal Roofers - measuring"],
+      workCompleted: ["Sealed window perimeters"], issuesDelays: ["waiting on meter can from consumers"],
+    });
+    await putLog("2026-11-13", {
+      crewOnSite: ["NACE (5)"], workCompleted: ["NACE - roof sheathing"], issuesDelays: ["Roof leak at the chimney"],
+      tomorrowPlan: ["NACE - continue roof"], photos: [photo(4), photo(5), photo(6), photo(7)],
+    });
+    await putLog("2026-11-14", { createdBy: "weather", weatherReadings: [{ slot: "morning", at: 3, tempF: 30, conditions: "Snow", windMph: 4, precip: true }] });
+    await call("create_appointment", { project: W, title: "Insulation inspection", start: "2026-11-17T10:00" });
+    await call("create_phase", { project: W, name: "Insulation", start: "2026-11-19", end: "2026-12-04" });
+
+    r = await call("get_weekly_report", { project: W, date: "2026-11-12" }); assert.strictEqual(r.empty, true);
+    r = await call("build_weekly_report", { project: W, date: "2026-11-12" });
+    assert.strictEqual(r.built, true); assert.strictEqual(r.status, "Draft"); assert.strictEqual(r.weekStart, "2026-11-09");
+    assert.deepStrictEqual(r.daysLogged, ["Mon Nov 9", "Wed Nov 11", "Thu Nov 12", "Fri Nov 13"], "Tuesday had no log; Saturday has weather only");
+    assert.strictEqual(r.summary, "4 days logged, 6 crew at peak, D & W Mechanical, A Plus Concrete and MI Metal Roofers on site, 1 issue still open.");
+    assert.deepStrictEqual(r.weather, ["Mon Nov 9: 34°-41°F, light rain, then overcast", "Sat Nov 14: 30°F, snow"]);
+    assert.strictEqual(r.precipDays, 2);
+    assert.deepStrictEqual(r.crew, [
+      "Mon Nov 9: NACE 6; subs: D & W Mechanical",
+      "Wed Nov 11: NACE 3; subs: A Plus Concrete",
+      "Thu Nov 12: subs: D & W Mechanical, MI Metal Roofers",
+      "Fri Nov 13: NACE 5",
+    ]);
+    assert.deepStrictEqual(r.subsOnSite, ["D & W Mechanical", "A Plus Concrete", "MI Metal Roofers"], "D&W on two days, listed once");
+    assert.deepStrictEqual(r.workCompleted, [
+      { who: "NACE", lines: ["framed the lanai walls (Mon, Wed)", "Sealed window perimeters (Thu)", "roof sheathing (Fri)"] },
+      { who: "D & W Mechanical", lines: ["started plumbing rough-in (Mon)"] },
+      { who: "A Plus Concrete", lines: ["set the patio forms (Wed)"] },
+    ]);
+    assert.deepStrictEqual(r.deliveriesInspections, ["Wed Nov 11 - Drywall delivered"]);
+    assert.deepStrictEqual(r.issues, [
+      { text: "Roof leak at the chimney", status: "open", since: "Fri Nov 13" },
+      { text: "Waiting on meter can from Consumers", status: "cleared", since: "Mon Nov 9" },   // on three days, gone by Friday
+    ]);
+    assert.deepStrictEqual(r.nextWeek, ["NACE - continue roof", "Tue Nov 17, 10:00 AM - Insulation inspection", "Phase: Insulation, Thu Nov 19 to Fri Dec 4"]);
+    assert.deepStrictEqual(r.photos.map((x) => [x.name, x.date]), [["p1.jpg", "2026-11-09"], ["p3.jpg", "2026-11-11"], ["p4.jpg", "2026-11-13"], ["p2.jpg", "2026-11-09"], ["p5.jpg", "2026-11-13"], ["p6.jpg", "2026-11-13"]], "spread across the days, six at most");
+    assert.deepStrictEqual(r.notes, ["Wed Nov 11: Weekly meeting with the owner."]);
+    assert(!("edited" in db._store.get(`projects/${wId}/weeklyReports/2026-11-09`)) || db._store.get(`projects/${wId}/weeklyReports/2026-11-09`).edited === false);
+
+    // the PDF: built, filed under Weekly Reports, reused while current, rebuilt once the report changes
+    r = await call("weekly_report_pdf", { project: W, date: "2026-11-09" });
+    assert.strictEqual(r.rebuilt, true); assert(r.url.includes("weekly_reports")); assert(r.fileName.startsWith("Weekly Report - Weekly Test - 2026-11-09"));
+    assert.strictEqual(r.emailSubject, "Weekly Report - Weekly Test - week of Nov 9 - 15, 2026"); assert(r.emailBody.includes("WORK COMPLETED") && r.emailBody.includes("PDF: "));
+    const weeklyPdf = saved[`projects/${wId}/weekly_reports/2026-11-09.pdf`]; assert(weeklyPdf && weeklyPdf.slice(0, 4).toString() === "%PDF");
+    require("fs").writeFileSync(require("path").join(__dirname, "last-weekly-report.pdf"), weeklyPdf);
+    r = await call("list_files", { project: W, folder: "Weekly Reports" }); assert.strictEqual(r.count, 1);
+    r = await call("weekly_report_pdf", { project: W, date: "2026-11-09" }); assert.strictEqual(r.rebuilt, false, "current PDF reused");
+
+    // a person's wording sticks: editing marks the report, and a plain rebuild leaves it alone
+    r = await call("set_weekly_report_section", { project: W, date: "2026-11-09", section: "summary", text: "Short week, lanai framed, roof under way." });
+    assert.strictEqual(r.summary, "Short week, lanai framed, roof under way."); assert.strictEqual(r.edited, true); assert.strictEqual(r.pdfIsCurrent, false, "the PDF is now stale");
+    r = await call("set_weekly_report_section", { project: W, date: "2026-11-09", section: "workCompleted", groups: [{ who: "NACE", lines: ["Lanai walls framed"] }, { who: "MI Metal Roofers", lines: ["Measured the roof"] }] });
+    assert.deepStrictEqual(r.workCompleted.map((g) => g.who), ["NACE", "MI Metal Roofers"]);
+    r = await call("set_weekly_report_section", { project: W, date: "2026-11-09", section: "issues", issues: [{ text: "Roof leak at the chimney", status: "cleared" }] });
+    assert.deepStrictEqual(r.issues, [{ text: "Roof leak at the chimney", status: "cleared" }]);
+    r = await call("set_weekly_report_section", { project: W, date: "2026-11-09", section: "notes", lines: [] }); assert.strictEqual(r.notes, undefined, "an empty list clears the section");
+    r = await call("set_weekly_report_section", { project: W, date: "2026-11-09", section: "crew" }); assert(r.error && /Pass lines/.test(r.error), r.error);
+    r = await call("set_weekly_report_section", { project: W, date: "2026-11-09", section: "status", text: "Done" }); assert(r.error && /Draft or Final/.test(r.error));
+    r = await call("set_weekly_report_section", { project: W, date: "2026-11-02", section: "summary", text: "x" }); assert(r.error && /Build it first/.test(r.error));
+    r = await call("build_weekly_report", { project: W, date: "2026-11-09" });
+    assert.strictEqual(r.built, false); assert.strictEqual(r.reason, "edited"); assert.strictEqual(r.summary, "Short week, lanai framed, roof under way.");
+
+    // another project's report, marked Final, that the Saturday run must not touch
+    r = await call("create_project", { name: "Final Test" }); const fId = r.id;
+    await db.collection("projects").doc(fId).collection("dailyLogs").doc("2026-11-10").set({ crewOnSite: ["NACE (3)"], workCompleted: ["NACE - trim"], updatedAt: 1 });
+    r = await call("build_weekly_report", { project: "Final Test", date: "2026-11-10" }); assert.strictEqual(r.built, true);
+    r = await call("set_weekly_report_section", { project: "Final Test", date: "2026-11-10", section: "status", text: "Final" });
+    assert.strictEqual(r.status, "Final"); assert.strictEqual(r.edited, undefined, "marking Final isn't an edit");
+    const finalBefore = JSON.stringify(db._store.get(`projects/${fId}/weeklyReports/2026-11-09`));
+    await db.collection("projects").doc(fId).collection("dailyLogs").doc("2026-11-12").set({ workCompleted: ["NACE - more trim"], updatedAt: 2 });   // logged after it was finalised
+
+    // Saturday Nov 14, 7 AM: the weekly run
+    const run = await wr.runWeeklyReports(db, parseDate("2026-11-14T07:00", tz));
+    assert.strictEqual(run.weekStart, "2026-11-09");
+    assert(run.keptFinal.includes("Final Test"), JSON.stringify(run));
+    assert(run.keptEdited.includes(W), JSON.stringify(run));
+    assert(run.built.includes("Martin"), "Martin has a log on Nov 10, so it gets a Draft: " + JSON.stringify(run));
+    assert(run.nothingLogged.includes("Hansen Garage"));
+    assert.strictEqual(JSON.stringify(db._store.get(`projects/${fId}/weeklyReports/2026-11-09`)), finalBefore, "the Final report is exactly as it was");
+    assert.strictEqual(db._store.get(`projects/${wId}/weeklyReports/2026-11-09`).summary, "Short week, lanai framed, roof under way.", "the edited report keeps its wording");
+    r = await call("get_weekly_report", { project: "Martin", date: "2026-11-10" }); assert.strictEqual(r.status, "Draft"); assert.deepStrictEqual(r.daysLogged, ["Tue Nov 10"]);
+
+    // asked to, a rebuild replaces the edits and goes back to Draft
+    r = await call("build_weekly_report", { project: "Final Test", date: "2026-11-10", force: true });
+    assert.strictEqual(r.built, true); assert.strictEqual(r.status, "Draft"); assert.deepStrictEqual(r.workCompleted, [{ who: "NACE", lines: ["trim (Tue)", "more trim (Thu)"] }]);
+    r = await call("build_weekly_report", { project: W, date: "2026-11-09", force: true }); assert.strictEqual(r.edited, undefined); assert.strictEqual(r.summary.startsWith("4 days logged"), true);
+
+    r = await call("list_weekly_reports", { project: W });
+    assert.deepStrictEqual(r.weeks.map((x) => [x.weekStart, x.status, x.daysLogged, x.pdf]), [["2026-11-09", "Draft", 4, "stale"]]);
+  }
+  console.log("weekly report ok");
+
   r = await call("delete_task", { task: newId }); assert(/Deleted/.test(r));
   console.log("ALL TESTS PASSED");
 }

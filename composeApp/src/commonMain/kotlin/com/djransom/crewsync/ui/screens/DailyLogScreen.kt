@@ -47,13 +47,34 @@ import kotlin.time.Clock
  * The printable/emailable report is a PDF laid out server-side (functions/dailyReport.js) so it
  * looks identical from every platform; Print and Email both make sure the PDF is current first.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DailyLogTab(
     projectId: String,
     project: Project,
     userMap: Map<String, String>,
     currentUserEmail: String
+) {
+    // Daily: one day's log, as before. Weekly: the week's report built from those logs (WeeklyReportScreen.kt).
+    var weekly by rememberSaveable { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = !weekly, onClick = { weekly = false }, label = { Text(t("Daily")) })
+            FilterChip(selected = weekly, onClick = { weekly = true }, label = { Text(t("Weekly")) })
+        }
+        if (weekly) WeeklyReportView(projectId, project, currentUserEmail, Modifier.weight(1f))
+        else DailyLogDayView(projectId, project, userMap, currentUserEmail, Modifier.weight(1f))
+    }
+}
+
+/** One day's log: the Daily Log tab's Daily view. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DailyLogDayView(
+    projectId: String,
+    project: Project,
+    userMap: Map<String, String>,
+    currentUserEmail: String,
+    modifier: Modifier = Modifier
 ) {
     val firestore = Firebase.firestore
     val scope = rememberCoroutineScope()
@@ -158,7 +179,7 @@ fun DailyLogTab(
     val cameraLauncher = rememberCameraLauncher { addPhoto(it) }
     val fileLauncher = rememberFilePickerLauncher { addPhoto(it) }
 
-    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    Scaffold(modifier = modifier, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             // ---- day strip ----------------------------------------------------------------------
             val dayChips = remember(logs, today) { (listOf(today) + logs.map { it.date }).distinct().sortedDescending() }

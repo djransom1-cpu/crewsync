@@ -15,6 +15,9 @@ import com.djransom.crewsync.data.model.PhasePredecessor
 import com.djransom.crewsync.data.model.PredecessorType
 import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.data.model.Task
+import com.djransom.crewsync.data.model.WeeklyIssue
+import com.djransom.crewsync.data.model.WeeklyReport
+import com.djransom.crewsync.data.model.WeeklyWorkGroup
 import com.djransom.crewsync.i18n.I18n
 import com.djransom.crewsync.util.ScheduleSampleData
 import com.djransom.crewsync.util.TIMELINE_MONTHS_DAY_WIDTH
@@ -303,6 +306,30 @@ class ScheduleScreenshotTest {
             existingNames = listOf("Roof complete"), calendar = thanksgiving, dayFirstByDefault = false
         )
         ScheduleImportPreview(csv, "Martin schedule.csv", asBaseline = true, onAsBaseline = {}, modifier = Modifier.padding(24.dp))
+    }
+
+    // ---- the weekly report ----
+
+    /** The Weekly view's report for the week of Nov 9, as the server builds it from the sample week's logs. */
+    @Test
+    fun weeklyReport() = shot("weekly-report", width = 520, height = 1500) {
+        val report = WeeklyReport(
+            weekStart = "2026-11-09", weekEnd = "2026-11-15", daysLogged = listOf("2026-11-09", "2026-11-11", "2026-11-12", "2026-11-13"),
+            summary = "4 days logged, 6 crew at peak, D & W Mechanical, A+ Concrete and MI Metal Roofers on site, 1 issue still open.",
+            weather = listOf("Mon Nov 9: 34°-41°F, light rain, then overcast", "Sat Nov 14: 30°F, snow"), precipDays = 2,
+            crew = listOf("Mon Nov 9: NACE 6; subs: D & W Mechanical", "Wed Nov 11: NACE 3; subs: A+ Concrete", "Thu Nov 12: subs: D & W Mechanical, MI Metal Roofers", "Fri Nov 13: NACE 5"),
+            subsOnSite = listOf("D & W Mechanical", "A+ Concrete", "MI Metal Roofers"),
+            workCompleted = listOf(
+                WeeklyWorkGroup("NACE", listOf("framed the lanai walls (Mon, Wed)", "Sealed window perimeters (Thu)", "roof sheathing (Fri)")),
+                WeeklyWorkGroup("D & W Mechanical", listOf("started plumbing rough-in (Mon)")),
+                WeeklyWorkGroup("A+ Concrete", listOf("set the patio forms (Wed)"))
+            ),
+            deliveriesInspections = listOf("Wed Nov 11 - Drywall delivered"),
+            issues = listOf(WeeklyIssue("Roof leak at the chimney", "2026-11-13", "open"), WeeklyIssue("Waiting on meter can from Consumers", "2026-11-09", "cleared")),
+            nextWeek = listOf("NACE - continue roof", "Tue Nov 17, 10:00 AM - Insulation inspection", "Phase: Insulation, Thu Nov 19 to Fri Dec 4"),
+            notes = listOf("Wed Nov 11: Weekly meeting with the owner.")
+        )
+        WeeklyReportBody(report, onEdit = {}, modifier = Modifier.padding(12.dp))
     }
 
     private fun shot(name: String, width: Int, height: Int, density: Float = 1f, content: @Composable () -> Unit) {

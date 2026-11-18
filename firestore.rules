@@ -151,6 +151,12 @@ service cloud.firestore {
         allow read, create, update: if canAccessProject(projectId);
         allow delete: if isAdmin();
       }
+
+      // Weekly reports built from the daily logs (functions/weeklyReport.js): the same access as the logs.
+      match /weeklyReports/{weekStart} {
+        allow read, create, update: if canAccessProject(projectId);
+        allow delete: if isAdmin();
+      }
     }
 
     // ---------------- tasks / planner ----------------
