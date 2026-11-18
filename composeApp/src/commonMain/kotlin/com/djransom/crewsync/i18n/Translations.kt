@@ -3,6 +3,7 @@ package com.djransom.crewsync.i18n
 // Generated from the English wording used in t("…") calls. Keys are the English text exactly as written in the code.
 
 internal val translationsPl: Map<String, String> = mapOf(
+    "Show schedule phases" to "Pokaż etapy harmonogramu",
     "Look-ahead" to "Plan na najbliższe tygodnie",
     "This week" to "Ten tydzień",
     "2 weeks" to "2 tygodnie",
@@ -646,6 +647,7 @@ internal val translationsPl: Map<String, String> = mapOf(
 )
 
 internal val translationsNl: Map<String, String> = mapOf(
+    "Show schedule phases" to "Fasen van de planning tonen",
     "Look-ahead" to "Vooruitblik",
     "This week" to "Deze week",
     "2 weeks" to "2 weken",
@@ -1289,6 +1291,7 @@ internal val translationsNl: Map<String, String> = mapOf(
 )
 
 internal val translationsFr: Map<String, String> = mapOf(
+    "Show schedule phases" to "Afficher les phases du planning",
     "Look-ahead" to "Prévisionnel",
     "This week" to "Cette semaine",
     "2 weeks" to "2 semaines",
@@ -1932,6 +1935,7 @@ internal val translationsFr: Map<String, String> = mapOf(
 )
 
 internal val translationsDe: Map<String, String> = mapOf(
+    "Show schedule phases" to "Phasen des Terminplans anzeigen",
     "Look-ahead" to "Vorschau",
     "This week" to "Diese Woche",
     "2 weeks" to "2 Wochen",

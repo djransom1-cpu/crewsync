@@ -23,6 +23,7 @@ import com.djransom.crewsync.util.WorkCalendar
 import com.djransom.crewsync.util.planCascade
 import com.djransom.crewsync.util.shiftedDates
 import com.djransom.crewsync.util.toLocalMidnightMillis
+import kotlinx.datetime.DayOfWeek
 import org.jetbrains.skia.EncodedImageFormat
 import java.io.File
 import kotlin.test.Test
@@ -253,6 +254,32 @@ class ScheduleScreenshotTest {
 
     @Test
     fun lookAheadOnAPhone() = shot("schedule-lookahead-phone", width = 400, height = 1100) { LookAhead(weeks = 1, byTrade = false) }
+
+    // ---- phases on the site calendar ----
+
+    /** November 2026 with the sample schedule drawn as banners, the way the Calendar tab shows it on a laptop. */
+    @Test
+    fun calendarMonthWithPhases() = shot("calendar-month-phases", width = 1100, height = 900) {
+        MonthView(data.day(2026, 11, 1), data.today, data.roofTasks, data.roofAppointments, DayOfWeek.SUNDAY, phases = data.martinInProgress) {}
+    }
+
+    /** The same month on a phone, where the cells are narrow. */
+    @Test
+    fun calendarMonthWithPhasesOnAPhone() = shot("calendar-month-phases-phone", width = 400, height = 900) {
+        MonthView(data.day(2026, 11, 1), data.today, data.roofTasks, data.roofAppointments, DayOfWeek.SUNDAY, phases = data.martinInProgress) {}
+    }
+
+    /** The week of Nov 15: banners across the days each phase runs, above the hours. */
+    @Test
+    fun calendarWeekWithPhases() = shot("calendar-week-phases", width = 900, height = 520) {
+        WeekView(data.today, data.roofTasks, data.roofAppointments, DayOfWeek.SUNDAY, phases = data.martinInProgress) {}
+    }
+
+    /** Hidden: the same month with no phases passed, exactly as the calendar looked before. */
+    @Test
+    fun calendarMonthWithPhasesHidden() = shot("calendar-month-no-phases", width = 1100, height = 760) {
+        MonthView(data.day(2026, 11, 1), data.today, data.roofTasks, data.roofAppointments, DayOfWeek.SUNDAY, phases = emptyList()) {}
+    }
 
     private fun shot(name: String, width: Int, height: Int, density: Float = 1f, content: @Composable () -> Unit) {
         I18n.init("en")
