@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Slideshow
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.djransom.crewsync.data.model.Appointment
+import com.djransom.crewsync.data.model.Contact
 import com.djransom.crewsync.data.model.PhaseStatus
 import com.djransom.crewsync.data.model.Project
 import com.djransom.crewsync.data.model.SchedulePhase
@@ -39,14 +41,17 @@ import com.djransom.crewsync.util.formatPhaseDates
 import com.djransom.crewsync.util.groupPhases
 import com.djransom.crewsync.util.linkedTasks
 import com.djransom.crewsync.util.percentShown
+import com.djransom.crewsync.util.phasesReadyToMarkDone
 import com.djransom.crewsync.util.scheduleToday
 import com.djransom.crewsync.util.startDate
 import com.djransom.crewsync.util.toSchedulePhaseSafe
 import com.djransom.crewsync.util.workCalendar
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.firestore.firestore
+import dev.gitlive.firebase.firestore.where
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
@@ -58,10 +63,11 @@ import kotlinx.datetime.TimeZone
  * its card (SchedulePhaseCard.kt). The Present button opens presentation mode
  * (SchedulePresentation.kt): the same timeline on its own, full-screen, for the meeting room.
  *
- * Read-only for now - phases are loaded and changed through the connector. [ScheduleTab] does the
- * Firestore listening; [ScheduleContent] and everything under it draw whatever they are handed
- * and know nothing about Firestore, so tests and screenshots can feed them sample data (see
- * ScheduleScreenshotTest).
+ * With [ScheduleActions] to hand (the project's leader), phases can be added and edited here
+ * (SchedulePhaseEditScreen.kt); without, the tab is read-only. The phases themselves are listened
+ * to by ProjectDetailsScreen and passed in. [ScheduleContent] and everything under it draw
+ * whatever they are handed and know nothing about Firestore, so tests and screenshots can feed
+ * them sample data (see ScheduleScreenshotTest).
  */
 @Composable
 fun ScheduleTab(
@@ -69,34 +75,37 @@ fun ScheduleTab(
     project: Project,
     tasks: List<Task>,
     appointments: List<Appointment>,
+    phases: List<SchedulePhase>?,       // null while the first answer from Firestore is on its way
+    loadError: String?,
+    actions: ScheduleActions?,          // null: read-only
     presenting: Boolean = false,
     onPresentingChange: (Boolean) -> Unit = {}
 ) {
-    val firestore = Firebase.firestore
-    var loadError by remember(projectId) { mutableStateOf<String?>(null) }
-    val phasesFlow: Flow<List<SchedulePhase>?> = remember(projectId) {
-        firestore.collection("projects").document(projectId).collection("schedulePhases").snapshots
-            .map { snap -> snap.documents.map { it.toSchedulePhaseSafe() } }
-            .catch { e -> loadError = e.message ?: ""; emit(emptyList()) }
-    }
-    // null until the first answer arrives, so "loading" and "no schedule yet" don't look the same.
-    val phases by phasesFlow.collectAsState(initial = null)
     val calendar = remember(project.workWeek, project.scheduleHolidays) { project.workCalendar() }
+    // The workspace's contacts: for picking who's doing a phase, and for tap-to-call.
+    val contactsFlow = remember(project.environmentId) {
+        if (project.environmentId.isEmpty()) return@remember flowOf(emptyList())
+        Firebase.firestore.collection("contacts")
+            .where { "environmentId" equalTo project.environmentId }
+            .snapshots
+            .map { snap -> snap.documents.mapNotNull { doc -> try { doc.data<Contact>().copy(id = doc.id) } catch (_: Exception) { null } } }
+            .catch { emit(emptyList()) }
+    }
+    val contacts by contactsFlow.collectAsState(initial = emptyList())
 
-    val error = loadError
-    val loaded = phases
     // Presentation mode has no menu or back arrow of its own, so never leave someone in it looking at an error.
-    LaunchedEffect(error, presenting) { if (error != null && presenting) onPresentingChange(false) }
+    LaunchedEffect(loadError, presenting) { if (loadError != null && presenting) onPresentingChange(false) }
     when {
-        error != null -> ScheduleMessage(t("Couldn't load the schedule: {0}", error))
-        loaded == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        loadError != null -> ScheduleMessage(t("Couldn't load the schedule: {0}", loadError))
+        phases == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         presenting -> SchedulePresentationScreen(
-            projectName = project.name, phases = loaded, tasks = tasks, appointments = appointments, calendar = calendar,
+            projectName = project.name, phases = phases, tasks = tasks, appointments = appointments, calendar = calendar,
             onClose = { onPresentingChange(false) }
         )
         else -> ScheduleContent(
-            phases = loaded, tasks = tasks, appointments = appointments, calendar = calendar,
-            onPresent = { onPresentingChange(true) }
+            phases = phases, tasks = tasks, appointments = appointments, calendar = calendar,
+            onPresent = { onPresentingChange(true) },
+            actions = actions, contacts = contacts, projectId = projectId
         )
     }
 }
@@ -119,36 +128,115 @@ fun ScheduleContent(
     today: LocalDate = scheduleToday(zone),
     initialView: ScheduleView = ScheduleView.Timeline,
     timelineState: ScheduleTimelineState = rememberScheduleTimelineState(),
-    onPresent: (() -> Unit)? = null
+    onPresent: (() -> Unit)? = null,
+    actions: ScheduleActions? = null,      // null: read-only, no Add / Edit
+    contacts: List<Contact> = emptyList(),
+    projectId: String = ""
 ) {
-    if (phases.isEmpty()) {
-        ScheduleMessage(t("No schedule yet."), t("Phases will show here once the schedule is set up."), modifier)
-        return
-    }
     var viewName by rememberSaveable { mutableStateOf(initialView.name) }
     val view = if (viewName == ScheduleView.List.name) ScheduleView.List else ScheduleView.Timeline
-    // The card follows the phase by id, so it shows the latest if the phase changes while it's open.
+    // The card and the edit screen follow the phase by id, so they show the latest if it changes while they're open.
     var openPhaseId by rememberSaveable { mutableStateOf<String?>(null) }
+    var editingPhaseId by rememberSaveable { mutableStateOf<String?>(null) }
+    var addingPhase by rememberSaveable { mutableStateOf(false) }
+    var pendingEditId by remember { mutableStateOf<String?>(null) }
+    // Phases the person has said "Not now" to marking done. Only for this visit to the tab: it asks again next time.
+    var notNow by remember { mutableStateOf(emptySet<String>()) }
+    val tasksById = remember(tasks) { tasks.associateBy { it.id } }
+    val askDone = remember(phases, tasksById, notNow, actions) {
+        if (actions == null) null else phasesReadyToMarkDone(phases, tasksById).firstOrNull { it.id !in notNow }
+    }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        ScheduleToolbar(view, onView = { viewName = it.name }, timeline = timelineState, onPresent = onPresent)
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        when (view) {
-            ScheduleView.Timeline -> ScheduleTimeline(
-                phases = phases, tasks = tasks, calendar = calendar, state = timelineState,
-                onPhaseClick = { openPhaseId = it.id }, zone = zone, today = today
+    if (phases.isEmpty()) {
+        Box(modifier.fillMaxSize()) {
+            ScheduleMessage(t("No schedule yet."), t("Phases will show here once the schedule is set up."))
+            if (actions != null) {
+                Button(onClick = { addingPhase = true }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 48.dp)) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(t("Add phase"))
+                }
+            }
+        }
+    } else {
+        Column(modifier = modifier.fillMaxSize()) {
+            ScheduleToolbar(
+                view, onView = { viewName = it.name }, timeline = timelineState, onPresent = onPresent,
+                onAddPhase = if (actions != null) ({ addingPhase = true }) else null
             )
-            ScheduleView.List -> ScheduleList(phases = phases, tasks = tasks, calendar = calendar, zone = zone, onPhaseClick = { openPhaseId = it.id })
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            actions?.error?.let { problem ->
+                ScheduleNotice(t("Couldn't save: {0}", problem), isError = true, primary = t("OK") to { actions.dismissError() })
+            }
+            // Every linked task is finished: ask. The app never marks a phase done by itself.
+            if (actions != null && askDone != null) {
+                ScheduleNotice(
+                    t("All tasks for \"{0}\" are done. Mark this phase done?", askDone.name),
+                    primary = t("Mark done") to { actions.markDone(askDone) },
+                    secondary = t("Not now") to { notNow = notNow + askDone.id }
+                )
+            }
+            when (view) {
+                ScheduleView.Timeline -> ScheduleTimeline(
+                    phases = phases, tasks = tasks, calendar = calendar, state = timelineState,
+                    onPhaseClick = { openPhaseId = it.id }, zone = zone, today = today
+                )
+                ScheduleView.List -> ScheduleList(phases = phases, tasks = tasks, calendar = calendar, zone = zone, onPhaseClick = { openPhaseId = it.id })
+            }
         }
     }
+
     phases.firstOrNull { it.id == openPhaseId }?.let { phase ->
-        PhaseCardDialog(phase, calendar, tasks, appointments, today, zone, onDismiss = { openPhaseId = null })
+        PhaseCardDialog(
+            phase, calendar, tasks, appointments, today, zone, onDismiss = { openPhaseId = null }, contacts = contacts,
+            onEdit = if (actions != null) ({ pendingEditId = phase.id; openPhaseId = null }) else null
+        )
+    }
+    // The card has to be fully gone before the edit screen opens: closing one dialog and opening
+    // another in the same frame leaves the web build unresponsive (see pendingTaskId in PlannerScreen).
+    LaunchedEffect(pendingEditId, openPhaseId) {
+        val id = pendingEditId
+        if (id != null && openPhaseId == null) {
+            withFrameNanos { }
+            editingPhaseId = id
+            pendingEditId = null
+        }
+    }
+    if (actions != null) {
+        val editing = phases.firstOrNull { it.id == editingPhaseId }
+        if (editing != null || addingPhase) {
+            key(editing?.id ?: "new") {
+                PhaseEditDialog(
+                    phase = editing, allPhases = phases, tasks = tasks, appointments = appointments, contacts = contacts,
+                    calendar = calendar, projectId = projectId, today = today, zone = zone, actions = actions,
+                    onDismiss = { editingPhaseId = null; addingPhase = false }
+                )
+            }
+        }
+    }
+}
+
+/** A strip across the top of the tab for something that needs an answer: a question, or a save that failed. */
+@Composable
+private fun ScheduleNotice(text: String, primary: Pair<String, () -> Unit>, secondary: Pair<String, () -> Unit>? = null, isError: Boolean = false) {
+    val background = if (isError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer
+    val content = if (isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
+    Row(
+        modifier = Modifier.fillMaxWidth().background(background).padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text, color = content, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).padding(end = 8.dp))
+        if (secondary != null) TextButton(onClick = secondary.second) { Text(secondary.first) }
+        Button(onClick = primary.second) { Text(primary.first) }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ScheduleToolbar(view: ScheduleView, onView: (ScheduleView) -> Unit, timeline: ScheduleTimelineState, onPresent: (() -> Unit)?) {
+private fun ScheduleToolbar(
+    view: ScheduleView, onView: (ScheduleView) -> Unit, timeline: ScheduleTimelineState,
+    onPresent: (() -> Unit)?, onAddPhase: (() -> Unit)?
+) {
     Row(
         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -161,6 +249,12 @@ private fun ScheduleToolbar(view: ScheduleView, onView: (ScheduleView) -> Unit, 
             AssistChip(
                 onClick = onPresent, label = { Text(t("Present")) },
                 leadingIcon = { Icon(Icons.Default.Slideshow, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
+            )
+        }
+        if (onAddPhase != null) {
+            AssistChip(
+                onClick = onAddPhase, label = { Text(t("Add phase")) },
+                leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
             )
         }
         if (view == ScheduleView.Timeline) {

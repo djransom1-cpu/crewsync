@@ -46,6 +46,7 @@ import com.djransom.crewsync.util.downloadFile
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -53,6 +54,7 @@ import kotlin.time.Clock
 import com.djransom.crewsync.util.toProjectSafe
 import com.djransom.crewsync.util.toTaskSafe
 import com.djransom.crewsync.util.toDailyLogSafe
+import com.djransom.crewsync.util.toSchedulePhaseSafe
 import com.djransom.crewsync.util.toFirestoreMap
 import com.djransom.crewsync.util.parseColor
 import coil3.compose.AsyncImage
@@ -171,6 +173,18 @@ fun ProjectDetailsScreen(
     }
     val dailyLogs by dailyLogsFlow.collectAsState(initial = emptyList())
 
+    // The schedule's phases. Listened to here rather than inside the Schedule tab because the
+    // Planner and Calendar tabs need them too, for the Phase chip on a task or an appointment.
+    var scheduleLoadError by remember(projectId) { mutableStateOf<String?>(null) }
+    val schedulePhasesFlow: Flow<List<SchedulePhase>?> = remember(projectId) {
+        firestore.collection("projects").document(projectId).collection("schedulePhases").snapshots
+            .map { snap -> snap.documents.map { it.toSchedulePhaseSafe() } }
+            .catch { e -> scheduleLoadError = e.message ?: ""; emit(emptyList()) }
+    }
+    // null until the first answer arrives, so "loading" and "no schedule yet" don't look the same.
+    val schedulePhases by schedulePhasesFlow.collectAsState(initial = null)
+    val scheduleActions = rememberScheduleActions(projectId, environmentId, schedulePhases.orEmpty(), project?.buckets.orEmpty())
+
     // rememberSaveable, not remember - the Activity gets torn down and recreated on rotation
     // (no configChanges override in the manifest), and a plain remember would silently reset
     // this back to tab 0 (Dashboard), kicking users off whatever tab - Calendar, Files, etc. -
@@ -254,6 +268,7 @@ fun ProjectDetailsScreen(
         // Takes over the whole window: no drawer, no top bar, nothing to tap by mistake.
         ScheduleTab(
             projectId = projectId, project = project!!, tasks = tasks, appointments = appointments,
+            phases = schedulePhases, loadError = scheduleLoadError, actions = null,
             presenting = true, onPresentingChange = { presentingSchedule = it }
         )
     } else ModalNavigationDrawer(
@@ -416,7 +431,11 @@ fun ProjectDetailsScreen(
                                 }
                             }
                         )
-                        4 -> PlannerScreen(projectId = projectId, environmentId = environmentId, projectName = project!!.name, projectBuckets = project!!.buckets, projectMembers = project!!.members)
+                        4 -> PlannerScreen(
+                            projectId = projectId, environmentId = environmentId, projectName = project!!.name,
+                            projectBuckets = project!!.buckets, projectMembers = project!!.members,
+                            phases = schedulePhases.orEmpty(), onSetTaskPhase = scheduleActions::setTaskPhase
+                        )
                         5 -> CalendarScreen(
                             projectId = projectId,
                             tasks = tasks,
@@ -424,12 +443,16 @@ fun ProjectDetailsScreen(
                             canEdit = isLeader,
                             calendarShareEnabled = project!!.calendarShareEnabled,
                             calendarShareToken = project!!.calendarShareToken,
-                            firstDayOfWeek = userProfile?.firstDayOfWeek ?: "Sunday"
+                            firstDayOfWeek = userProfile?.firstDayOfWeek ?: "Sunday",
+                            phases = schedulePhases.orEmpty(), onSetAppointmentPhase = scheduleActions::setAppointmentPhase
                         )
                         6 -> NotesTab(projectId = projectId, notes = notes, currentUserEmail = auth.currentUser?.email ?: "")
                         7 -> DailyLogTab(projectId = projectId, project = project!!, userMap = userMap, currentUserEmail = auth.currentUser?.email ?: "")
                         8 -> ScheduleTab(
                             projectId = projectId, project = project!!, tasks = tasks, appointments = appointments,
+                            phases = schedulePhases, loadError = scheduleLoadError,
+                            // Same rule as the site calendar: the project's leader (or an admin) edits the schedule.
+                            actions = if (isLeader) scheduleActions else null,
                             presenting = false, onPresentingChange = { presentingSchedule = it }
                         )
                     }

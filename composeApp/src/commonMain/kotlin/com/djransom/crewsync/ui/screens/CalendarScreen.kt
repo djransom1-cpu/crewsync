@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.i18n.t
 import com.djransom.crewsync.i18n.monthName
 import com.djransom.crewsync.i18n.monthDay
@@ -55,9 +56,15 @@ fun CalendarScreen(
     canEdit: Boolean,
     calendarShareEnabled: Boolean = false,
     calendarShareToken: String = "",
-    firstDayOfWeek: String = "Sunday"
+    firstDayOfWeek: String = "Sunday",
+    // The project's schedule phases and how to put an appointment on one - for the Phase chip in
+    // the appointment dialog. The link is kept on the phase; the appointment record is unchanged.
+    phases: List<SchedulePhase> = emptyList(),
+    onSetAppointmentPhase: ((appointmentId: String, phaseId: String?) -> Unit)? = null
 ) {
     val startDow = parseFirstDayOfWeek(firstDayOfWeek)
+    // The phase picked in the appointment dialog, held until the appointment itself has been saved.
+    var phaseChoice by remember { mutableStateOf<PhaseChoice?>(null) }
     val firestore = Firebase.firestore
     val scope = rememberCoroutineScope()
     
@@ -168,13 +175,21 @@ fun CalendarScreen(
                 onDismiss = { 
                     showAddAppointmentDialog = false
                     appointmentToEdit = null
+                    phaseChoice = null
                 },
+                phases = if (onSetAppointmentPhase != null) phases else emptyList(),
+                currentPhaseId = appointmentToEdit?.let { phaseOfAppointment(phases, it.id)?.id },
+                onPhasePicked = { phaseChoice = PhaseChoice(it) },
                 onConfirm = { appt ->
+                    val choice = phaseChoice
+                    phaseChoice = null
                     scope.launch {
                         if (appt.id.isEmpty()) {
-                            firestore.collection("projects").document(projectId).collection("appointments").add(appt.toFirestoreMap())
+                            val added = firestore.collection("projects").document(projectId).collection("appointments").add(appt.toFirestoreMap())
+                            if (choice != null) onSetAppointmentPhase?.invoke(added.id, choice.phaseId)
                         } else {
                             firestore.collection("projects").document(projectId).collection("appointments").document(appt.id).set(appt.toFirestoreMap())
+                            if (choice != null) onSetAppointmentPhase?.invoke(appt.id, choice.phaseId)
                         }
                         showAddAppointmentDialog = false
                         appointmentToEdit = null
@@ -666,7 +681,13 @@ fun AppointmentItemCard(appointment: Appointment, showActions: Boolean, onEdit: 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate: LocalDate, onDismiss: () -> Unit, onConfirm: (Appointment) -> Unit) {
+fun AppointmentDialog(
+    projectId: String, appointment: Appointment?, initialDate: LocalDate, onDismiss: () -> Unit, onConfirm: (Appointment) -> Unit,
+    phases: List<SchedulePhase> = emptyList(),      // empty: no Phase chip
+    currentPhaseId: String? = null,
+    onPhasePicked: (String?) -> Unit = {}           // called just before onConfirm, and only if the phase was changed
+) {
+    var phaseId by remember(appointment) { mutableStateOf(currentPhaseId) }
     var title by remember(appointment) { mutableStateOf(appointment?.title ?: "") }
     var description by remember(appointment) { mutableStateOf(appointment?.description ?: "") }
     var notes by remember(appointment) { mutableStateOf(appointment?.notes ?: "") }
@@ -715,6 +736,8 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
                 )
                 
+                PhaseChip(phases = phases, selectedPhaseId = phaseId, onSelect = { phaseId = it })
+
                 Text(t("Label Color"), style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     colors.forEach { hex ->
@@ -838,6 +861,7 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
                 val end = LocalDateTime(endDate.year, endDate.monthNumber, endDate.dayOfMonth, endTimeState.hour, endTimeState.minute)
                     .toInstant(TimeZone.currentSystemDefault()).toEpochMilliseconds()
                 
+                if (phaseId != currentPhaseId) onPhasePicked(phaseId)
                 onConfirm(Appointment(
                     id = appointment?.id ?: "",
                     projectId = projectId,
@@ -936,6 +960,9 @@ fun ShareCalendarDialog(
         }
     )
 }
+
+/** A phase picked for an appointment. Wrapped so "picked: none" (null inside) can be told from "nothing picked" (no wrapper). */
+private class PhaseChoice(val phaseId: String?)
 
 private fun parseFirstDayOfWeek(pref: String): DayOfWeek = when (pref) {
     "Monday" -> DayOfWeek.MONDAY

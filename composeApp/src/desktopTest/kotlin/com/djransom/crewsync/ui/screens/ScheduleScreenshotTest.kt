@@ -9,6 +9,9 @@ import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import com.djransom.crewsync.data.model.Contact
+import com.djransom.crewsync.data.model.PhasePredecessor
+import com.djransom.crewsync.data.model.PredecessorType
 import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.i18n.I18n
 import com.djransom.crewsync.util.ScheduleSampleData
@@ -137,6 +140,49 @@ class ScheduleScreenshotTest {
     fun presentationPhaseCard() = shot("schedule-presentation-card", width = 672, height = 800, density = PHASE_CARD_LARGE_SCALE) {
         val roof = data.martinInProgress.first { it.name == "Roof complete" }
         PhaseCardBody(roof, thanksgiving, data.roofTasks, data.roofAppointments, data.today, data.zone, Modifier.padding(24.dp))
+    }
+
+    // ---- editing a phase ----
+
+    private val roofer = Contact(id = "cRoofer", name = "JR Roofing", jobTitle = "Roofing", phone = "231-555-0142")
+
+    /** The edit screen for a phase that exists: every field, its predecessor, and its linked tasks and visits. */
+    @Test
+    fun phaseEditForm() = shot("schedule-phase-edit", width = 480, height = 1500) {
+        val exterior = data.martinInProgress.first { it.name == "Exterior walls at chimney" }
+        val roof = data.martinInProgress.first { it.name == "Roof complete" }
+            .copy(contactId = roofer.id, predecessors = listOf(PhasePredecessor(exterior.id, PredecessorType.FS, -1)), notes = "Ridge vent on order. Flashing at the chimney still to do.")
+        PhaseEditForm(
+            draft = roof, onDraft = {}, live = roof, allPhases = data.martinInProgress, tasks = data.roofTasks,
+            appointments = data.roofAppointments, contacts = listOf(roofer), calendar = thanksgiving, today = data.today, zone = data.zone,
+            onUnlinkTask = {}, onAddTask = {}, onUnlinkAppointment = {}, onAddVisit = {}, onDelete = {},
+            modifier = Modifier.padding(24.dp)
+        )
+    }
+
+    /** The same screen for a brand-new phase: nothing filled in, and links wait until it's saved. */
+    @Test
+    fun newPhaseForm() = shot("schedule-phase-new", width = 480, height = 1000) {
+        PhaseEditForm(
+            draft = SchedulePhase(), onDraft = {}, live = null, allPhases = data.martinInProgress, tasks = data.roofTasks,
+            appointments = data.roofAppointments, contacts = listOf(roofer), calendar = thanksgiving, today = data.today, zone = data.zone,
+            onUnlinkTask = {}, onAddTask = {}, onUnlinkAppointment = {}, onAddVisit = {}, onDelete = null,
+            modifier = Modifier.padding(24.dp)
+        )
+    }
+
+    /** The card with a contact that has a phone number: the number shows, with a Call button. */
+    @Test
+    fun phaseCardWithCall() = shot("schedule-phase-card-call", width = 420, height = 540) {
+        val roof = data.martinInProgress.first { it.name == "Roof complete" }.copy(contactId = roofer.id)
+        PhaseCardBody(roof, thanksgiving, data.roofTasks, data.roofAppointments, data.today, data.zone, Modifier.padding(24.dp), contacts = listOf(roofer))
+    }
+
+    /** The Phase chip that appears on the task and appointment screens. */
+    @Test
+    fun phaseChip() = shot("schedule-phase-chip", width = 360, height = 120) {
+        val roof = data.martinInProgress.first { it.name == "Roof complete" }
+        PhaseChip(phases = data.martinInProgress, selectedPhaseId = roof.id, onSelect = {}, modifier = Modifier.padding(24.dp))
     }
 
     private fun shot(name: String, width: Int, height: Int, density: Float = 1f, content: @Composable () -> Unit) {

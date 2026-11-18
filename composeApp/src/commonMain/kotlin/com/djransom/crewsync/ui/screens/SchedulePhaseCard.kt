@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -21,6 +23,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import com.djransom.crewsync.data.model.Appointment
+import com.djransom.crewsync.data.model.Contact
 import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.data.model.Task
 import com.djransom.crewsync.i18n.clockTime
@@ -31,6 +34,7 @@ import com.djransom.crewsync.util.endDate
 import com.djransom.crewsync.util.formatPhaseDates
 import com.djransom.crewsync.util.formatScheduleDay
 import com.djransom.crewsync.util.linkedTasks
+import com.djransom.crewsync.util.makePhoneCall
 import com.djransom.crewsync.util.millisToLocalDate
 import com.djransom.crewsync.util.nextLinkedAppointment
 import com.djransom.crewsync.util.percentShown
@@ -57,7 +61,9 @@ fun PhaseCardDialog(
     today: LocalDate,
     zone: TimeZone,
     onDismiss: () -> Unit,
-    large: Boolean = false
+    large: Boolean = false,
+    contacts: List<Contact> = emptyList(),
+    onEdit: (() -> Unit)? = null        // null: no Edit button (read-only, or presentation mode)
 ) {
     // On the meeting-room screen the same card is simply drawn bigger: the lettering, the spacing
     // and the dialog itself are all scaled up together.
@@ -67,8 +73,9 @@ fun PhaseCardDialog(
         AlertDialog(
             onDismissRequest = onDismiss,
             confirmButton = { TextButton(onClick = onDismiss) { Text(t("Close")) } },
+            dismissButton = onEdit?.let { edit -> { TextButton(onClick = edit) { Text(t("Edit")) } } },
             title = { PhaseCardTitle(phase) },
-            text = { PhaseCardBody(phase, calendar, tasks, appointments, today, zone, Modifier.verticalScroll(rememberScrollState())) }
+            text = { PhaseCardBody(phase, calendar, tasks, appointments, today, zone, Modifier.verticalScroll(rememberScrollState()), contacts) }
         )
     }
 }
@@ -95,7 +102,8 @@ fun PhaseCardBody(
     appointments: List<Appointment>,
     today: LocalDate,
     zone: TimeZone,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    contacts: List<Contact> = emptyList()
 ) {
     val linked = remember(phase.taskIds, tasks) { phase.linkedTasks(tasks.associateBy { it.id }) }
     val next = remember(phase.appointmentIds, appointments, today, zone) { phase.nextLinkedAppointment(appointments.associateBy { it.id }, today, zone) }
@@ -136,7 +144,18 @@ fun PhaseCardBody(
             )
         }
         if (phase.trade.isNotBlank()) PhaseFact(t("Trade"), phase.trade)
-        if (phase.contactName.isNotBlank()) PhaseFact(t("Contact"), phase.contactName)
+        if (phase.contactName.isNotBlank()) {
+            // A contact picked from the contacts list has a number to hand: show it, with a Call button.
+            val phone = phaseContact(phase, contacts)?.let { it.phone.ifBlank { it.secondaryPhone } }.orEmpty()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { PhaseFact(t("Contact"), phase.contactName, detail = phone) }
+                if (phone.isNotBlank()) {
+                    IconButton(onClick = { makePhoneCall(phone) }) {
+                        Icon(Icons.Default.Call, contentDescription = t("Call"), tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        }
 
         HorizontalDivider()
         Text(t("Linked tasks"), style = MaterialTheme.typography.titleSmall)
