@@ -60,11 +60,19 @@ fun CalendarScreen(
     // The project's schedule phases and how to put an appointment on one - for the Phase chip in
     // the appointment dialog. The link is kept on the phase; the appointment record is unchanged.
     phases: List<SchedulePhase> = emptyList(),
-    onSetAppointmentPhase: ((appointmentId: String, phaseId: String?) -> Unit)? = null
+    onSetAppointmentPhase: ((appointmentId: String, phaseId: String?) -> Unit)? = null,
+    // For "Move the phase too?" when a linked appointment is moved to another day. Null: never asked.
+    scheduleActions: ScheduleActions? = null,
+    workCalendar: WorkCalendar? = null
 ) {
     val startDow = parseFirstDayOfWeek(firstDayOfWeek)
     // The phase picked in the appointment dialog, held until the appointment itself has been saved.
     var phaseChoice by remember { mutableStateOf<PhaseChoice?>(null) }
+    // A linked appointment was moved: the question, then (on yes) the shift waiting for its preview.
+    var movePhaseAsk by remember { mutableStateOf<MovePhaseAsk?>(null) }
+    var queuedPhaseShift by remember { mutableStateOf<PendingShift?>(null) }
+    var pendingPhaseShift by remember { mutableStateOf<PendingShift?>(null) }
+    var phaseShiftLoop by remember { mutableStateOf<List<String>?>(null) }
     val firestore = Firebase.firestore
     val scope = rememberCoroutineScope()
     
@@ -183,6 +191,7 @@ fun CalendarScreen(
                 onConfirm = { appt ->
                     val choice = phaseChoice
                     phaseChoice = null
+                    val before = appointmentToEdit
                     scope.launch {
                         if (appt.id.isEmpty()) {
                             val added = firestore.collection("projects").document(projectId).collection("appointments").add(appt.toFirestoreMap())
@@ -193,10 +202,63 @@ fun CalendarScreen(
                         }
                         showAddAppointmentDialog = false
                         appointmentToEdit = null
+                        // A linked appointment moved to another day: offer to move its phase too (the answer defaults to no).
+                        val phase = if (before != null && choice == null && before.recurrence == "None") phaseOfAppointment(phases, before.id) else null
+                        if (before != null && phase != null && scheduleActions != null && workCalendar != null && phase.start != null && phase.end != null) {
+                            val days = workCalendar.workingDaysBetween(timestampToDate(before.startDate), timestampToDate(appt.startDate))
+                            if (days != 0) {
+                                withFrameNanos { }   // let the appointment dialog finish closing first
+                                withFrameNanos { }
+                                movePhaseAsk = MovePhaseAsk(phase, days, before.id, appt.title)
+                            }
+                        }
                     }
                 }
             )
         }
+    }
+
+    movePhaseAsk?.let { ask ->
+        AlertDialog(
+            onDismissRequest = { movePhaseAsk = null },
+            title = { Text(t("Move the phase too?")) },
+            text = {
+                val moved = if (ask.days > 0) t("{0} working day(s) later", ask.days) else t("{0} working day(s) earlier", -ask.days)
+                Text(t("\"{0}\" is linked to the phase \"{1}\", and you moved it {2}. Move the phase by the same amount?", ask.appointmentTitle, ask.phase.name, moved))
+            },
+            // "No" is the default: it's the filled button, and tapping outside the box means no as well.
+            confirmButton = { Button(onClick = { movePhaseAsk = null }) { Text(t("No")) } },
+            dismissButton = {
+                TextButton(onClick = {
+                    movePhaseAsk = null
+                    val zone = TimeZone.currentSystemDefault()
+                    if (workCalendar != null) {
+                        shiftedDates(ask.phase, ask.days, workCalendar, zone)?.let { (s, e) ->
+                            when (val plan = planCascade(phases, ask.phase.id, s, e, workCalendar, zone)) {
+                                is ShiftPlan.Loop -> phaseShiftLoop = plan.names
+                                // The appointment itself has just been moved by hand, so the preview leaves it out.
+                                is ShiftPlan.Moves -> queuedPhaseShift = PendingShift(plan.moves, skipAppointmentId = ask.appointmentId)
+                            }
+                        }
+                    }
+                }) { Text(t("Move the phase")) }
+            }
+        )
+    }
+    // The question has to be fully gone before the preview opens (the web build goes unresponsive otherwise).
+    LaunchedEffect(queuedPhaseShift, movePhaseAsk) {
+        val next = queuedPhaseShift
+        if (next != null && movePhaseAsk == null) {
+            withFrameNanos { }
+            pendingPhaseShift = next
+            queuedPhaseShift = null
+        }
+    }
+    if (scheduleActions != null && workCalendar != null) {
+        ShiftPreviewHost(
+            pendingPhaseShift, phaseShiftLoop, tasks, appointments, workCalendar, scheduleToday(), TimeZone.currentSystemDefault(), scheduleActions,
+            onDone = { pendingPhaseShift = null; phaseShiftLoop = null }
+        )
     }
 
     if (showDeleteConfirm != null) {
@@ -960,6 +1022,9 @@ fun ShareCalendarDialog(
         }
     )
 }
+
+/** "Move the phase too?": the phase, how many working days the appointment was moved, and which appointment it was. */
+private class MovePhaseAsk(val phase: SchedulePhase, val days: Int, val appointmentId: String, val appointmentTitle: String)
 
 /** A phase picked for an appointment. Wrapped so "picked: none" (null inside) can be told from "nothing picked" (no wrapper). */
 private class PhaseChoice(val phaseId: String?)

@@ -55,6 +55,7 @@ import com.djransom.crewsync.util.toProjectSafe
 import com.djransom.crewsync.util.toTaskSafe
 import com.djransom.crewsync.util.toDailyLogSafe
 import com.djransom.crewsync.util.toSchedulePhaseSafe
+import com.djransom.crewsync.util.workCalendar
 import com.djransom.crewsync.util.toFirestoreMap
 import com.djransom.crewsync.util.parseColor
 import coil3.compose.AsyncImage
@@ -444,7 +445,8 @@ fun ProjectDetailsScreen(
                             calendarShareEnabled = project!!.calendarShareEnabled,
                             calendarShareToken = project!!.calendarShareToken,
                             firstDayOfWeek = userProfile?.firstDayOfWeek ?: "Sunday",
-                            phases = schedulePhases.orEmpty(), onSetAppointmentPhase = scheduleActions::setAppointmentPhase
+                            phases = schedulePhases.orEmpty(), onSetAppointmentPhase = scheduleActions::setAppointmentPhase,
+                            scheduleActions = if (isLeader) scheduleActions else null, workCalendar = project!!.workCalendar()
                         )
                         6 -> NotesTab(projectId = projectId, notes = notes, currentUserEmail = auth.currentUser?.email ?: "")
                         7 -> DailyLogTab(projectId = projectId, project = project!!, userMap = userMap, currentUserEmail = auth.currentUser?.email ?: "")

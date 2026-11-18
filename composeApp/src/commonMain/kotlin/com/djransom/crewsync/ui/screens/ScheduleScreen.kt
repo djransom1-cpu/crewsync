@@ -40,7 +40,13 @@ import com.djransom.crewsync.util.endDate
 import com.djransom.crewsync.util.formatPhaseDates
 import com.djransom.crewsync.util.groupPhases
 import com.djransom.crewsync.util.linkedTasks
+import com.djransom.crewsync.util.ShiftPlan
+import com.djransom.crewsync.util.appointmentMoves
 import com.djransom.crewsync.util.percentShown
+import com.djransom.crewsync.util.planCascade
+import com.djransom.crewsync.util.shiftedDates
+import com.djransom.crewsync.util.taskMoves
+import com.djransom.crewsync.util.tidiedForSave
 import com.djransom.crewsync.util.phasesReadyToMarkDone
 import com.djransom.crewsync.util.scheduleToday
 import com.djransom.crewsync.util.startDate
@@ -53,7 +59,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.plus
 import kotlinx.datetime.TimeZone
 
 /**
@@ -147,6 +155,36 @@ fun ScheduleContent(
         if (actions == null) null else phasesReadyToMarkDone(phases, tasksById).firstOrNull { it.id !in notNow }
     }
 
+    // ---- shifting: a change to a phase's dates that may move other things waits here for a yes ----
+    var pendingShift by remember { mutableStateOf<PendingShift?>(null) }
+    var shiftLoop by remember { mutableStateOf<List<String>?>(null) }
+    var shiftingPhaseId by remember { mutableStateOf<String?>(null) }     // the Shift button's "how many days?" dialog
+    // Something to do once every dialog that's open has closed (one must be gone before the next opens).
+    var afterDialogs by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val appointmentsById = remember(appointments) { appointments.associateBy { it.id } }
+
+    /**
+     * New dates for a phase. If nothing else would move - no followers, no linked appointments or
+     * dated tasks - it's simply saved; otherwise (or when [alwaysPreview]) the preview is shown
+     * and nothing is saved until Apply. [edited] carries the edit screen's other changes along.
+     */
+    fun requestDates(phase: SchedulePhase, newStart: LocalDate, newEnd: LocalDate, edited: SchedulePhase?, alwaysPreview: Boolean) {
+        if (actions == null) return
+        when (val plan = planCascade(phases, phase.id, newStart, newEnd, calendar, zone)) {
+            is ShiftPlan.Loop -> shiftLoop = plan.names
+            is ShiftPlan.Moves -> {
+                val othersMove = plan.moves.any { !it.isOrigin } || plan.moves.any {
+                    appointmentMoves(it, appointmentsById, today, calendar, zone).isNotEmpty() || taskMoves(it, tasksById, calendar, zone).isNotEmpty()
+                }
+                when {
+                    plan.moves.isNotEmpty() && (alwaysPreview || othersMove) -> pendingShift = PendingShift(plan.moves, phase.takeIf { edited != null }, edited)
+                    edited != null -> actions.savePhase(phase, edited)
+                    plan.moves.isNotEmpty() -> actions.applyShift(plan.moves, emptyList(), emptyList())
+                }
+            }
+        }
+    }
+
     if (phases.isEmpty()) {
         Box(modifier.fillMaxSize()) {
             ScheduleMessage(t("No schedule yet."), t("Phases will show here once the schedule is set up."))
@@ -179,7 +217,15 @@ fun ScheduleContent(
             when (view) {
                 ScheduleView.Timeline -> ScheduleTimeline(
                     phases = phases, tasks = tasks, calendar = calendar, state = timelineState,
-                    onPhaseClick = { openPhaseId = it.id }, zone = zone, today = today
+                    onPhaseClick = { openPhaseId = it.id }, zone = zone, today = today,
+                    onPhaseDrag = if (actions == null) null else { phase, days ->
+                        // The bar was dragged by calendar days; what's kept is how many WORKING days that is.
+                        val start = phase.startDate(zone)
+                        if (start != null) {
+                            val workingDays = calendar.workingDaysBetween(start, start.plus(days, DateTimeUnit.DAY))
+                            if (workingDays != 0) shiftedDates(phase, workingDays, calendar, zone)?.let { (s, e) -> requestDates(phase, s, e, null, alwaysPreview = true) }
+                        }
+                    }
                 )
                 ScheduleView.List -> ScheduleList(phases = phases, tasks = tasks, calendar = calendar, zone = zone, onPhaseClick = { openPhaseId = it.id })
             }
@@ -189,7 +235,8 @@ fun ScheduleContent(
     phases.firstOrNull { it.id == openPhaseId }?.let { phase ->
         PhaseCardDialog(
             phase, calendar, tasks, appointments, today, zone, onDismiss = { openPhaseId = null }, contacts = contacts,
-            onEdit = if (actions != null) ({ pendingEditId = phase.id; openPhaseId = null }) else null
+            onEdit = if (actions != null) ({ pendingEditId = phase.id; openPhaseId = null }) else null,
+            onShift = if (actions != null && phase.start != null && phase.end != null) ({ openPhaseId = null; afterDialogs = { shiftingPhaseId = phase.id } }) else null
         )
     }
     // The card has to be fully gone before the edit screen opens: closing one dialog and opening
@@ -209,10 +256,44 @@ fun ScheduleContent(
                 PhaseEditDialog(
                     phase = editing, allPhases = phases, tasks = tasks, appointments = appointments, contacts = contacts,
                     calendar = calendar, projectId = projectId, today = today, zone = zone, actions = actions,
-                    onDismiss = { editingPhaseId = null; addingPhase = false }
+                    onDismiss = { editingPhaseId = null; addingPhase = false },
+                    onSave = { before, edited ->
+                        val tidy = edited.tidiedForSave()
+                        val newStart = tidy.startDate(zone)
+                        val newEnd = tidy.endDate(zone)
+                        if (before != null && newStart != null && newEnd != null && (before.start != tidy.start || before.end != tidy.end)) {
+                            // The dates changed: once this dialog has closed, see what else would move.
+                            afterDialogs = { requestDates(before, newStart, newEnd, tidy, alwaysPreview = false) }
+                        } else {
+                            actions.savePhase(before, tidy)
+                        }
+                    }
                 )
             }
         }
+    }
+
+    val dialogOpen = openPhaseId != null || editingPhaseId != null || addingPhase || shiftingPhaseId != null
+    LaunchedEffect(afterDialogs, dialogOpen) {
+        val next = afterDialogs
+        if (next != null && !dialogOpen) {
+            withFrameNanos { }
+            afterDialogs = null
+            next()
+        }
+    }
+    if (actions != null) {
+        phases.firstOrNull { it.id == shiftingPhaseId }?.let { phase ->
+            ShiftAmountDialog(
+                phase, calendar, zone,
+                onPreview = { days ->
+                    shiftingPhaseId = null
+                    shiftedDates(phase, days, calendar, zone)?.let { (s, e) -> afterDialogs = { requestDates(phase, s, e, null, alwaysPreview = true) } }
+                },
+                onDismiss = { shiftingPhaseId = null }
+            )
+        }
+        ShiftPreviewHost(pendingShift, shiftLoop, tasks, appointments, calendar, today, zone, actions, onDone = { pendingShift = null; shiftLoop = null })
     }
 }
 

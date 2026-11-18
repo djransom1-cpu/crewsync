@@ -49,7 +49,7 @@ Keys are stored hashed in `mcp_access_keys`; logins in `mcp_oauth_tokens`.
 | Tasks | `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task` |
 | Checklists | `add_checklist_items` (appends, never duplicates), `set_checklist_item`, `remove_checklist_item` |
 | Calendar | `list_appointments` (expands Daily/Weekly/Monthly), `create_appointment`, `update_appointment`, `delete_appointment` |
-| Schedule | `list_schedule`, `get_phase`, `create_phase`, `update_phase`, `delete_phase`, `link_to_phase`, `unlink_from_phase`, `import_schedule` (with `dryRun`), `set_baseline` |
+| Schedule | `list_schedule`, `get_phase`, `create_phase`, `update_phase`, `delete_phase`, `link_to_phase`, `unlink_from_phase`, `import_schedule` (with `dryRun`), `set_baseline`, `shift_phase` (with `cascade`, `dryRun`) |
 | Contacts | `list_contacts`, `create_contact`, `update_contact`, `delete_contact` |
 | Files | `list_files` (names, folders, download URLs) |
 | Crew | `list_team`, `create_broadcast` |
@@ -75,4 +75,8 @@ Behaviors worth knowing:
 - Phase dates are whole days (`YYYY-MM-DD`). Working days skip weekends and the project's
   holidays; set those with `update_project` (`scheduleHolidays`, `workWeek`).
 - `set_baseline` leaves an existing baseline alone unless `overwrite` is true.
+- `shift_phase` moves a phase by working days and, by default, everything that follows it through
+  the predecessors; `update_phase` does the same when given `cascade: true`. Both take `dryRun`.
+  The rule (planCascade in `schedule.js`, twin of the app's `ScheduleShift.kt`): a follower keeps
+  its place relative to the earliest day its predecessors allow. The baseline never moves.
 - Everything is scoped to the signed-in user's active workspace (Environment).

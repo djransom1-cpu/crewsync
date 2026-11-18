@@ -34,6 +34,7 @@ import com.djransom.crewsync.util.PhaseDatesEdit
 import com.djransom.crewsync.util.WorkCalendar
 import com.djransom.crewsync.util.blockedPredecessorIds
 import com.djransom.crewsync.util.datesForEdit
+import com.djransom.crewsync.util.formatPhaseDates
 import com.djransom.crewsync.util.formatScheduleDay
 import com.djransom.crewsync.util.inScheduleOrder
 import com.djransom.crewsync.util.linkedTasks
@@ -68,7 +69,10 @@ fun PhaseEditDialog(
     today: LocalDate,
     zone: TimeZone,
     actions: ScheduleActions,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    // Where Save sends the phase as it was and as edited. Left out, it's saved straight away; the
+    // Schedule tab passes this so that changed dates go through the shift preview first.
+    onSave: ((before: SchedulePhase?, edited: SchedulePhase) -> Unit)? = null
 ) {
     // The phase as it was when editing began: only what differs from this is saved.
     val original = remember(phase?.id) { phase }
@@ -78,6 +82,7 @@ fun PhaseEditDialog(
     var showAddTask by remember { mutableStateOf(false) }
     var showAddVisit by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmBaseline by remember { mutableStateOf(false) }
     val dates = draft.datesForEdit(zone)
     val canSave = draft.name.isNotBlank() && !dates.endsBeforeStart
 
@@ -94,11 +99,15 @@ fun PhaseEditDialog(
                 onUnlinkAppointment = { actions.setAppointmentPhase(it, null) },
                 onAddVisit = { showAddVisit = true },
                 onDelete = if (original != null) ({ confirmDelete = true }) else null,
+                onSetBaseline = { confirmBaseline = true },
                 modifier = Modifier.verticalScroll(rememberScrollState())
             )
         },
         confirmButton = {
-            Button(onClick = { actions.savePhase(original, draft); onDismiss() }, enabled = canSave) { Text(t("Save")) }
+            Button(onClick = {
+                if (onSave != null) onSave(original, draft) else actions.savePhase(original, draft)
+                onDismiss()
+            }, enabled = canSave) { Text(t("Save")) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(t("Cancel")) } }
     )
@@ -121,6 +130,15 @@ fun PhaseEditDialog(
                 showAddVisit = false
                 actions.createLinkedAppointment(appointment, live.id)
             }
+        )
+    }
+    if (confirmBaseline && live != null) {
+        AlertDialog(
+            onDismissRequest = { confirmBaseline = false },
+            title = { Text(t("Set as baseline?")) },
+            text = { Text(t("The saved dates of \"{0}\" become its plan. Slip is measured from them from now on.", live.name)) },
+            confirmButton = { Button(onClick = { confirmBaseline = false; actions.setBaseline(live) }) { Text(t("Set as baseline")) } },
+            dismissButton = { TextButton(onClick = { confirmBaseline = false }) { Text(t("Cancel")) } }
         )
     }
     if (confirmDelete && original != null) {
@@ -161,7 +179,8 @@ fun PhaseEditForm(
     onUnlinkAppointment: (String) -> Unit,
     onAddVisit: () -> Unit,
     onDelete: (() -> Unit)?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onSetBaseline: (() -> Unit)? = null
 ) {
     val dates = draft.datesForEdit(zone, calendar)
     fun setDates(next: PhaseDatesEdit) = onDraft(draft.withDates(next, zone))
@@ -191,6 +210,17 @@ fun PhaseEditForm(
 
         // ---- dates and working days ----
         PhaseDatesEditor(dates, calendar, onChange = ::setDates)
+        // The plan (baseline) is never moved by editing or shifting; this is the one way to reset it.
+        if (onSetBaseline != null && live != null && live.start != null && live.end != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val planned = formatPhaseDates(live.baselineStart?.let { millisToLocalDate(it, zone) }, live.baselineEnd?.let { millisToLocalDate(it, zone) })
+                Text(
+                    if (planned.isEmpty()) t("No baseline yet") else t("Planned: {0}", planned),
+                    style = MaterialTheme.typography.bodySmall, color = muted, modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = onSetBaseline) { Text(t("Set as baseline")) }
+            }
+        }
 
         // ---- status ----
         FormLabel(t("Status"))

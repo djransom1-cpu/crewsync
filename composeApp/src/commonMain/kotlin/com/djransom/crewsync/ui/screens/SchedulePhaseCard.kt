@@ -63,7 +63,8 @@ fun PhaseCardDialog(
     onDismiss: () -> Unit,
     large: Boolean = false,
     contacts: List<Contact> = emptyList(),
-    onEdit: (() -> Unit)? = null        // null: no Edit button (read-only, or presentation mode)
+    onEdit: (() -> Unit)? = null,       // null: no Edit button (read-only, or presentation mode)
+    onShift: (() -> Unit)? = null       // null: no Shift button
 ) {
     // On the meeting-room screen the same card is simply drawn bigger: the lettering, the spacing
     // and the dialog itself are all scaled up together.
@@ -73,7 +74,12 @@ fun PhaseCardDialog(
         AlertDialog(
             onDismissRequest = onDismiss,
             confirmButton = { TextButton(onClick = onDismiss) { Text(t("Close")) } },
-            dismissButton = onEdit?.let { edit -> { TextButton(onClick = edit) { Text(t("Edit")) } } },
+            dismissButton = if (onEdit == null && onShift == null) null else ({
+                Row {
+                    if (onShift != null) TextButton(onClick = onShift) { Text(t("Shift")) }
+                    if (onEdit != null) TextButton(onClick = onEdit) { Text(t("Edit")) }
+                }
+            }),
             title = { PhaseCardTitle(phase) },
             text = { PhaseCardBody(phase, calendar, tasks, appointments, today, zone, Modifier.verticalScroll(rememberScrollState()), contacts) }
         )

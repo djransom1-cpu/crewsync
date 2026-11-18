@@ -432,6 +432,117 @@ async function main() {
   r = await call("delete_task", { task: tearOff });
   console.log("schedule tools ok");
 
+  // ---- shifting: the same five-phase chain as the app's ScheduleShiftTest.kt, and the same answers ----
+  //   Framing            Mon Nov 2  - Fri Nov 6
+  //   Rough plumbing     Mon Nov 9  - Fri Nov 13    after Framing finishes
+  //   Rough electrical   Wed Nov 11 - Tue Nov 17    two working days after plumbing STARTS
+  //   Insulation         Tue Nov 17 - Mon Nov 23    starts on electrical's last day (finish-to-start, lag -1)
+  //   Drywall            Tue Nov 24 - ...           after Insulation AND after plumbing
+  assert.strictEqual(cal.successorStart(D("2026-11-09"), D("2026-11-13"), "FS", 0), D("2026-11-16"), "the working day after it finishes");
+  assert.strictEqual(cal.successorStart(D("2026-11-09"), D("2026-11-13"), "FS", -1), D("2026-11-13"), "lag -1 starts on its last day");
+  assert.strictEqual(cal.successorStart(D("2026-11-09"), D("2026-11-13"), "SS", 2), D("2026-11-11"), "two working days after it starts");
+  const hansen = "Hansen Garage";
+  const mk = (name, start, extra) => call("create_phase", { project: hansen, name, start, ...extra });
+  r = await mk("Framing", "2026-11-02", { end: "2026-11-06" });
+  r = await mk("Rough plumbing", "2026-11-09", { end: "2026-11-13", predecessors: [{ phase: "Framing" }] });
+  r = await mk("Rough electrical", "2026-11-11", { end: "2026-11-17", predecessors: [{ phase: "Rough plumbing", type: "SS", lagDays: 2 }] });
+  r = await mk("Insulation", "2026-11-17", { end: "2026-11-23", predecessors: [{ phase: "Rough electrical", lagDays: -1 }] });
+  r = await mk("Drywall", "2026-11-24", { durationDays: 5, predecessors: [{ phase: "Insulation" }, { phase: "Rough plumbing" }] });
+  assert.strictEqual(r.end, "Mon 2026-11-30");
+  r = await call("set_baseline", { project: hansen }); assert.strictEqual(r.baselineSet.length, 5);
+  const chainDates = async () => Object.fromEntries((await call("list_schedule", { project: hansen })).phases.map((x) => [x.name, `${x.start} to ${x.end}`]));
+  const unshifted = await chainDates();
+
+  // a dry run says what would move and saves nothing
+  r = await call("shift_phase", { project: hansen, phase: "Framing", days: 3, dryRun: true });
+  assert.strictEqual(r.dryRun, true); assert.strictEqual(r.saved, false); assert.strictEqual(r.phasesMoved, 5);
+  assert.deepStrictEqual(r.phases.map((x) => [x.name, x.to, x.shiftDays]), [
+    ["Framing", "Thu 2026-11-05 to Wed 2026-11-11", 3],
+    ["Rough plumbing", "Thu 2026-11-12 to Wed 2026-11-18", 3],      // finish-to-start: the working day after Framing ends
+    ["Rough electrical", "Mon 2026-11-16 to Fri 2026-11-20", 3],    // start-to-start + 2
+    ["Insulation", "Fri 2026-11-20 to Thu 2026-11-26", 3],          // lag -1: still starts on electrical's last day
+    ["Drywall", "Fri 2026-11-27 to Thu 2026-12-03", 3],             // after the later of its two predecessors
+  ]);
+  assert.strictEqual(r.phases[0].from, "Mon 2026-11-02 to Fri 2026-11-06"); assert.strictEqual(r.phases[0].follower, undefined); assert.strictEqual(r.phases[1].follower, true);
+  assert.deepStrictEqual(await chainDates(), unshifted, "a dry run saves nothing");
+
+  // across a holiday: with Thanksgiving and the Friday after it off, Drywall's five days are Nov 24, 25, 30, Dec 1, 2
+  r = await call("update_project", { project: hansen, scheduleHolidays: ["2026-11-26", "2026-11-27"] });
+  r = await call("update_phase", { project: hansen, phase: "Drywall", end: "2026-12-02" }); assert.strictEqual(r.workingDays, 5); assert.strictEqual(r.alsoMoved, undefined);
+  r = await call("set_baseline", { project: hansen, phases: ["Drywall"], overwrite: true });
+  const planned = await chainDates();
+  r = await call("shift_phase", { project: hansen, phase: "Framing", days: 3 });
+  assert.strictEqual(r.shifted, true); assert.strictEqual(r.phasesMoved, 5);
+  assert.deepStrictEqual(r.phases.slice(3).map((x) => [x.name, x.to, x.shiftDays]), [
+    ["Insulation", "Fri 2026-11-20 to Mon 2026-11-30", 3],          // Fri 20, Mon 23, Tue 24, Wed 25, then Mon 30
+    ["Drywall", "Tue 2026-12-01 to Mon 2026-12-07", 3],             // three working days on from Nov 24 is Dec 1
+  ]);
+  assert.deepStrictEqual(r.totals.finish, { planned: "Wed 2026-12-02", current: "Mon 2026-12-07", slipDays: 3 }, "the baseline did not move, so the slip shows");
+  r = await call("get_phase", { project: hansen, phase: "Drywall" });
+  assert.strictEqual(r.start, "Tue 2026-12-01"); assert.strictEqual(r.end, "Mon 2026-12-07"); assert.strictEqual(r.workingDays, 5, "its length in working days is kept");
+  assert.strictEqual(r.baselineStart, "Tue 2026-11-24"); assert.strictEqual(r.baselineEnd, "Wed 2026-12-02"); assert.strictEqual(r.slipDays, 3);
+  // shifting back by the same amount puts everything back
+  r = await call("shift_phase", { project: hansen, phase: "Framing", days: -3 }); assert.deepStrictEqual(await chainDates(), planned);
+
+  // update_phase: nothing follows unless cascade is asked for; with cascade + dryRun it shows what would
+  r = await call("update_phase", { project: hansen, phase: "Rough plumbing", end: "2026-11-25", dryRun: true });
+  assert.strictEqual(r.dryRun, true); assert.deepStrictEqual(r.wouldUpdate, ["end"]); assert.deepStrictEqual(r.phases.map((x) => [x.name, x.shiftDays, x.endShiftDays]), [["Rough plumbing", 0, 8]]);
+  r = await call("update_phase", { project: hansen, phase: "Rough plumbing", end: "2026-11-25", cascade: true, dryRun: true });
+  assert.deepStrictEqual(r.phases.map((x) => [x.name, x.to, x.shiftDays]), [
+    ["Rough plumbing", "Mon 2026-11-09 to Wed 2026-11-25", 0],
+    ["Drywall", "Mon 2026-11-30 to Fri 2026-12-04", 2],             // electrical waits on plumbing's START, so only Drywall follows
+  ]);
+  assert.deepStrictEqual(await chainDates(), planned, "still nothing saved");
+  r = await call("update_phase", { project: hansen, phase: "Rough plumbing", end: "2026-11-25", cascade: true });
+  assert.deepStrictEqual(r.updated, ["end"]); assert.strictEqual(r.end, "Wed 2026-11-25"); assert.deepStrictEqual(r.alsoMoved.phases.map((x) => [x.name, x.shiftDays]), [["Drywall", 2]]);
+  r = await call("get_phase", { project: hansen, phase: "Drywall" }); assert.strictEqual(r.start, "Mon 2026-11-30"); assert.strictEqual(r.baselineStart, "Tue 2026-11-24");
+  r = await call("update_phase", { project: hansen, phase: "Rough plumbing", end: "2026-11-13", cascade: true }); assert.deepStrictEqual(await chainDates(), planned, "and back again");
+
+  // linked appointments move with their phase - not repeating ones, not ones already past - and task dates only when asked.
+  // "Today" is pinned to Mon Nov 9, 2026 for this part so the result does not depend on the day the test runs.
+  const realNow = Date.now;
+  Date.now = () => parseDate("2026-11-09T08:00", tz);
+  try {
+    r = await call("create_appointment", { project: hansen, title: "Rough-in inspection", start: "2026-11-13T13:30" }); const inspectionId = r.id;
+    r = await call("create_appointment", { project: hansen, title: "Plumber weekly", start: "2026-11-10T09:00", recurrence: "Weekly" });
+    r = await call("create_appointment", { project: hansen, title: "Pipe delivery", start: "2026-11-03T07:00" });
+    r = await call("create_task", { project: hansen, title: "Order fixtures", dueDate: "2026-11-13" }); const fixtures = r.id;
+    r = await call("create_task", { project: hansen, title: "Permit", status: "Done", dueDate: "2026-11-06" });
+    r = await call("link_to_phase", { project: hansen, phase: "Rough plumbing", tasks: ["Order fixtures", "Permit"], appointments: ["Rough-in inspection", "Plumber weekly", "Pipe delivery"] });
+    assert.strictEqual(r.linkedTasks, 2); assert.strictEqual(r.linkedAppointments, 3);
+    r = await call("shift_phase", { project: hansen, phase: "Rough plumbing", days: 3, cascade: false, dryRun: true });
+    assert.deepStrictEqual(r.appointmentsMoved.map((x) => [x.title, x.from, x.to]), [["Rough-in inspection", "Fri 2026-11-13 1:30 PM", "Wed 2026-11-18 1:30 PM"]]);
+    assert.strictEqual(r.tasksMoved, undefined, "task dates stay unless asked");
+    r = await call("shift_phase", { project: hansen, phase: "Rough plumbing", days: 3, cascade: false, moveAppointments: false, dryRun: true }); assert.strictEqual(r.appointmentsMoved, undefined);
+    r = await call("shift_phase", { project: hansen, phase: "Rough plumbing", days: 3, cascade: false, moveTasks: true });
+    assert.deepStrictEqual(r.phases.map((x) => x.name), ["Rough plumbing"], "cascade: false moves only the phase itself");
+    assert.deepStrictEqual(r.tasksMoved.map((x) => [x.title, x.dueDate]), [["Order fixtures", "Wed 2026-11-18"]], "not the card that is Done");
+    r = await call("list_appointments", { project: hansen, afterDate: "2026-11-01", beforeDate: "2026-11-30" });
+    assert.strictEqual(r.appointments.find((x) => x.id === inspectionId).start, "Wed 2026-11-18 1:30 PM"); assert.strictEqual(r.appointments.find((x) => x.id === inspectionId).end, "Wed 2026-11-18 2:30 PM");
+    assert.strictEqual(r.appointments.find((x) => x.title === "Pipe delivery").start, "Tue 2026-11-03 7:00 AM", "the one already past is left alone");
+    assert.strictEqual(r.appointments.find((x) => x.title === "Plumber weekly").start, "Tue 2026-11-10 9:00 AM", "so is the repeating one");
+    r = await call("get_task", { task: fixtures }); assert.strictEqual(r.dueDate, "Wed 2026-11-18"); assert.strictEqual(r.phase, "Rough plumbing");
+    r = await call("shift_phase", { project: hansen, phase: "Rough plumbing", days: -3, cascade: false, moveAppointments: false });
+    assert.deepStrictEqual(await chainDates(), planned);
+  } finally {
+    Date.now = realNow;
+  }
+
+  // a loop in the predecessors (which the tools refuse to create, so it is written straight into the store here) is refused by name
+  const hansenId = (await call("get_project", { project: hansen })).id;
+  const hansenPhase = (name) => [...db._store].find(([k, v]) => k.startsWith(`projects/${hansenId}/schedulePhases/`) && v.name === name);
+  db._store.set(hansenPhase("Framing")[0], { ...hansenPhase("Framing")[1], predecessors: [{ phaseId: hansenPhase("Drywall")[1].id, type: "FS", lagDays: 0 }] });
+  r = await call("shift_phase", { project: hansen, phase: "Framing", days: 3, dryRun: true });
+  assert(r.error && /go round in a loop: Framing -> Rough plumbing -> Rough electrical -> Insulation -> Drywall -> Framing/.test(r.error), r.error);
+  r = await call("shift_phase", { project: hansen, phase: "Framing", days: 3 }); assert(r.error && /Nothing was saved/.test(r.error)); assert.deepStrictEqual(await chainDates(), planned);
+  r = await call("update_phase", { project: hansen, phase: "Framing", start: "2026-11-05", cascade: true }); assert(r.error && /loop/.test(r.error), r.error);
+  r = await call("shift_phase", { project: hansen, phase: "Framing", days: 3, cascade: false, dryRun: true }); assert.strictEqual(r.phasesMoved, 1, "with cascade off the phase itself can still be moved");
+  // other refusals
+  r = await call("shift_phase", { project: hansen, phase: "Framing", days: 0 }); assert(r.error && /other than 0/.test(r.error));
+  r = await call("create_phase", { project: hansen, name: "Punch list" });
+  r = await call("shift_phase", { project: hansen, phase: "Punch list", days: 2 }); assert(r.error && /no dates to shift/.test(r.error));
+  console.log("schedule shifting ok");
+
   r = await call("delete_task", { task: newId }); assert(/Deleted/.test(r));
   console.log("ALL TESTS PASSED");
 }

@@ -571,6 +571,89 @@ async function restampPhaseDurations(ctx, project) {
   return stale.length;
 }
 
+// --- shifting (see planCascade in schedule.js) ---------------------------------------------------
+
+const loopMessage = (names) =>
+  `The predecessors go round in a loop: ${names.join(" -> ")}. Nothing was saved. Fix the predecessors first (update_phase), or pass cascade: false to move only this phase.`;
+
+/**
+ * The appointments and task cards linked to moving phases that would move with them, by the same
+ * number of working days as each phase's START. Left alone: repeating appointments (moving one
+ * would change every occurrence), appointments that have already happened, task cards with no
+ * dates or in a Done bucket, and everything on a phase whose start did not move.
+ */
+function linkedMoves(ctx, sc, moves, { moveAppointments, moveTasks }) {
+  const out = { appointments: [], tasks: [] };
+  for (const m of moves) {
+    if (!m.startShift) continue;
+    if (moveAppointments) {
+      for (const id of m.phase.appointmentIds) {
+        const appt = sc.apptById.get(id);
+        if (!appt || (appt.recurrence && appt.recurrence !== "None")) continue;
+        const start = Number(appt.startDate);
+        const day = msToDay(start, ctx.tz);
+        if (day < sc.today) continue;
+        const clock = utcToZoned(start, ctx.tz);
+        const d = new Date(sc.cal.addWorkingDays(day, m.startShift) * 86400000);
+        const newStart = zonedToUtc(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), clock.h, clock.mi, 0, ctx.tz);
+        out.appointments.push({ appt, phase: m.phase, newStart, newEnd: newStart + Math.max(0, Number(appt.endDate || appt.startDate) - start) });
+      }
+    }
+    if (moveTasks) {
+      const moved = (ms) => (ms === undefined || ms === null ? undefined : dayToMs(sc.cal.addWorkingDays(msToDay(Number(ms), ctx.tz), m.startShift), ctx.tz));
+      for (const id of m.phase.taskIds) {
+        const task = sc.taskById.get(id);
+        if (!task || schedule.isDoneStatus(task.status)) continue;
+        const hasStart = task.startDate !== undefined && task.startDate !== null, hasDue = task.dueDate !== undefined && task.dueDate !== null;
+        if (!hasStart && !hasDue) continue;
+        out.tasks.push({ task, phase: m.phase, newStart: moved(task.startDate), newDue: moved(task.dueDate) });
+      }
+    }
+  }
+  return out;
+}
+
+/** What a shift does or would do, in words a person can check: each phase from/to and by how many working days. */
+function cascadeView(ctx, moves, linked) {
+  const span = (s, e) => (s === e ? schedule.fmtDay(s) : `${schedule.fmtDay(s)} to ${schedule.fmtDay(e)}`);
+  return {
+    phasesMoved: moves.length,
+    phases: moves.map((m) => ({
+      id: m.phase.id, name: m.phase.name,
+      from: span(m.oldStart, m.oldEnd), to: span(m.newStart, m.newEnd),
+      shiftDays: m.startShift,
+      endShiftDays: m.endShift !== m.startShift ? m.endShift : undefined,
+      follower: m.isOrigin ? undefined : true,
+    })),
+    appointmentsMoved: linked.appointments.length ? linked.appointments.map((x) => ({
+      id: x.appt.id, title: x.appt.title, phase: x.phase.name, from: fmtDateTime(Number(x.appt.startDate), ctx.tz), to: fmtDateTime(x.newStart, ctx.tz),
+    })) : undefined,
+    tasksMoved: linked.tasks.length ? linked.tasks.map((x) => ({
+      id: x.task.id, title: x.task.title, phase: x.phase.name,
+      startDate: x.newStart === undefined ? undefined : fmtDate(x.newStart, ctx.tz), dueDate: x.newDue === undefined ? undefined : fmtDate(x.newDue, ctx.tz),
+    })) : undefined,
+  };
+}
+
+/** Adds the writes for moved phases and their linked items to a batch. Only dates are written: targeted updates, the baseline untouched. */
+function addCascadeWrites(batch, ctx, p, sc, moves, linked, now) {
+  for (const m of moves) {
+    batch.update(phasesCol(ctx, p.id).doc(m.phase.id), {
+      start: dayToMs(m.newStart, ctx.tz), end: dayToMs(m.newEnd, ctx.tz), durationDays: sc.cal.durationDays(m.newStart, m.newEnd),
+      updatedAt: now, updatedBy: ctx.email,
+    });
+  }
+  for (const x of linked.appointments) {
+    batch.update(ctx.db.collection("projects").doc(p.id).collection("appointments").doc(x.appt.id), { startDate: x.newStart, endDate: x.newEnd });
+  }
+  for (const x of linked.tasks) {
+    const patch = {};
+    if (x.newStart !== undefined) patch.startDate = x.newStart;
+    if (x.newDue !== undefined) patch.dueDate = x.newDue;
+    batch.update(ctx.db.collection("tasks").doc(x.task.id), patch);
+  }
+}
+
 // --- contacts ---------------------------------------------------------------------------------
 
 async function loadContacts(ctx) {
@@ -1219,7 +1302,7 @@ function buildServer(ctx) {
     });
 
   reg("update_phase",
-    "Change a schedule phase. Only the fields you pass change. Dates: a new start alone moves the phase and keeps its length; a new end alone stretches or shrinks it; start + end, start + durationDays or end + durationDays set it exactly. The baseline never moves here. The phases that follow are NOT shifted - check list_schedule afterwards and tell the person if later phases now overlap or start too early. Setting percentComplete switches the phase to a manual percent; percentMode 'auto' goes back to working it out from the linked tasks' checklists.",
+    "Change a schedule phase. Only the fields you pass change. Dates: a new start alone moves the phase and keeps its length; a new end alone stretches or shrinks it; start + end, start + durationDays or end + durationDays set it exactly. The baseline never moves here. The phases that follow are NOT shifted unless you pass cascade: true, which moves them by the same rule as shift_phase (and moves linked appointments with them unless moveAppointments is false). Use dryRun: true first to see what would change, and show the person, before saving a change that cascades. Setting percentComplete switches the phase to a manual percent; percentMode 'auto' goes back to working it out from the linked tasks' checklists.",
     {
       project: z.string().describe("Project name or ID"),
       phase: z.string().describe("Phase name or ID"),
@@ -1239,12 +1322,17 @@ function buildServer(ctx) {
       percentMode: z.enum(["auto", "manual"]).optional(),
       color: z.string().optional().describe("Hex like #2196F3; an empty string goes back to colouring by status"),
       order: z.number().optional().describe("Position in the schedule; lower comes first"),
+      cascade: z.boolean().optional().describe("When the dates change, also move the phases that follow through the predecessors (default false)"),
+      moveAppointments: z.boolean().optional().describe("With cascade: move linked appointments along with their phase (default true)"),
+      moveTasks: z.boolean().optional().describe("With cascade: move the dates of linked task cards too (default false)"),
+      dryRun: z.boolean().optional().describe("Work out and return what would change; save nothing"),
     },
     async (a) => {
       const p = await findProject(ctx, a.project);
       const sc = await loadSchedule(ctx, p);
       const ph = findPhase(sc, a.phase);
       const patch = {};
+      let resolved = null;
       if (a.name !== undefined) {
         const name = a.name.trim();
         const dup = sc.phases.find((x) => x.id !== ph.id && norm(x.name) === norm(name));
@@ -1268,17 +1356,66 @@ function buildServer(ctx) {
         if (a.milestone !== undefined) patch.isMilestone = a.milestone;
       } else if (["start", "end", "durationDays", "milestone"].some((k) => a[k] !== undefined)) {
         const d = resolvePhaseDates(sc.cal, ph, { start: parseDay(a.start, ctx.tz), end: parseDay(a.end, ctx.tz), durationDays: a.durationDays, milestone: a.milestone });
+        resolved = d;
         patch.start = d.startDay === null ? FieldValue.delete() : dayToMs(d.startDay, ctx.tz);
         patch.end = d.endDay === null ? FieldValue.delete() : dayToMs(d.endDay, ctx.tz);
         patch.durationDays = d.durationDays;
         patch.isMilestone = d.isMilestone;
       }
       if (!Object.keys(patch).length) throw new ToolError("Nothing to update — pass at least one field.");
-      const updated = Object.keys(a).filter((k) => k !== "project" && k !== "phase" && a[k] !== undefined);
-      // A targeted update, never a whole-document save, so fields this build doesn't know about survive.
-      await phasesCol(ctx, p.id).doc(ph.id).update({ ...patch, updatedAt: Date.now(), updatedBy: ctx.email });
+      const options = ["project", "phase", "cascade", "moveAppointments", "moveTasks", "dryRun"];
+      const updated = Object.keys(a).filter((k) => !options.includes(k) && a[k] !== undefined);
+      // What the new dates do to this phase and, with cascade, to everything that follows it.
+      let moves = [], linked = { appointments: [], tasks: [] };
+      if (resolved && resolved.startDay !== null && resolved.endDay !== null) {
+        const plan = schedule.planCascade(sc.phases, ph.id, resolved.startDay, resolved.endDay, sc.cal, !!a.cascade);
+        if (plan.loop) throw new ToolError(loopMessage(plan.loop));
+        moves = plan.moves;
+        if (a.cascade) linked = linkedMoves(ctx, sc, moves, { moveAppointments: a.moveAppointments !== false, moveTasks: !!a.moveTasks });
+      }
+      if (a.dryRun) return json({ dryRun: true, saved: false, wouldUpdate: updated, ...cascadeView(ctx, moves, linked) });
+      // Targeted updates, never whole-document saves, so fields this build doesn't know about survive.
+      const now = Date.now();
+      const batch = ctx.db.batch();
+      batch.update(phasesCol(ctx, p.id).doc(ph.id), { ...patch, updatedAt: now, updatedBy: ctx.email });
+      addCascadeWrites(batch, ctx, p, sc, moves.filter((m) => !m.isOrigin), linked, now);
+      await batch.commit();
       const after = await loadSchedule(ctx, p);
-      return json({ updated, ...phaseDetail(after.phases.find((x) => x.id === ph.id), after, ctx) });
+      const followers = moves.filter((m) => !m.isOrigin);
+      return json({
+        updated,
+        ...phaseDetail(after.phases.find((x) => x.id === ph.id), after, ctx),
+        alsoMoved: followers.length || linked.appointments.length || linked.tasks.length ? cascadeView(ctx, followers, linked) : undefined,
+      });
+    });
+
+  reg("shift_phase",
+    "Move a phase earlier or later by a number of WORKING days, keeping its length, and (unless cascade is false) every phase that follows it through the predecessors. A follower keeps its place relative to the earliest day its predecessors allow, so gaps and overlaps that were there stay, a follower held up by something else does not move, and a phase that is Done never moves. The baseline never moves, so slip shows afterwards. Linked appointments move with their phase unless moveAppointments is false (repeating appointments and ones already past are left alone); linked task cards' dates move only if moveTasks is true. ALWAYS run with dryRun: true first and show the person what would move before doing it for real.",
+    {
+      project: z.string().describe("Project name or ID"),
+      phase: z.string().describe("Phase name or ID"),
+      days: z.number().int().describe("Working days to move it: positive is later, negative is earlier"),
+      cascade: z.boolean().optional().describe("Also move the phases that follow (default true)"),
+      moveAppointments: z.boolean().optional().describe("Move linked appointments along with their phase (default true)"),
+      moveTasks: z.boolean().optional().describe("Move the dates of linked task cards too (default false)"),
+      dryRun: z.boolean().optional().describe("Work out and return what would move; save nothing"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      const ph = findPhase(sc, a.phase);
+      if (!a.days) throw new ToolError("days must be a number of working days other than 0.");
+      const target = schedule.shiftedDays(ph, a.days, sc.cal);
+      if (!target) throw new ToolError(`"${ph.name}" has no dates to shift. Give it dates with update_phase first.`);
+      const plan = schedule.planCascade(sc.phases, ph.id, target[0], target[1], sc.cal, a.cascade !== false);
+      if (plan.loop) throw new ToolError(loopMessage(plan.loop));
+      const linked = linkedMoves(ctx, sc, plan.moves, { moveAppointments: a.moveAppointments !== false, moveTasks: !!a.moveTasks });
+      if (a.dryRun) return json({ dryRun: true, saved: false, project: p.name, ...cascadeView(ctx, plan.moves, linked) });
+      const batch = ctx.db.batch();
+      addCascadeWrites(batch, ctx, p, sc, plan.moves, linked, Date.now());
+      await batch.commit();
+      const after = await loadSchedule(ctx, p);
+      return json({ shifted: true, project: p.name, ...cascadeView(ctx, plan.moves, linked), totals: scheduleTotals(after) });
     });
 
   reg("delete_phase",

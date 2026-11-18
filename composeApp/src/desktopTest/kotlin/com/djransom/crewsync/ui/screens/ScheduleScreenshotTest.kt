@@ -13,10 +13,14 @@ import com.djransom.crewsync.data.model.Contact
 import com.djransom.crewsync.data.model.PhasePredecessor
 import com.djransom.crewsync.data.model.PredecessorType
 import com.djransom.crewsync.data.model.SchedulePhase
+import com.djransom.crewsync.data.model.Task
 import com.djransom.crewsync.i18n.I18n
 import com.djransom.crewsync.util.ScheduleSampleData
 import com.djransom.crewsync.util.TIMELINE_MONTHS_DAY_WIDTH
+import com.djransom.crewsync.util.ShiftPlan
 import com.djransom.crewsync.util.WorkCalendar
+import com.djransom.crewsync.util.planCascade
+import com.djransom.crewsync.util.shiftedDates
 import com.djransom.crewsync.util.toLocalMidnightMillis
 import org.jetbrains.skia.EncodedImageFormat
 import java.io.File
@@ -183,6 +187,35 @@ class ScheduleScreenshotTest {
     fun phaseChip() = shot("schedule-phase-chip", width = 360, height = 120) {
         val roof = data.martinInProgress.first { it.name == "Roof complete" }
         PhaseChip(phases = data.martinInProgress, selectedPhaseId = roof.id, onSelect = {}, modifier = Modifier.padding(24.dp))
+    }
+
+    // ---- shifting ----
+
+    /**
+     * The preview shown before a shift is saved: the roof slips three working days, the siding and
+     * the mechanical rough-in that wait on it follow, and the roof's linked visit and dated task
+     * are offered to go along (the visit ticked, the task not).
+     */
+    @Test
+    fun shiftPreview() = shot("schedule-shift-preview", width = 460, height = 560) {
+        val roofId = data.martinInProgress.first { it.name == "Roof complete" }.id
+        val dated = Task(id = "tDated", projectId = "pM", title = "Flashing at chimney", status = "In Progress", dueDate = data.day(2026, 12, 9).toLocalMidnightMillis(data.zone))
+        val phases = data.martinInProgress.map { p ->
+            when (p.name) {
+                "Roof complete" -> p.copy(taskIds = p.taskIds + dated.id)
+                "Siding" -> p.copy(predecessors = listOf(PhasePredecessor(roofId, PredecessorType.SS, 0)))
+                "Mechanical & plumbing" -> p.copy(predecessors = listOf(PhasePredecessor(roofId, PredecessorType.SS, 18)))
+                else -> p
+            }
+        }
+        val roof = phases.first { it.id == roofId }
+        val (start, end) = shiftedDates(roof, 3, thanksgiving, data.zone)!!
+        val moves = (planCascade(phases, roofId, start, end, thanksgiving, data.zone) as ShiftPlan.Moves).moves
+        ShiftPreviewBody(
+            moves, data.roofTasks + dated, data.roofAppointments, thanksgiving, data.today, data.zone,
+            appointmentsTicked = { true }, onAppointmentsTicked = { _, _ -> }, tasksTicked = { false }, onTasksTicked = { _, _ -> },
+            modifier = Modifier.padding(24.dp)
+        )
     }
 
     private fun shot(name: String, width: Int, height: Int, density: Float = 1f, content: @Composable () -> Unit) {

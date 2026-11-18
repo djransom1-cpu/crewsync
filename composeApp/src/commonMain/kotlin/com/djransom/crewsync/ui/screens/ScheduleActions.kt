@@ -13,12 +13,16 @@ import com.djransom.crewsync.data.model.Appointment
 import com.djransom.crewsync.data.model.PhaseStatus
 import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.data.model.Task
+import com.djransom.crewsync.util.AppointmentMove
 import com.djransom.crewsync.util.PhaseLinkKind
 import com.djransom.crewsync.util.PhaseLinkOp
+import com.djransom.crewsync.util.PhaseMove
+import com.djransom.crewsync.util.TaskMove
 import com.djransom.crewsync.util.linkOps
 import com.djransom.crewsync.util.phaseFieldChanges
 import com.djransom.crewsync.util.tidiedForSave
 import com.djransom.crewsync.util.toFirestoreMap
+import com.djransom.crewsync.util.toLocalMidnightMillis
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.CollectionReference
@@ -27,6 +31,7 @@ import dev.gitlive.firebase.firestore.FirebaseFirestore
 import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
+import kotlinx.datetime.TimeZone
 import kotlin.time.Clock
 
 /**
@@ -112,6 +117,61 @@ class ScheduleActions internal constructor(
                 batch.update(phases.document(other.id), "predecessors" to (if (remaining.isEmpty()) FieldValue.delete else remaining), *stamp())
             }
             batch.commit()
+        }
+    }
+
+    /**
+     * Carries out a shift the person has seen in the preview and approved, all in one go: every
+     * phase in [moves] gets its new dates, and the ticked appointments and task cards get theirs.
+     * When the shift came from the edit screen, [originBefore] and [originEdited] are the changed
+     * phase before and after, so its other edited fields are saved with it. Only dates are written
+     * to the phases that follow, and the baseline is never touched.
+     */
+    fun applyShift(
+        moves: List<PhaseMove>,
+        appointments: List<AppointmentMove>,
+        tasks: List<TaskMove>,
+        originBefore: SchedulePhase? = null,
+        originEdited: SchedulePhase? = null
+    ) {
+        val originChanges = if (originBefore != null && originEdited != null) phaseFieldChanges(originBefore, originEdited.tidiedForSave()) else null
+        if (moves.isEmpty() && originChanges.isNullOrEmpty()) return
+        enqueue {
+            val zone = TimeZone.currentSystemDefault()
+            val batch = firestore.batch()
+            if (originBefore != null && !originChanges.isNullOrEmpty()) {
+                val fields = originChanges.map { (name, value) -> name to (value ?: FieldValue.delete) }
+                batch.update(phases.document(originBefore.id), *fields.toTypedArray(), *stamp())
+            }
+            moves.filter { originChanges == null || !it.isOrigin }.forEach { move ->
+                batch.update(
+                    phases.document(move.phase.id),
+                    "start" to move.newStart.toLocalMidnightMillis(zone).toDouble(),
+                    "end" to move.newEnd.toLocalMidnightMillis(zone).toDouble(),
+                    "durationDays" to move.newDurationDays,
+                    *stamp()
+                )
+            }
+            // Targeted updates of the dates alone: nothing else on the appointment or the task card is rewritten.
+            val calendar = firestore.collection("projects").document(projectId).collection("appointments")
+            appointments.forEach { batch.update(calendar.document(it.appointment.id), "startDate" to it.newStart.toDouble(), "endDate" to it.newEnd.toDouble()) }
+            tasks.forEach { move ->
+                val fields = listOfNotNull(move.newStart?.let { "startDate" to it.toDouble() }, move.newDue?.let { "dueDate" to it.toDouble() })
+                if (fields.isNotEmpty()) batch.update(firestore.collection("tasks").document(move.task.id), *fields.toTypedArray())
+            }
+            batch.commit()
+        }
+    }
+
+    /** "Set as baseline": the phase's current dates become its plan - what slip is measured against from now on. */
+    fun setBaseline(phase: SchedulePhase) {
+        if (phase.id.isEmpty()) return
+        enqueue {
+            phases.document(phase.id).update(
+                "baselineStart" to (phase.start?.toDouble() ?: FieldValue.delete),
+                "baselineEnd" to (phase.end?.toDouble() ?: FieldValue.delete),
+                *stamp()
+            )
         }
     }
 

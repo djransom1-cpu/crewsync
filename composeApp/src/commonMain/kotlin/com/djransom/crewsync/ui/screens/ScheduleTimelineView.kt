@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.horizontalScroll
@@ -145,6 +146,8 @@ class ScheduleTimelineState {
     internal var fitRequested by mutableStateOf(false)
     internal var aroundRequested by mutableStateOf<Pair<Int, Int>?>(null)
     internal var positioned = false
+    /** A bar being dragged (after a long press): which phase, and how far sideways in pixels so far. */
+    internal var drag by mutableStateOf<TimelineDrag?>(null)
     internal var leftDayNow: () -> Int = { 0 }
 
     /** Change the zoom, keeping whatever day is at the left edge where it is. */
@@ -171,6 +174,8 @@ class ScheduleTimelineState {
     }
 }
 
+internal data class TimelineDrag(val phaseId: String, val dx: Float)
+
 @Composable
 fun rememberScheduleTimelineState(): ScheduleTimelineState = remember { ScheduleTimelineState() }
 
@@ -194,7 +199,10 @@ fun ScheduleTimeline(
     modifier: Modifier = Modifier,
     style: TimelineStyle = TimelineStyle.Standard,
     zone: TimeZone = TimeZone.currentSystemDefault(),
-    today: LocalDate = scheduleToday(zone)
+    today: LocalDate = scheduleToday(zone),
+    // Long-press a bar and drag it sideways: called on release with how many calendar days it was
+    // moved. Nothing is saved by the drag itself - the caller shows the shift preview. Null: bars can't be dragged.
+    onPhaseDrag: ((phase: SchedulePhase, days: Int) -> Unit)? = null
 ) {
     val span = remember(phases, today, zone) { timelineSpan(phases, today, zone) }
     if (span == null) {
@@ -297,8 +305,31 @@ fun ScheduleTimeline(
                                 phaseAt(tap, rows, bars, dayPx, slop = 10.dp.toPx(), rowHeightPx = { rowHeight(it, style).toPx() })?.let(onPhaseClick)
                             }
                         }
+                            .pointerInput(rows, bars, dayPx, style, onPhaseDrag) {
+                                if (onPhaseDrag == null) return@pointerInput
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { at ->
+                                        phaseAt(at, rows, bars, dayPx, slop = 10.dp.toPx(), rowHeightPx = { rowHeight(it, style).toPx() })
+                                            ?.takeIf { it.start != null && it.end != null }?.let { state.drag = TimelineDrag(it.id, 0f) }
+                                    },
+                                    onDrag = { change, amount ->
+                                        state.drag?.let { state.drag = it.copy(dx = it.dx + amount.x); change.consume() }
+                                    },
+                                    onDragEnd = {
+                                        val dropped = state.drag
+                                        state.drag = null
+                                        if (dropped != null) {
+                                            val days = (dropped.dx / dayPx).roundToInt()
+                                            val phase = rows.firstNotNullOfOrNull { row -> (row as? ScheduleRow.PhaseLine)?.phase?.takeIf { it.id == dropped.phaseId } }
+                                            if (days != 0 && phase != null) onPhaseDrag(phase, days)
+                                        }
+                                    },
+                                    onDragCancel = { state.drag = null }
+                                )
+                            }
                     ) {
-                        drawTimelineBody(span, rows, bars, working, dayPx, dayWidth, today, colors, style)
+                        // Reading the drag here redraws the chart as a bar is dragged, and at no other time.
+                        drawTimelineBody(span, rows, bars, working, dayPx, dayWidth, today, colors, style, state.drag)
                     }
                 }
             }
@@ -439,7 +470,7 @@ private fun DrawScope.drawTimelineHeader(
 
 private fun DrawScope.drawTimelineBody(
     span: TimelineSpan, rows: List<ScheduleRow>, bars: List<PhaseBarDraw?>, working: BooleanArray,
-    dayPx: Float, dayWidth: Dp, today: LocalDate, colors: TimelineColors, style: TimelineStyle
+    dayPx: Float, dayWidth: Dp, today: LocalDate, colors: TimelineColors, style: TimelineStyle, drag: TimelineDrag? = null
 ) {
     val line = 1.dp.toPx()
     // Weekends and holidays, shaded while a day is wide enough to tell apart.
@@ -467,7 +498,9 @@ private fun DrawScope.drawTimelineBody(
             drawRect(colors.band, Offset(0f, y), Size(size.width, groupH))
             y += groupH
         } else {
-            bars[index]?.let { drawPhaseBar(it, dayPx, centerY = y + rowH / 2, colors, style) }
+            // A bar being dragged is drawn where it would land, snapped to whole days.
+            val dragged = if (drag != null && (row as? ScheduleRow.PhaseLine)?.phase?.id == drag.phaseId) (drag.dx / dayPx).roundToInt() * dayPx else 0f
+            bars[index]?.let { drawPhaseBar(it, dayPx, centerY = y + rowH / 2, colors, style, offsetPx = dragged) }
             drawRect(colors.grid.copy(alpha = 0.5f), Offset(0f, y + rowH - line), Size(size.width, line))
             y += rowH
         }
@@ -484,13 +517,13 @@ private fun DrawScope.drawTimelineBody(
  * shows above and below even when the bar covers it end to end), then the bar itself in its
  * status colour - pale for the whole length, solid for the part that's done.
  */
-private fun DrawScope.drawPhaseBar(bar: PhaseBarDraw, dayPx: Float, centerY: Float, colors: TimelineColors, style: TimelineStyle) {
+private fun DrawScope.drawPhaseBar(bar: PhaseBarDraw, dayPx: Float, centerY: Float, colors: TimelineColors, style: TimelineStyle, offsetPx: Float = 0f) {
     val ghostFill = colors.ghost.copy(alpha = if (style.strong) 0.14f else 0.10f)
     val ghostEdge = colors.ghost.copy(alpha = if (style.strong) 0.70f else 0.46f)
     val ghostStroke = Stroke(width = (if (style.strong) 2.dp else 1.dp).toPx())
     if (bar.isMilestone) {
         bar.baseline?.let { drawDiamond(Offset((it.offsetDays + 0.5f) * dayPx, centerY), style.ghostHeight.toPx() * 0.43f, ghostFill, ghostEdge, ghostStroke) }
-        bar.current?.let { drawDiamond(Offset((it.offsetDays + 0.5f) * dayPx, centerY), style.barHeight.toPx() * 0.47f, bar.color, null, ghostStroke) }
+        bar.current?.let { drawDiamond(Offset((it.offsetDays + 0.5f) * dayPx + offsetPx, centerY), style.barHeight.toPx() * 0.47f, bar.color, null, ghostStroke) }
         return
     }
     val minWidth = 3.dp.toPx()
@@ -504,8 +537,12 @@ private fun DrawScope.drawPhaseBar(bar: PhaseBarDraw, dayPx: Float, centerY: Flo
     }
     bar.current?.let { c ->
         val h = style.barHeight.toPx()
-        val left = c.offsetDays * dayPx
         val width = max(c.lengthDays * dayPx, minWidth)
+        if (offsetPx != 0f) {
+            // Mid-drag: a pale mark where the bar is coming from, under the bar itself at where it would land.
+            drawRoundRect(bar.color.copy(alpha = 0.16f), Offset(c.offsetDays * dayPx, centerY - h / 2), Size(width, h), CornerRadius(h * 0.28f))
+        }
+        val left = c.offsetDays * dayPx + offsetPx
         val rect = Rect(left, centerY - h / 2, left + width, centerY + h / 2)
         val shape = Path().apply { addRoundRect(RoundRect(rect, CornerRadius(h * 0.28f))) }
         clipPath(shape) {

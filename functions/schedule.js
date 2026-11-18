@@ -89,11 +89,18 @@ function workCalendar(project = {}) {
   const endForDuration = (start, days) => addWorkingDays(onOrAfter(start), Math.max(1, days) - 1);
   /** First working day of a phase that ends on `end` and runs `days` working days. */
   const startForDuration = (end, days) => addWorkingDays(onOrBefore(end), 1 - Math.max(1, days));
+  /**
+   * The earliest day a phase may start given one predecessor: FS, the working day after the
+   * predecessor's last day plus the lag (lag -1 starts on that last day); SS, the predecessor's
+   * first day plus the lag. Same as successorStart in ScheduleDates.kt.
+   */
+  const successorStart = (predStart, predEnd, type, lagDays) =>
+    (normalizeType(type) === "SS" ? addWorkingDays(onOrAfter(predStart), lagDays || 0) : addWorkingDays(onOrBefore(predEnd), 1 + (lagDays || 0)));
 
   return {
     workWeek: [...weekSet].sort((a, b) => a - b),
     holidays: [...holidays].sort((a, b) => a - b).map(dayToIso),
-    isWorkingDay, onOrAfter, onOrBefore, addWorkingDays, workingDaysBetween, durationDays, endForDuration, startForDuration,
+    isWorkingDay, onOrAfter, onOrBefore, addWorkingDays, workingDaysBetween, durationDays, endForDuration, startForDuration, successorStart,
   };
 }
 
@@ -264,7 +271,96 @@ function findLoop(phases, phaseId, predecessorIds) {
   return walk(phaseId, [phaseId]);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Shifting a phase and everything that follows it - the twin of ScheduleShift.kt, and tested
+// against the same five-phase chain. Phases here carry startDay / endDay (day numbers).
+//
+// The rule for a follower: it keeps its place relative to the earliest day its predecessors
+// allow. If a change moves that earliest day by N working days, the follower moves N working
+// days and keeps its length. So a gap left on purpose stays a gap, shifting back puts everything
+// back, a follower held up by some other predecessor doesn't move, a phase that is Done doesn't
+// move, and a phase with no dates has nothing to move. The baseline is never touched.
+// ---------------------------------------------------------------------------------------------
+
+/** Where a phase would sit if moved `days` working days (negative is earlier), keeping its length: [startDay, endDay]. Null if undated. */
+function shiftedDays(phase, days, cal) {
+  if (phase.startDay === null || phase.startDay === undefined || phase.endDay === null || phase.endDay === undefined) return null;
+  if (!days) return [phase.startDay, phase.endDay];
+  const start = cal.addWorkingDays(phase.startDay, days);
+  return [start, phase.isMilestone ? start : cal.endForDuration(start, Math.max(1, cal.durationDays(phase.startDay, phase.endDay)))];
+}
+
+/**
+ * Everything that moves when phase `originId` is given the dates newStart..newEnd (day numbers).
+ * Returns { moves: [{ phase, oldStart, oldEnd, newStart, newEnd, startShift, endShift, isOrigin }] }
+ * with the changed phase first, or { loop: [names...] } when the predecessors go round in a circle.
+ * With cascade false only the phase itself is listed.
+ */
+function planCascade(phases, originId, newStart, newEnd, cal, cascade = true) {
+  const byId = new Map(phases.map((p) => [p.id, p]));
+  const origin = byId.get(originId);
+  if (!origin) return { moves: [] };
+  const followersOf = new Map();
+  for (const p of phases) for (const link of p.predecessors) {
+    if (!followersOf.has(link.phaseId)) followersOf.set(link.phaseId, []);
+    followersOf.get(link.phaseId).push(p);
+  }
+  // Followers in an order where each comes after everything it waits on, stopping dead at a loop.
+  const order = [], state = new Map(), trail = [];
+  let loop = null;
+  const walk = (p) => {
+    if (loop) return;
+    state.set(p.id, 1);
+    trail.push(p);
+    for (const next of followersOf.get(p.id) || []) {
+      if (state.get(next.id) === 1) { loop = [...trail.slice(trail.findIndex((x) => x.id === next.id)), next].map((x) => x.name || x.id); return; }
+      if (state.get(next.id) !== 2) walk(next);
+      if (loop) return;
+    }
+    trail.pop();
+    state.set(p.id, 2);
+    order.push(p);
+  };
+  if (cascade) walk(origin);
+  if (loop) return { loop };
+  const followers = order.reverse().filter((p) => p.id !== originId);
+
+  const dated = (p) => p.startDay !== null && p.startDay !== undefined && p.endDay !== null && p.endDay !== undefined;
+  const oldDates = new Map(phases.filter(dated).map((p) => [p.id, [p.startDay, p.endDay]]));
+  const newDates = new Map(oldDates);
+  newDates.set(originId, [newStart, newEnd]);
+  const earliestStart = (phase, dates) => {
+    const days = phase.predecessors.filter((link) => dates.has(link.phaseId))
+      .map((link) => cal.successorStart(dates.get(link.phaseId)[0], dates.get(link.phaseId)[1], link.type, link.lagDays));
+    return days.length ? Math.max(...days) : null;
+  };
+  for (const follower of followers) {
+    const old = oldDates.get(follower.id);
+    if (!old || follower.status === "Done") continue;
+    const before = earliestStart(follower, oldDates), after = earliestStart(follower, newDates);
+    if (before === null || after === null) continue;
+    const shift = cal.workingDaysBetween(before, after);
+    if (!shift) continue;
+    const start = cal.addWorkingDays(old[0], shift);
+    newDates.set(follower.id, [start, follower.isMilestone ? start : cal.endForDuration(start, Math.max(1, cal.durationDays(old[0], old[1])))]);
+  }
+  const moves = [];
+  for (const p of [origin, ...followers]) {
+    const now = newDates.get(p.id);
+    if (!now) continue;
+    const old = oldDates.get(p.id);
+    if (old && old[0] === now[0] && old[1] === now[1]) continue;
+    const [os, oe] = old || now; // a phase being given its first dates: nothing to measure a shift from
+    moves.push({
+      phase: p, oldStart: os, oldEnd: oe, newStart: now[0], newEnd: now[1],
+      startShift: cal.workingDaysBetween(os, now[0]), endShift: cal.workingDaysBetween(oe, now[1]), isOrigin: p.id === originId,
+    });
+  }
+  return { moves };
+}
+
 module.exports = {
+  shiftedDays, planCascade,
   STATUSES, WEEKDAYS, DEFAULT_WORK_WEEK,
   matchStatus, normalizeStatus, normalizeType, normalizeMode,
   dayNum, dayToIso, isoToDay, isoWeekday, fmtDay, workCalendar,
