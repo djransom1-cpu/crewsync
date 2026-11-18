@@ -9,6 +9,7 @@ import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import com.djransom.crewsync.data.model.Appointment
 import com.djransom.crewsync.data.model.Contact
 import com.djransom.crewsync.data.model.PhasePredecessor
 import com.djransom.crewsync.data.model.PredecessorType
@@ -217,6 +218,41 @@ class ScheduleScreenshotTest {
             modifier = Modifier.padding(24.dp)
         )
     }
+
+    // ---- the look-ahead ----
+
+    /** The sample schedule with a few trades, two dated task cards and an all-day delivery, so the look-ahead has something in every part. */
+    @Composable
+    private fun LookAhead(weeks: Int, byTrade: Boolean) {
+        val ms = { m: Int, d: Int -> data.day(2026, m, d).toLocalMidnightMillis(data.zone) }
+        val phases = data.martinInProgress.map {
+            when (it.name) {
+                "Roof complete" -> it.copy(taskIds = it.taskIds + "tFlash")
+                "Mechanical & plumbing" -> it.copy(trade = "Mechanical")
+                "Electrical rough-in" -> it.copy(trade = "Electrical")
+                "Insulation" -> it.copy(trade = "Insulation")
+                else -> it
+            }
+        }
+        val tasks = data.roofTasks + listOf(
+            Task(id = "tPermit", title = "Septic permit", status = "In Progress", dueDate = ms(11, 13)),
+            Task(id = "tFlash", title = "Flashing at chimney", status = "Not Started", dueDate = ms(11, 20))
+        )
+        val appointments = data.roofAppointments + Appointment(id = "aDelivery", title = "Insulation delivery", isAllDay = true, startDate = ms(11, 19), endDate = ms(11, 19))
+        ScheduleContent(
+            phases, tasks, appointments, thanksgiving, zone = data.zone, today = data.today,
+            initialView = ScheduleView.LookAhead, initialLookWeeks = weeks, initialLookByTrade = byTrade
+        )
+    }
+
+    @Test
+    fun lookAheadByDay() = shot("schedule-lookahead-day", width = 900, height = 1000) { LookAhead(weeks = 2, byTrade = false) }
+
+    @Test
+    fun lookAheadByTrade() = shot("schedule-lookahead-trade", width = 900, height = 1000) { LookAhead(weeks = 2, byTrade = true) }
+
+    @Test
+    fun lookAheadOnAPhone() = shot("schedule-lookahead-phone", width = 400, height = 1100) { LookAhead(weeks = 1, byTrade = false) }
 
     private fun shot(name: String, width: Int, height: Int, density: Float = 1f, content: @Composable () -> Unit) {
         I18n.init("en")

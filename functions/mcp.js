@@ -654,6 +654,128 @@ function addCascadeWrites(batch, ctx, p, sc, moves, linked, now) {
   }
 }
 
+// --- look-ahead (the twin of ScheduleLookAhead.kt in the app: same rules, same groups) ---------
+
+const textOrder = (a, b) => { const x = String(a || "").toLowerCase(), y = String(b || "").toLowerCase(); return x < y ? -1 : x > y ? 1 : 0; };
+const ENTRY_RANK = { appointment: 0, phase: 1, task: 2 };
+const ROLE_RANK = { starts: 0, finishes: 1, "under way": 2, running: 3 };
+/** Visits first (all-day before timed, then by time), then phases (starting before finishing), then task cards; ties by name. */
+const entryOrder = (a, b) => a.day - b.day || ENTRY_RANK[a.type] - ENTRY_RANK[b.type] || (a.minutes ?? -1) - (b.minutes ?? -1)
+  || (ROLE_RANK[a.role] ?? 0) - (ROLE_RANK[b.role] ?? 0) || textOrder(a.name, b.name);
+
+/**
+ * What's coming up from today through the Sunday that ends week `weeks` (this week is the first),
+ * with what's behind on top.
+ *  - Phases: not Done, dated, running on at least one day of the window.
+ *  - Appointments: every occurrence in the window, repeating ones included; a visit spanning
+ *    several days is listed once, on its first day in the window.
+ *  - Task cards: due in the window and not in a Done-like bucket.
+ *  - Behind: phases that should have started or finished and haven't (the timeline's "late"
+ *    rule), and task cards whose due date has passed.
+ * Grouped by day (phases under way right through the window first, then each day that has
+ * something on it) or by trade (each phase's trade, with the visits and cards linked to it; a
+ * trade-less group last).
+ */
+function buildLookAhead(ctx, sc, weeks, groupBy) {
+  const today = sc.today;
+  const first = today;
+  const last = today - (schedule.isoWeekday(today) - 1) + 7 * Math.min(6, Math.max(1, weeks)) - 1;
+  const inWindow = (d) => d >= first && d <= last;
+  const phaseWith = (list, id) => sc.phases.find((p) => p[list].includes(id));
+  const span = (s, e) => (s === e ? schedule.fmtDay(s) : `${schedule.fmtDay(s)} to ${schedule.fmtDay(e)}`);
+
+  const behind = sc.phases.filter((p) => schedule.isLate(p, today)).map((p) => {
+    if (p.status === "Not started" && p.startDay !== null && today > p.startDay) return { p, reason: "should have started", since: p.startDay };
+    return p.endDay !== null ? { p, reason: "should have finished", since: p.endDay } : null;
+  }).filter(Boolean).sort((a, b) => a.since - b.since || textOrder(a.p.name, b.p.name));
+
+  const due = sc.tasks.filter((t) => !schedule.isDoneStatus(t.status) && t.dueDate !== undefined && t.dueDate !== null)
+    .map((t) => ({ t, day: msToDay(Number(t.dueDate), ctx.tz) }));
+  const overdue = due.filter((x) => x.day < today).sort((a, b) => a.day - b.day || textOrder(a.t.title, b.t.title));
+
+  const running = sc.phases.filter((p) => p.status !== "Done" && p.startDay !== null && p.endDay !== null && p.endDay >= first && p.startDay <= last)
+    .map((p) => ({ p, startsIn: inWindow(p.startDay), endsIn: inWindow(p.endDay), late: schedule.isLate(p, today) }));
+
+  const fromMs = dayToMs(first, ctx.tz), toMs = dayToMs(last + 1, ctx.tz) - 1;
+  const visits = sc.appts.flatMap((a) => expandAppointment(a, fromMs, toMs, ctx.tz).map((inst) => {
+    const clock = utcToZoned(inst.instanceStart, ctx.tz);
+    return { a, inst, day: Math.max(first, msToDay(inst.instanceStart, ctx.tz)), minutes: a.isAllDay ? null : clock.h * 60 + clock.mi };
+  }));
+
+  // One line of the look-ahead, as data.
+  const phaseEntry = (r, role, day) => ({
+    type: "phase", role, day, name: r.p.name,
+    view: cleanForWrite({
+      type: "phase", id: r.p.id, name: r.p.name, what: role === "running" ? undefined : role,
+      dates: span(r.p.startDay, r.p.endDay), status: r.p.status, trade: r.p.trade.trim() || undefined, late: r.late || undefined,
+    }),
+  });
+  const visitEntry = (v) => ({
+    type: "appointment", day: v.day, minutes: v.minutes, name: v.a.title,
+    view: cleanForWrite({
+      type: "appointment", id: v.a.id, title: v.a.title, day: schedule.fmtDay(v.day),
+      time: v.a.isAllDay ? "all day" : fmtDateTime(v.inst.instanceStart, ctx.tz).split(" ").slice(2).join(" "),
+      location: v.a.location || undefined, phase: phaseWith("appointmentIds", v.a.id)?.name,
+    }),
+  });
+  const dueEntry = (x) => {
+    const p = checklistProgress(x.t);
+    return {
+      type: "task", day: x.day, name: x.t.title,
+      view: cleanForWrite({
+        type: "task", id: x.t.id, title: x.t.title, due: schedule.fmtDay(x.day), status: x.t.status,
+        checklist: p.total ? `${p.done}/${p.total} done` : undefined, phase: phaseWith("taskIds", x.t.id)?.name,
+      }),
+    };
+  };
+  const dueInWindow = due.filter((x) => inWindow(x.day));
+
+  let groups;
+  if (groupBy === "trade") {
+    const tradeOf = (p) => (p?.trade || "").trim();
+    const key = (trade) => trade.toLowerCase().split(" ").filter(Boolean).join(" ");
+    const entries = [
+      ...running.map((r) => [tradeOf(r.p), phaseEntry(r, "running", Math.max(r.p.startDay, first))]),
+      ...visits.map((v) => [tradeOf(phaseWith("appointmentIds", v.a.id)), visitEntry(v)]),
+      ...dueInWindow.map((x) => [tradeOf(phaseWith("taskIds", x.t.id)), dueEntry(x)]),
+    ];
+    const byKey = new Map();
+    for (const [trade, entry] of entries) {
+      if (!byKey.has(key(trade))) byKey.set(key(trade), { trade, entries: [] }); // the first spelling met is the one shown
+      byKey.get(key(trade)).entries.push(entry);
+    }
+    const all = [...byKey.values()].map((g) => ({ ...g, entries: g.entries.sort(entryOrder) }));
+    const named = all.filter((g) => g.trade).sort((a, b) => a.entries[0].day - b.entries[0].day || textOrder(a.trade, b.trade));
+    groups = [...named, ...all.filter((g) => !g.trade)].map((g) => ({ trade: g.trade || "No trade", items: g.entries.map((e) => e.view) }));
+  } else {
+    const underWay = running.filter((r) => !r.startsIn && !r.endsIn).map((r) => phaseEntry(r, "under way", first)).sort(entryOrder);
+    const dated = [
+      ...running.filter((r) => r.startsIn).map((r) => phaseEntry(r, "starts", r.p.startDay)),
+      ...running.filter((r) => r.endsIn).map((r) => phaseEntry(r, "finishes", r.p.endDay)),
+      ...visits.map(visitEntry),
+      ...dueInWindow.map(dueEntry),
+    ];
+    const days = [...new Set(dated.map((e) => e.day))].sort((a, b) => a - b);
+    groups = [
+      ...(underWay.length ? [{ heading: "Under way", items: underWay.map((e) => e.view) }] : []),
+      ...days.map((d) => ({ day: schedule.fmtDay(d), items: dated.filter((e) => e.day === d).sort(entryOrder).map((e) => e.view) })),
+    ];
+  }
+
+  return {
+    project: sc.project.name,
+    today: schedule.fmtDay(today),
+    window: { from: schedule.fmtDay(first), to: schedule.fmtDay(last), weeks: Math.min(6, Math.max(1, weeks)) },
+    behind: {
+      phases: behind.map((b) => ({ id: b.p.id, name: b.p.name, reason: b.reason, since: schedule.fmtDay(b.since), status: b.p.status })),
+      overdueTasks: overdue.map((x) => cleanForWrite({ id: x.t.id, title: x.t.title, due: schedule.fmtDay(x.day), status: x.t.status, phase: phaseWith("taskIds", x.t.id)?.name })),
+    },
+    counts: { phases: running.length, appointments: visits.length, tasks: dueInWindow.length },
+    groupBy: groupBy === "trade" ? "trade" : "day",
+    groups,
+  };
+}
+
 // --- contacts ---------------------------------------------------------------------------------
 
 async function loadContacts(ctx) {
@@ -1416,6 +1538,19 @@ function buildServer(ctx) {
       await batch.commit();
       const after = await loadSchedule(ctx, p);
       return json({ shifted: true, project: p.name, ...cascadeView(ctx, plan.moves, linked), totals: scheduleTotals(after) });
+    });
+
+  reg("look_ahead",
+    "The look-ahead for a project: what is coming up from today through the end of this week, or 2 or 3 weeks (up to 6) - the phases running or starting, the site-calendar appointments (repeating ones expanded) and the task cards due - grouped by day or by trade, with a Behind section on top: phases that should have started or finished and haven't, and overdue task cards. The same as the Look-ahead view on the app's Schedule tab.",
+    {
+      project: z.string().describe("Project name or ID"),
+      weeks: z.number().int().min(1).max(6).optional().describe("1 = this week, 2 (default) or 3 weeks; counts this week as the first"),
+      groupBy: z.enum(["day", "trade"]).optional().describe("day (default): what happens on each day; trade: by each phase's trade, with its linked visits and cards"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      return json(buildLookAhead(ctx, sc, a.weeks || 2, a.groupBy || "day"));
     });
 
   reg("delete_phase",

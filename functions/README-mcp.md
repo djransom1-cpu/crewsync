@@ -49,7 +49,7 @@ Keys are stored hashed in `mcp_access_keys`; logins in `mcp_oauth_tokens`.
 | Tasks | `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task` |
 | Checklists | `add_checklist_items` (appends, never duplicates), `set_checklist_item`, `remove_checklist_item` |
 | Calendar | `list_appointments` (expands Daily/Weekly/Monthly), `create_appointment`, `update_appointment`, `delete_appointment` |
-| Schedule | `list_schedule`, `get_phase`, `create_phase`, `update_phase`, `delete_phase`, `link_to_phase`, `unlink_from_phase`, `import_schedule` (with `dryRun`), `set_baseline`, `shift_phase` (with `cascade`, `dryRun`) |
+| Schedule | `list_schedule`, `get_phase`, `create_phase`, `update_phase`, `delete_phase`, `link_to_phase`, `unlink_from_phase`, `import_schedule` (with `dryRun`), `set_baseline`, `shift_phase` (with `cascade`, `dryRun`), `look_ahead` |
 | Contacts | `list_contacts`, `create_contact`, `update_contact`, `delete_contact` |
 | Files | `list_files` (names, folders, download URLs) |
 | Crew | `list_team`, `create_broadcast` |

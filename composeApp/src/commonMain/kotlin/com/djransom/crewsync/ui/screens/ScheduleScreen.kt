@@ -118,12 +118,13 @@ fun ScheduleTab(
     }
 }
 
-/** The two ways the Schedule tab shows the phases. */
-enum class ScheduleView { Timeline, List }
+/** The ways the Schedule tab shows the phases: the timeline, the list, and the look-ahead (ScheduleLookAheadView.kt). */
+enum class ScheduleView { Timeline, List, LookAhead }
 
 /**
- * The schedule with its toolbar: Timeline or List, and for the timeline the zoom (weeks or
- * months) and Fit. [today] and [zone] can be pinned so a screenshot comes out the same every day.
+ * The schedule with its toolbar: Timeline, List or Look-ahead; for the timeline the zoom (weeks or
+ * months) and Fit; for the look-ahead how many weeks, and whether by day or by trade. [today] and
+ * [zone] can be pinned so a screenshot comes out the same every day.
  */
 @Composable
 fun ScheduleContent(
@@ -139,10 +140,15 @@ fun ScheduleContent(
     onPresent: (() -> Unit)? = null,
     actions: ScheduleActions? = null,      // null: read-only, no Add / Edit
     contacts: List<Contact> = emptyList(),
-    projectId: String = ""
+    projectId: String = "",
+    initialLookWeeks: Int = 2,
+    initialLookByTrade: Boolean = false
 ) {
     var viewName by rememberSaveable { mutableStateOf(initialView.name) }
-    val view = if (viewName == ScheduleView.List.name) ScheduleView.List else ScheduleView.Timeline
+    val view = ScheduleView.entries.firstOrNull { it.name == viewName } ?: ScheduleView.Timeline
+    // The look-ahead's settings: this week, two or three weeks; by day or by trade.
+    var lookWeeks by rememberSaveable { mutableStateOf(initialLookWeeks) }
+    var lookByTrade by rememberSaveable { mutableStateOf(initialLookByTrade) }
     // The card and the edit screen follow the phase by id, so they show the latest if it changes while they're open.
     var openPhaseId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingPhaseId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -200,7 +206,9 @@ fun ScheduleContent(
         Column(modifier = modifier.fillMaxSize()) {
             ScheduleToolbar(
                 view, onView = { viewName = it.name }, timeline = timelineState, onPresent = onPresent,
-                onAddPhase = if (actions != null) ({ addingPhase = true }) else null
+                onAddPhase = if (actions != null) ({ addingPhase = true }) else null,
+                lookWeeks = lookWeeks, onLookWeeks = { lookWeeks = it },
+                lookByTrade = lookByTrade, onLookByTrade = { lookByTrade = it }
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             actions?.error?.let { problem ->
@@ -228,6 +236,10 @@ fun ScheduleContent(
                     }
                 )
                 ScheduleView.List -> ScheduleList(phases = phases, tasks = tasks, calendar = calendar, zone = zone, onPhaseClick = { openPhaseId = it.id })
+                ScheduleView.LookAhead -> ScheduleLookAheadView(
+                    phases = phases, tasks = tasks, appointments = appointments, weeks = lookWeeks, byTrade = lookByTrade,
+                    today = today, zone = zone, onPhaseClick = { openPhaseId = it.id }
+                )
             }
         }
     }
@@ -316,7 +328,8 @@ private fun ScheduleNotice(text: String, primary: Pair<String, () -> Unit>, seco
 @Composable
 private fun ScheduleToolbar(
     view: ScheduleView, onView: (ScheduleView) -> Unit, timeline: ScheduleTimelineState,
-    onPresent: (() -> Unit)?, onAddPhase: (() -> Unit)?
+    onPresent: (() -> Unit)?, onAddPhase: (() -> Unit)?,
+    lookWeeks: Int, onLookWeeks: (Int) -> Unit, lookByTrade: Boolean, onLookByTrade: (Boolean) -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp),
@@ -325,6 +338,7 @@ private fun ScheduleToolbar(
     ) {
         FilterChip(selected = view == ScheduleView.Timeline, onClick = { onView(ScheduleView.Timeline) }, label = { Text(t("Timeline")) })
         FilterChip(selected = view == ScheduleView.List, onClick = { onView(ScheduleView.List) }, label = { Text(t("List")) })
+        FilterChip(selected = view == ScheduleView.LookAhead, onClick = { onView(ScheduleView.LookAhead) }, label = { Text(t("Look-ahead")) })
         // Presentation mode: the schedule on its own, full-screen, for the meeting-room screen.
         if (onPresent != null) {
             AssistChip(
@@ -353,6 +367,15 @@ private fun ScheduleToolbar(
                 onClick = { timeline.fit() }, label = { Text(t("Fit")) },
                 leadingIcon = { Icon(Icons.Default.FitScreen, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
             )
+        }
+        if (view == ScheduleView.LookAhead) {
+            Spacer(Modifier.width(12.dp))
+            FilterChip(selected = lookWeeks == 1, onClick = { onLookWeeks(1) }, label = { Text(t("This week")) })
+            FilterChip(selected = lookWeeks == 2, onClick = { onLookWeeks(2) }, label = { Text(t("2 weeks")) })
+            FilterChip(selected = lookWeeks == 3, onClick = { onLookWeeks(3) }, label = { Text(t("3 weeks")) })
+            Spacer(Modifier.width(12.dp))
+            FilterChip(selected = !lookByTrade, onClick = { onLookByTrade(false) }, label = { Text(t("By day")) })
+            FilterChip(selected = lookByTrade, onClick = { onLookByTrade(true) }, label = { Text(t("By trade")) })
         }
     }
 }

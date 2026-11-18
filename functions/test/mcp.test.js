@@ -543,6 +543,78 @@ async function main() {
   r = await call("shift_phase", { project: hansen, phase: "Punch list", days: 2 }); assert(r.error && /no dates to shift/.test(r.error));
   console.log("schedule shifting ok");
 
+  // ---- look-ahead: the same scenario as the app's ScheduleLookAheadTest.kt, with "today" pinned to Wed Nov 18, 2026 ----
+  {
+    const realNow = Date.now;
+    Date.now = () => parseDate("2026-11-18T08:00", tz);
+    try {
+      const la = "Lookahead Test";
+      r = await call("create_project", { name: la }); assert.strictEqual(r.created, true);
+      const ph = (name, start, end, extra) => call("create_phase", { project: la, name, start, end, ...extra });
+      await ph("Roof complete", "2026-09-21", "2026-12-11", { status: "In progress", trade: "Roofing" });
+      await ph("Siding", "2026-09-21", "2026-11-15", { status: "In progress" });
+      await ph("Septic & grading", "2026-10-15", "2026-11-15", { status: "On hold" });
+      await ph("Remaining concrete", "2026-11-01", "2026-11-15");
+      await ph("Electrical service", "2026-10-05", "2026-10-09", { status: "Done" });
+      await ph("Mechanical & plumbing", "2026-10-15", "2026-11-19", { status: "In progress", trade: "Mechanical" });
+      await ph("Electrical rough-in", "2026-10-29", "2026-11-19", { trade: " electrical " });
+      await ph("Insulation", "2026-11-19", "2026-12-04");
+      await ph("Drywall", "2026-12-04", "2027-01-04");
+      await call("create_task", { project: la, title: "Septic permit", status: "In Progress", dueDate: "2026-11-13" });
+      await call("create_task", { project: la, title: "Flashing at chimney", dueDate: "2026-11-20" });
+      await call("create_task", { project: la, title: "Order insulation", status: "Done", dueDate: "2026-11-19" });
+      await call("create_appointment", { project: la, title: "Weekly Meeting", start: "2026-10-13T09:00", recurrence: "Weekly" });
+      await call("create_appointment", { project: la, title: "Roofer on site - ridge and flashing", start: "2026-11-20T07:30", end: "2026-11-20T15:00" });
+      await call("create_appointment", { project: la, title: "Insulation delivery", start: "2026-11-19", isAllDay: true });
+      await call("create_appointment", { project: la, title: "Walk-through", start: "2026-11-10T09:00" });
+      await call("link_to_phase", { project: la, phase: "Roof complete", tasks: ["Flashing at chimney"], appointments: ["Weekly Meeting", "Roofer on site - ridge and flashing"] });
+
+      const names = (groups) => groups.map((g) => [g.day || g.trade || g.heading, g.items.map((i) => (i.type === "phase" ? `${i.name} ${i.what || "running"}` : `${i.type === "task" ? "due" : "visit"} ${i.name || i.title}`))]);
+      r = await call("look_ahead", { project: la, weeks: 1 });
+      assert.deepStrictEqual(r.window, { from: "Wed 2026-11-18", to: "Sun 2026-11-22", weeks: 1 });
+      assert.deepStrictEqual(r.behind.phases.map((b) => [b.name, b.reason, b.since]), [
+        ["Electrical rough-in", "should have started", "Thu 2026-10-29"],
+        ["Remaining concrete", "should have started", "Sun 2026-11-01"],
+        ["Septic & grading", "should have finished", "Sun 2026-11-15"],   // on hold, past its end
+        ["Siding", "should have finished", "Sun 2026-11-15"],             // in progress, past its end
+      ]);
+      assert.deepStrictEqual(r.behind.overdueTasks.map((t) => [t.title, t.due]), [["Septic permit", "Fri 2026-11-13"]]);
+      assert.deepStrictEqual(r.counts, { phases: 4, appointments: 2, tasks: 1 }, "the Done card and the past walk-through are left out");
+      assert.strictEqual(r.groupBy, "day");
+      assert.deepStrictEqual(names(r.groups), [
+        ["Under way", ["Roof complete under way"]],
+        ["Thu 2026-11-19", ["visit Insulation delivery", "Insulation starts", "Electrical rough-in finishes", "Mechanical & plumbing finishes"]],
+        ["Fri 2026-11-20", ["visit Roofer on site - ridge and flashing", "due Flashing at chimney"]],
+      ]);
+      const roofer = r.groups[2].items[0];
+      assert.deepStrictEqual([roofer.day, roofer.time, roofer.phase], ["Fri 2026-11-20", "7:30 AM", "Roof complete"]);
+      assert.strictEqual(r.groups[1].items[0].time, "all day");
+      assert.strictEqual(r.groups[1].items[2].late, true);
+
+      r = await call("look_ahead", { project: la, groupBy: "trade" });
+      assert.deepStrictEqual(r.window, { from: "Wed 2026-11-18", to: "Sun 2026-11-29", weeks: 2 }, "two weeks by default");
+      assert.deepStrictEqual(names(r.groups), [
+        ["electrical", ["Electrical rough-in running"]],
+        ["Mechanical", ["Mechanical & plumbing running"]],
+        ["Roofing", ["Roof complete running", "visit Roofer on site - ridge and flashing", "due Flashing at chimney", "visit Weekly Meeting"]],
+        ["No trade", ["visit Insulation delivery", "Insulation running"]],
+      ]);
+      assert.strictEqual(r.groups[2].items[3].day, "Tue 2026-11-24", "the Tuesday meeting comes round");
+
+      r = await call("look_ahead", { project: la, weeks: 3 });
+      assert.strictEqual(r.window.to, "Sun 2026-12-06");
+      const byDay = Object.fromEntries(names(r.groups));
+      assert.deepStrictEqual(byDay["Fri 2026-12-04"], ["Drywall starts", "Insulation finishes"], "a phase starting and finishing inside the window is listed on both days");
+      assert.deepStrictEqual(byDay["Tue 2026-12-01"], ["visit Weekly Meeting"]);
+
+      r = await call("look_ahead", { project: "pT" });
+      assert.deepStrictEqual([r.counts, r.groups, r.behind.phases], [{ phases: 0, appointments: 0, tasks: 0 }, [], []], "a project with nothing coming up");
+    } finally {
+      Date.now = realNow;
+    }
+  }
+  console.log("look-ahead ok");
+
   r = await call("delete_task", { task: newId }); assert(/Deleted/.test(r));
   console.log("ALL TESTS PASSED");
 }
