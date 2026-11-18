@@ -17,6 +17,9 @@ fun DocumentSnapshot.toProjectSafe(): Project {
             val envId: String = try { this.get("environmentId") } catch (_: Exception) { "" }
             val shareEnabled: Boolean = try { this.get("calendarShareEnabled") } catch (_: Exception) { false }
             val shareToken: String = try { this.get("calendarShareToken") } catch (_: Exception) { "" }
+            val isArchived: Boolean = try { this.get("archived") } catch (_: Exception) { false }
+            val holidays: List<String> = try { this.get("scheduleHolidays") } catch (_: Exception) { emptyList() }
+            val week: List<Int> = try { this.get("workWeek") } catch (_: Exception) { listOf(1, 2, 3, 4, 5) }
             Project(
                 id = this.id,
                 environmentId = envId,
@@ -27,7 +30,10 @@ fun DocumentSnapshot.toProjectSafe(): Project {
                 location = locationStr,
                 calendarShareEnabled = shareEnabled,
                 calendarShareToken = shareToken,
-                createdAt = created
+                createdAt = created,
+                archived = isArchived,
+                scheduleHolidays = holidays,
+                workWeek = week
             )
         } catch (_: Exception) {
             Project(id = this.id, name = "Project ${this.id.take(4)}")
@@ -212,6 +218,7 @@ fun com.djransom.crewsync.data.model.Project.toFirestoreMap(): Map<String, Any?>
     map["cardSizes"] = cardSizes
     map["calendarShareEnabled"] = calendarShareEnabled
     map["calendarShareToken"] = calendarShareToken
+    map["archived"] = archived
     return map
 }
 
@@ -314,4 +321,207 @@ fun DocumentSnapshot.toProjectFileSafe(): ProjectFile {
             ProjectFile(id = this.id, name = "File ${this.id.take(4)}")
         }
     }
+}
+
+// ---- Daily logs (projects/{projectId}/dailyLogs/{date}) ----------------------------------------
+
+fun DailyLog.toFirestoreMap(): Map<String, Any?> {
+    val map = mutableMapOf<String, Any?>()
+    map["id"] = id
+    map["projectId"] = projectId
+    map["date"] = date
+    map["weather"] = weather
+    if (weatherReadings.isNotEmpty()) map["weatherReadings"] = weatherReadings
+    // Same empty-list rule as Task.toFirestoreMap(): GitLive's JS encoder can't take an empty
+    // array through the Any-typed path, and a missing key decodes back to emptyList() anyway.
+    if (crewOnSite.isNotEmpty()) map["crewOnSite"] = crewOnSite
+    if (workCompleted.isNotEmpty()) map["workCompleted"] = workCompleted
+    if (deliveriesInspections.isNotEmpty()) map["deliveriesInspections"] = deliveriesInspections
+    if (issuesDelays.isNotEmpty()) map["issuesDelays"] = issuesDelays
+    if (tomorrowPlan.isNotEmpty()) map["tomorrowPlan"] = tomorrowPlan
+    map["notes"] = notes
+    if (photos.isNotEmpty()) map["photos"] = photos
+    if (entries.isNotEmpty()) map["entries"] = entries
+    if (contributors.isNotEmpty()) map["contributors"] = contributors
+    map["createdBy"] = createdBy
+    map["createdAt"] = createdAt.toDouble()
+    map["updatedBy"] = updatedBy
+    map["updatedAt"] = updatedAt.toDouble()
+    map["pdfUrl"] = pdfUrl
+    map["pdfBuiltAt"] = pdfBuiltAt.toDouble()
+    return map
+}
+
+fun DocumentSnapshot.toDailyLogSafe(): DailyLog {
+    return try {
+        this.data<DailyLog>().copy(id = this.id, date = this.id)
+    } catch (_: Exception) {
+        fun str(k: String): String = try { this.get<String>(k) } catch (_: Exception) { "" }
+        fun strList(k: String): List<String> = try { this.get<List<String>>(k) } catch (_: Exception) { emptyList() }
+        fun long(k: String): Long = try { this.get<Double>(k).toLong() } catch (_: Exception) { try { this.get<Long>(k) } catch (_: Exception) { 0L } }
+        DailyLog(
+            id = this.id,
+            projectId = str("projectId"),
+            date = this.id,
+            weather = str("weather"),
+            crewOnSite = strList("crewOnSite"),
+            workCompleted = strList("workCompleted"),
+            deliveriesInspections = strList("deliveriesInspections"),
+            issuesDelays = strList("issuesDelays"),
+            tomorrowPlan = strList("tomorrowPlan"),
+            notes = str("notes"),
+            contributors = strList("contributors"),
+            createdBy = str("createdBy"),
+            createdAt = long("createdAt"),
+            updatedBy = str("updatedBy"),
+            updatedAt = long("updatedAt"),
+            pdfUrl = str("pdfUrl"),
+            pdfBuiltAt = long("pdfBuiltAt")
+        )
+    }
+}
+
+// ---- Schedule phases (projects/{projectId}/schedulePhases/{id}) --------------------------------
+
+fun SchedulePhase.toFirestoreMap(): Map<String, Any?> {
+    val map = mutableMapOf<String, Any?>()
+    if (id.isNotEmpty()) map["id"] = id
+    map["projectId"] = projectId
+    map["environmentId"] = environmentId
+    map["name"] = name
+    map["group"] = group
+    map["order"] = order
+    // Dates go out as Doubles like every other epoch-millis field in this file; a phase with no
+    // date yet simply has no key (it reads back as null).
+    if (start != null) map["start"] = start.toDouble()
+    if (end != null) map["end"] = end.toDouble()
+    map["durationDays"] = durationDays
+    map["isMilestone"] = isMilestone
+    // Same empty-list rule as Task.toFirestoreMap(): GitLive's JS encoder can't take an empty
+    // array through the Any-typed path, and a missing key decodes back to emptyList() anyway.
+    if (predecessors.isNotEmpty()) map["predecessors"] = predecessors
+    map["trade"] = trade
+    map["contactId"] = contactId
+    map["contactName"] = contactName
+    map["status"] = status
+    map["percentComplete"] = percentComplete
+    map["percentMode"] = percentMode
+    if (baselineStart != null) map["baselineStart"] = baselineStart.toDouble()
+    if (baselineEnd != null) map["baselineEnd"] = baselineEnd.toDouble()
+    map["notes"] = notes
+    if (color.isNotBlank()) map["color"] = color
+    if (taskIds.isNotEmpty()) map["taskIds"] = taskIds
+    if (appointmentIds.isNotEmpty()) map["appointmentIds"] = appointmentIds
+    map["createdAt"] = createdAt.toDouble()
+    map["updatedAt"] = updatedAt.toDouble()
+    map["updatedBy"] = updatedBy
+    return map
+}
+
+fun DocumentSnapshot.toSchedulePhaseSafe(): SchedulePhase {
+    return try {
+        this.data<SchedulePhase>().copy(id = this.id).normalized()
+    } catch (_: Exception) {
+        // The typed decode is all-or-nothing: one field of the wrong type (a date typed in as
+        // text, a null where a string belongs) fails the whole document. Rather than drop the
+        // phase off the schedule, rebuild it field by field and default whatever can't be read.
+        schedulePhaseFromFields(this.id) { key -> loosePhaseField(key) }
+    }
+}
+
+/**
+ * One field of a phase document read on its own, or null if it's missing or can't be read.
+ * Each field has to be asked for as a definite type - the Firestore library can't hand back
+ * "whatever is there" (get<Any?> has no serializer and always throws) - so numbers are read as
+ * numbers, lists as lists and everything else as text. The library is forgiving within a type
+ * (a number stored as text still reads as a number); see GitLiveDecodingTest for exactly what
+ * it accepts.
+ */
+private fun DocumentSnapshot.loosePhaseField(key: String): Any? = when (key) {
+    "predecessors" -> tryGet<List<PhasePredecessor>>(key)
+    "taskIds", "appointmentIds" -> tryGet<List<String>>(key)
+    "isMilestone" -> tryGet<Boolean>(key)
+    "order", "start", "end", "durationDays", "percentComplete",
+    "baselineStart", "baselineEnd", "createdAt", "updatedAt" -> tryGet<Double>(key)
+    else -> tryGet<String>(key)
+}
+
+private inline fun <reified T> DocumentSnapshot.tryGet(key: String): T? =
+    try { this.get<T?>(key) } catch (_: Exception) { null }
+
+/**
+ * Builds a phase from loose fields, tolerating anything missing or of the wrong type: numbers
+ * may arrive as Int, Long, Double or numeric text, lists may hold junk entries, and every field
+ * falls back to the model's default. [read] returns the raw value stored under a field name, or
+ * null. Kept free of Firestore types so it can be unit-tested (see SchedulePhaseParsingTest).
+ */
+fun schedulePhaseFromFields(id: String, read: (String) -> Any?): SchedulePhase {
+    fun str(k: String): String = (read(k) as? String) ?: ""
+    fun longOrNull(k: String): Long? = numberOrNull(read(k))?.toLong()
+    fun int(k: String): Int = numberOrNull(read(k))?.toInt() ?: 0
+    fun strList(k: String): List<String> =
+        (read(k) as? List<*>)?.mapNotNull { (it as? String)?.takeIf { s -> s.isNotBlank() } } ?: emptyList()
+    val preds = (read("predecessors") as? List<*>)?.mapNotNull { raw ->
+        when (raw) {
+            is PhasePredecessor -> raw
+            is Map<*, *> -> PhasePredecessor(
+                phaseId = (raw["phaseId"] as? String) ?: "",
+                type = (raw["type"] as? String) ?: PredecessorType.FS,
+                lagDays = numberOrNull(raw["lagDays"])?.toInt() ?: 0
+            )
+            else -> null
+        }
+    } ?: emptyList()
+    return SchedulePhase(
+        id = id,
+        projectId = str("projectId"),
+        environmentId = str("environmentId"),
+        name = str("name"),
+        group = str("group"),
+        order = numberOrNull(read("order"))?.toDouble() ?: 0.0,
+        start = longOrNull("start"),
+        end = longOrNull("end"),
+        durationDays = int("durationDays"),
+        isMilestone = (read("isMilestone") as? Boolean) ?: false,
+        predecessors = preds,
+        trade = str("trade"),
+        contactId = str("contactId"),
+        contactName = str("contactName"),
+        status = str("status"),
+        percentComplete = int("percentComplete"),
+        percentMode = str("percentMode"),
+        baselineStart = longOrNull("baselineStart"),
+        baselineEnd = longOrNull("baselineEnd"),
+        notes = str("notes"),
+        color = str("color"),
+        taskIds = strList("taskIds"),
+        appointmentIds = strList("appointmentIds"),
+        createdAt = longOrNull("createdAt") ?: 0L,
+        updatedAt = longOrNull("updatedAt") ?: 0L,
+        updatedBy = str("updatedBy")
+    ).normalized()
+}
+
+/**
+ * Tidies values that are readable but out of range, whichever way the phase was decoded: an
+ * unknown status becomes "Not started", percent is held to 0-100, a predecessor with no phase
+ * (or pointing at this phase itself) is dropped, and links are de-duplicated.
+ */
+fun SchedulePhase.normalized(): SchedulePhase = copy(
+    status = PhaseStatus.normalize(status),
+    percentMode = PercentMode.normalize(percentMode),
+    percentComplete = percentComplete.coerceIn(0, 100),
+    durationDays = durationDays.coerceAtLeast(0),
+    predecessors = predecessors
+        .filter { it.phaseId.isNotBlank() && it.phaseId != id }
+        .map { it.copy(type = PredecessorType.normalize(it.type)) }
+        .distinctBy { it.phaseId },
+    taskIds = taskIds.distinct(),
+    appointmentIds = appointmentIds.distinct()
+)
+
+private fun numberOrNull(v: Any?): Number? = when (v) {
+    is Number -> v
+    is String -> v.trim().toDoubleOrNull()
+    else -> null
 }

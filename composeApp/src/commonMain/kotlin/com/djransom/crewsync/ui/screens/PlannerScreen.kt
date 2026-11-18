@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.i18n.t
 import com.djransom.crewsync.i18n.numericDate
 import androidx.compose.foundation.background
@@ -67,7 +68,13 @@ import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlannerScreen(projectId: String, environmentId: String, projectName: String, projectBuckets: List<String>, projectMembers: List<String>) {
+fun PlannerScreen(
+    projectId: String, environmentId: String, projectName: String, projectBuckets: List<String>, projectMembers: List<String>,
+    // The project's schedule phases and how to put a task on one - for the Phase chip in the
+    // task card's details. The link is kept on the phase, so the task itself is never rewritten for it.
+    phases: List<SchedulePhase> = emptyList(),
+    onSetTaskPhase: ((taskId: String, phaseId: String?) -> Unit)? = null
+) {
     val firestore = Firebase.firestore
     val scope = rememberCoroutineScope()
 
@@ -469,7 +476,10 @@ fun PlannerScreen(projectId: String, environmentId: String, projectName: String,
                 selectedTask = null
                 pendingDeleteTaskId = taskId
             },
-            onPrint = { printPlannerTask(projectName, it, userMap) }
+            onPrint = { printPlannerTask(projectName, it, userMap) },
+            phases = if (onSetTaskPhase != null) phases else emptyList(),
+            currentPhaseId = phaseOfTask(phases, selectedTask!!.id)?.id,
+            onPhaseChange = { taskId, phaseId -> onSetTaskPhase?.invoke(taskId, phaseId) }
         )
     }
 
@@ -1416,12 +1426,17 @@ fun TaskDetailsDialog(
     onDismiss: () -> Unit,
     onSave: (Task) -> Unit,
     onDelete: (String) -> Unit,
-    onPrint: (Task) -> Unit
+    onPrint: (Task) -> Unit,
+    phases: List<SchedulePhase> = emptyList(),      // empty: no Phase chip (a project with no schedule)
+    currentPhaseId: String? = null,
+    onPhaseChange: (taskId: String, phaseId: String?) -> Unit = { _, _ -> }
 ) {
     var title by remember { mutableStateOf(task.title) }
     var description by remember { mutableStateOf(task.description) }
     var selectedMembers by remember { mutableStateOf(task.getAllAssignedEmails()) }
     var status by remember { mutableStateOf(task.status) }
+    // Which schedule phase the card is on. Like the other fields it only takes effect on Save.
+    var phaseId by remember { mutableStateOf(currentPhaseId) }
     var selectedColor by remember { mutableStateOf(task.color) }
     var checklistGroups by remember { mutableStateOf(task.checklistGroups) }
     var attachments by remember { mutableStateOf(task.attachments) }
@@ -1497,6 +1512,7 @@ fun TaskDetailsDialog(
                     label = { Text(t("Description")) },
                     modifier = Modifier.fillMaxWidth()
                 )
+                PhaseChip(phases = phases, selectedPhaseId = phaseId, onSelect = { phaseId = it })
 
                 // Multi-Assignee Picker
                 Column {
@@ -1652,7 +1668,10 @@ fun TaskDetailsDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onSave(currentEdits()) }) { Text(t("Save Changes")) }
+            Button(onClick = {
+                if (phaseId != currentPhaseId) onPhaseChange(task.id, phaseId)
+                onSave(currentEdits())
+            }) { Text(t("Save Changes")) }
         },
         dismissButton = {
             TextButton(onClick = { onDelete(task.id) }, colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)) {

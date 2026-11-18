@@ -46,12 +46,16 @@ import com.djransom.crewsync.util.downloadFile
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.firestore.firestore
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
 import com.djransom.crewsync.util.toProjectSafe
 import com.djransom.crewsync.util.toTaskSafe
+import com.djransom.crewsync.util.toDailyLogSafe
+import com.djransom.crewsync.util.toSchedulePhaseSafe
+import com.djransom.crewsync.util.workCalendar
 import com.djransom.crewsync.util.toFirestoreMap
 import com.djransom.crewsync.util.parseColor
 import coil3.compose.AsyncImage
@@ -75,6 +79,7 @@ fun ProjectDetailsScreen(
     var showAddMemberDialog by remember { mutableStateOf(false) }
     var showProjectAlertDialog by remember { mutableStateOf(false) }
     var showEditProjectDialog by remember { mutableStateOf(false) }
+    var showDeleteProjectDialog by remember { mutableStateOf(false) }
     var isUploading by remember { mutableStateOf(false) }
     var currentFolderId by remember { mutableStateOf<String?>(null) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
@@ -163,11 +168,32 @@ fun ProjectDetailsScreen(
     }
     val messages by messagesFlow.collectAsState(initial = emptyList())
 
+    val dailyLogsFlow = remember(projectId) {
+        firestore.collection("projects").document(projectId).collection("dailyLogs").snapshots
+            .map { snap -> snap.documents.map { it.toDailyLogSafe() }.sortedByDescending { it.date } }
+    }
+    val dailyLogs by dailyLogsFlow.collectAsState(initial = emptyList())
+
+    // The schedule's phases. Listened to here rather than inside the Schedule tab because the
+    // Planner and Calendar tabs need them too, for the Phase chip on a task or an appointment.
+    var scheduleLoadError by remember(projectId) { mutableStateOf<String?>(null) }
+    val schedulePhasesFlow: Flow<List<SchedulePhase>?> = remember(projectId) {
+        firestore.collection("projects").document(projectId).collection("schedulePhases").snapshots
+            .map { snap -> snap.documents.map { it.toSchedulePhaseSafe() } }
+            .catch { e -> scheduleLoadError = e.message ?: ""; emit(emptyList()) }
+    }
+    // null until the first answer arrives, so "loading" and "no schedule yet" don't look the same.
+    val schedulePhases by schedulePhasesFlow.collectAsState(initial = null)
+    val scheduleActions = rememberScheduleActions(projectId, environmentId, schedulePhases.orEmpty(), project?.buckets.orEmpty())
+
     // rememberSaveable, not remember - the Activity gets torn down and recreated on rotation
     // (no configChanges override in the manifest), and a plain remember would silently reset
     // this back to tab 0 (Dashboard), kicking users off whatever tab - Calendar, Files, etc. -
     // they were actually on.
     var selectedTab by rememberSaveable { mutableStateOf(0) }
+    // The schedule's presentation mode (the meeting-room view). Saveable for the same reason as
+    // the tab: turning a phone to landscape rebuilds the Activity.
+    var presentingSchedule by rememberSaveable { mutableStateOf(false) }
     val tabs = listOf(
         "Home" to Icons.Default.Home,
         "Team" to Icons.Default.Person,
@@ -175,7 +201,12 @@ fun ProjectDetailsScreen(
         "Chat" to Icons.Default.Email,
         "Planner" to Icons.AutoMirrored.Filled.List,
         "Calendar" to Icons.Default.DateRange,
-        "Notes" to Icons.Default.Edit
+        "Notes" to Icons.Default.Edit,
+        "Daily Log" to Icons.Default.Assignment,
+        // New tabs go on the END of this list: the Home screen's cards jump to tabs by their
+        // position here (see ProjectHomeScreen), so inserting one in the middle would send
+        // every card after it to the wrong tab.
+        "Schedule" to Icons.Default.Timeline
     )
 
     val isSuperAdmin = userProfile?.role == "SuperAdmin" || userProfile?.role == "Admin"
@@ -234,7 +265,14 @@ fun ProjectDetailsScreen(
         }
     }
 
-    ModalNavigationDrawer(
+    if (presentingSchedule && project != null) {
+        // Takes over the whole window: no drawer, no top bar, nothing to tap by mistake.
+        ScheduleTab(
+            projectId = projectId, project = project!!, tasks = tasks, appointments = appointments,
+            phases = schedulePhases, loadError = scheduleLoadError, actions = null,
+            presenting = true, onPresentingChange = { presentingSchedule = it }, logs = dailyLogs
+        )
+    } else ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet {
@@ -276,10 +314,13 @@ fun ProjectDetailsScreen(
                         }
                     },
                     actions = {
-                        if (isAdmin && selectedTab == 0) {
+                        // The project's creator (team leader) can edit, archive and delete it, not just admins
+                        if (isLeader && selectedTab == 0) {
                             IconButton(onClick = { showEditProjectDialog = true }) {
                                 Icon(Icons.Default.Edit, contentDescription = t("Edit Project"))
                             }
+                        }
+                        if (isAdmin && selectedTab == 0) {
                             IconButton(onClick = { showProjectAlertDialog = true }) {
                                 Icon(Icons.Default.Warning, contentDescription = t("Send Alert"), tint = MaterialTheme.colorScheme.error)
                             }
@@ -315,6 +356,7 @@ fun ProjectDetailsScreen(
                             messages = messages,
                             files = files,
                             notes = notes,
+                            dailyLogs = dailyLogs,
                             userMap = userMap,
                             userPicMap = userPicMap,
                             onMoveCard = { cardId, direction ->
@@ -390,7 +432,11 @@ fun ProjectDetailsScreen(
                                 }
                             }
                         )
-                        4 -> PlannerScreen(projectId = projectId, environmentId = environmentId, projectName = project!!.name, projectBuckets = project!!.buckets, projectMembers = project!!.members)
+                        4 -> PlannerScreen(
+                            projectId = projectId, environmentId = environmentId, projectName = project!!.name,
+                            projectBuckets = project!!.buckets, projectMembers = project!!.members,
+                            phases = schedulePhases.orEmpty(), onSetTaskPhase = scheduleActions::setTaskPhase
+                        )
                         5 -> CalendarScreen(
                             projectId = projectId,
                             tasks = tasks,
@@ -398,9 +444,22 @@ fun ProjectDetailsScreen(
                             canEdit = isLeader,
                             calendarShareEnabled = project!!.calendarShareEnabled,
                             calendarShareToken = project!!.calendarShareToken,
-                            firstDayOfWeek = userProfile?.firstDayOfWeek ?: "Sunday"
+                            firstDayOfWeek = userProfile?.firstDayOfWeek ?: "Sunday",
+                            phases = schedulePhases.orEmpty(), onSetAppointmentPhase = scheduleActions::setAppointmentPhase,
+                            scheduleActions = if (isLeader) scheduleActions else null, workCalendar = project!!.workCalendar()
                         )
                         6 -> NotesTab(projectId = projectId, notes = notes, currentUserEmail = auth.currentUser?.email ?: "")
+                        7 -> DailyLogTab(
+                            projectId = projectId, project = project!!, userMap = userMap, currentUserEmail = auth.currentUser?.email ?: "",
+                            phases = schedulePhases.orEmpty(), tasks = tasks, appointments = appointments, logs = dailyLogs
+                        )
+                        8 -> ScheduleTab(
+                            projectId = projectId, project = project!!, tasks = tasks, appointments = appointments,
+                            phases = schedulePhases, loadError = scheduleLoadError,
+                            // Same rule as the site calendar: the project's leader (or an admin) edits the schedule.
+                            actions = if (isLeader) scheduleActions else null,
+                            presenting = false, onPresentingChange = { presentingSchedule = it }, logs = dailyLogs
+                        )
                     }
                 }
             }
@@ -492,11 +551,100 @@ fun ProjectDetailsScreen(
                             doc.update("ownerEmail" to edits.ownerEmail)
                             showEditProjectDialog = false
                         }
+                    },
+                    onArchiveToggle = {
+                        val archive = !(project?.archived ?: false)
+                        scope.launch {
+                            firestore.collection("projects").document(projectId).update("archived" to archive)
+                            showEditProjectDialog = false
+                            if (archive) onBack()
+                        }
+                    },
+                    onDeleteRequest = {
+                        showEditProjectDialog = false
+                        showDeleteProjectDialog = true
+                    }
+                )
+            }
+
+            if (showDeleteProjectDialog && project != null) {
+                DeleteProjectDialog(
+                    project = project!!,
+                    onDismiss = { showDeleteProjectDialog = false },
+                    onDeleted = {
+                        showDeleteProjectDialog = false
+                        onBack()
                     }
                 )
             }
         }
     }
+}
+
+/**
+ * Permanently deletes a project and everything in it (tasks, calendar, files, photos, notes, chat) through the
+ * deleteProject Cloud Function, which checks the caller made the project or is an admin. He has to type the
+ * project's name first so a real job can't go by accident.
+ */
+@Composable
+fun DeleteProjectDialog(project: Project, onDismiss: () -> Unit, onDeleted: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var typed by remember(project.id) { mutableStateOf("") }
+    var working by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    // Compare letters and digits only, so punctuation, extra spaces, smart quotes or keyboard autocorrect
+    // of things like "(duplicate, ok to remove)" can't keep the button disabled
+    fun normalize(s: String) = s.filter { it.isLetterOrDigit() }.lowercase()
+    val matches = normalize(project.name).let { it.isNotEmpty() && normalize(typed) == it }
+
+    AlertDialog(
+        onDismissRequest = { if (!working) onDismiss() },
+        title = { Text(t("Delete Project Permanently")) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(t("This deletes {0} and everything in it: tasks, calendar, files and photos, notes and chat. It can't be undone.", project.name))
+                Text(
+                    t("If you might need it again, archive it instead."),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray
+                )
+                TextField(
+                    value = typed,
+                    onValueChange = { typed = it; error = null },
+                    label = { Text(t("Type the project name to confirm")) },
+                    placeholder = { Text(project.name) },
+                    singleLine = true,
+                    enabled = !working,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(autoCorrectEnabled = false),
+                    supportingText = {
+                        if (typed.isNotBlank() && !matches) Text(t("Doesn't match \"{0}\" yet", project.name))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (working) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    working = true; error = null
+                    scope.launch {
+                        val problem = com.djransom.crewsync.util.deleteProjectForever(project.id)
+                        working = false
+                        if (problem == null) onDeleted() else error = problem
+                    }
+                },
+                enabled = matches && !working,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text(t("Delete Forever"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !working) { Text(t("Cancel")) }
+        }
+    )
 }
 
 @Composable
@@ -534,7 +682,13 @@ data class ProjectEdits(
 )
 
 @Composable
-fun EditProjectDialog(project: Project, onDismiss: () -> Unit, onConfirm: (ProjectEdits) -> Unit) {
+fun EditProjectDialog(
+    project: Project,
+    onDismiss: () -> Unit,
+    onConfirm: (ProjectEdits) -> Unit,
+    onArchiveToggle: () -> Unit = {},
+    onDeleteRequest: () -> Unit = {}
+) {
     var name by remember(project.id) { mutableStateOf(project.name) }
     var description by remember(project.id) { mutableStateOf(project.description) }
     var location by remember(project.id) { mutableStateOf(project.location) }
@@ -570,6 +724,25 @@ fun EditProjectDialog(project: Project, onDismiss: () -> Unit, onConfirm: (Proje
                 TextField(value = ownerName, onValueChange = { ownerName = it }, label = { Text(t("Owner Name")) }, modifier = Modifier.fillMaxWidth())
                 TextField(value = ownerPhone, onValueChange = { ownerPhone = it }, label = { Text(t("Owner Phone")) }, modifier = Modifier.fillMaxWidth())
                 TextField(value = ownerEmail, onValueChange = { ownerEmail = it }, label = { Text(t("Owner Email")) }, modifier = Modifier.fillMaxWidth())
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                Text(t("Manage Project"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(
+                    if (project.archived) t("This project is archived. Restore it to put it back on the dashboard.")
+                    else t("Archiving hides the project from the dashboard but keeps everything in it. You can restore it any time."),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray
+                )
+                OutlinedButton(onClick = onArchiveToggle, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (project.archived) t("Restore Project") else t("Archive Project"))
+                }
+                TextButton(
+                    onClick = onDeleteRequest,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(t("Delete Project Permanently…"))
+                }
             }
         },
         confirmButton = {

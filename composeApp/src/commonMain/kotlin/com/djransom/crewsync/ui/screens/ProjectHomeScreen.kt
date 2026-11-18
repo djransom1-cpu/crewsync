@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.djransom.crewsync.data.model.*
@@ -36,6 +37,7 @@ fun ProjectHomeScreen(
     messages: List<ChatMessage>,
     files: List<ProjectFile>,
     notes: List<Note>,
+    dailyLogs: List<DailyLog> = emptyList(),
     userMap: Map<String, String>,
     userPicMap: Map<String, String?>,
     onMoveCard: (String, Int) -> Unit,
@@ -45,7 +47,8 @@ fun ProjectHomeScreen(
     // Falls back to appending "Notes" for projects created before that card existed, since
     // their stored cardOrder won't include it - new projects already get it via Project's
     // default cardOrder.
-    val cardOrder = if ("Notes" in project.cardOrder) project.cardOrder else project.cardOrder + "Notes"
+    val cardOrder = (if ("Notes" in project.cardOrder) project.cardOrder else project.cardOrder + "Notes")
+        .let { if ("Daily Log" in it) it else it + "Daily Log" } // same fallback for the Daily Log card
     val cardSizes = project.cardSizes
 
     LazyVerticalGrid(
@@ -103,6 +106,7 @@ fun ProjectHomeScreen(
                         "Team" -> 1
                         "Files" -> 2
                         "Notes" -> 6
+                        "Daily Log" -> 7
                         else -> 0
                     }
                     onNavigateToTab(index)
@@ -116,6 +120,7 @@ fun ProjectHomeScreen(
                     "Team" -> TeamSummaryCard(project.members, userPicMap)
                     "Files" -> FilesSummaryCard(files)
                     "Notes" -> NotesSummaryCard(notes)
+                    "Daily Log" -> DailyLogSummaryCard(dailyLogs, userMap)
                 }
             }
         }
@@ -364,6 +369,39 @@ fun NotesSummaryCard(notes: List<Note>) {
                     Text(latest.title.ifBlank { t("Untitled Note") }, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                 }
             }
+        }
+    }
+}
+
+/** Today's log at a glance: weather so far, how much is written, who's written it; or the last day that has one. */
+@Composable
+fun DailyLogSummaryCard(logs: List<DailyLog>, userMap: Map<String, String>) {
+    val today = todayLogDate()
+    val todays = logs.firstOrNull { it.date == today }
+    val latest = logs.filter { !it.isEmpty() }.maxByOrNull { it.date }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (todays != null) {
+            val w = todays.weatherLine()
+            if (w.isNotBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.WbSunny, contentDescription = null, modifier = Modifier.size(12.dp), tint = Color.Gray)
+                    Spacer(Modifier.width(4.dp))
+                    Text(w, style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (todays.isEmpty()) {
+                Text(t("Nothing logged for today yet."), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+            } else {
+                val items = todays.crewOnSite.size + todays.workCompleted.size + todays.deliveriesInspections.size + todays.issuesDelays.size + todays.tomorrowPlan.size
+                Text(t("Today: {0} item(s)", items) + (if (todays.photos.isNotEmpty()) " · " + t("{0} photo(s) attached", todays.photos.size) else ""), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                todays.workCompleted.firstOrNull()?.let { Text("• $it", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                if (todays.contributors.isNotEmpty()) Text(t("By {0}", todays.contributors.joinToString(", ") { userMap[it] ?: it }), style = MaterialTheme.typography.labelSmall, color = Color.Gray, maxLines = 1)
+            }
+        } else {
+            Text(t("Nothing logged for today yet."), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+        }
+        if (latest != null && latest.date != today) {
+            Text(t("Last report: {0}", formatLogDate(latest.date)), style = MaterialTheme.typography.labelSmall, color = Color.Gray)
         }
     }
 }

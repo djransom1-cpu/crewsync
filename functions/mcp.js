@@ -15,6 +15,8 @@
  * Data model mirrors the app (composeApp/.../data/model + util/FirestoreUtils.kt):
  *   projects/{id}                       Project  (environmentId, name, buckets, members, ...)
  *   projects/{id}/appointments/{id}     Appointment (startDate/endDate epoch ms, recurrence None|Daily|Weekly|Monthly)
+ *   projects/{id}/schedulePhases/{id}   SchedulePhase (start/end epoch ms at local midnight, baseline, predecessors,
+ *                                             taskIds/appointmentIds = its linked tasks and appointments; see schedule.js)
  *   projects/{id}/files/{id}            ProjectFile (name, url, folderId, uploadedBy, uploadedAt)
  *   projects/{id}/folders/{id}          ProjectFolder
  *   tasks/{id}                          Task (environmentId, projectId, status == one of project.buckets,
@@ -34,12 +36,15 @@ const { z } = require("zod");
 const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { logger } = require("firebase-functions");
-const { getFirestore } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
 const { mcpAuthRouter } = require("@modelcontextprotocol/sdk/server/auth/router.js");
 const { requireBearerAuth } = require("@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js");
 const { buildProvider, hashKey, DEFAULT_TIMEZONE } = require("./oauth");
+const dailyReport = require("./dailyReport");
+const weeklyReport = require("./weeklyReport");
+const schedule = require("./schedule");
 
 // Legacy shared secret from the first connector build. Still accepted at the consent page and
 // mapped to the owner account, so existing sign-ins keep working after this deploy.
@@ -363,6 +368,415 @@ function apptView(a, ctx, projectName) {
   };
 }
 
+// --- schedule phases --------------------------------------------------------------------------
+// Phase dates are stored the way task dates are (epoch ms at local midnight), but the schedule
+// math is done in whole calendar days ("day numbers") - see schedule.js, the twin of the app's
+// ScheduleDates.kt. These helpers convert at the edges and do the Firestore access.
+
+function msToDay(ms, tz) {
+  if (ms === null || ms === undefined) return null;
+  const z = utcToZoned(ms, tz);
+  return schedule.dayNum(z.y, z.mo, z.d);
+}
+function dayToMs(day, tz) {
+  if (day === null || day === undefined) return null;
+  const d = new Date(day * 86400000);
+  return zonedToUtc(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), 0, 0, 0, tz);
+}
+/**
+ * A date as a person gives it ("2026-12-01", "today") as a calendar day; a time of day, if any,
+ * is dropped. Stricter than parseDate(): that hands anything it doesn't recognise to Date.parse,
+ * which reads "12/01/2026" in the SERVER's time zone and can land a phase a day early.
+ */
+function parseDay(input, tz) {
+  if (input === undefined || input === null || String(input).trim() === "") return undefined;
+  const s = String(input).trim();
+  if (/^(today|tomorrow|yesterday|now)$/i.test(s)) return msToDay(parseDate(s, tz), tz);
+  const m = /^(\d{4}-\d{2}-\d{2})(?:[T ].*)?$/.exec(s);
+  const day = m ? schedule.isoToDay(m[1]) : null;
+  if (day === null) throw new ToolError(`Could not understand the date "${input}". Use YYYY-MM-DD, for example 2026-12-01.`);
+  return day;
+}
+
+const phasesCol = (ctx, projectId) => ctx.db.collection("projects").doc(projectId).collection("schedulePhases");
+/** An empty list is never written (see cleanForWrite): the field is removed instead. */
+const listOrDelete = (arr) => (arr.length ? arr : FieldValue.delete());
+
+function withDays(ph, tz) {
+  return {
+    ...ph,
+    startDay: msToDay(ph.start, tz), endDay: msToDay(ph.end, tz),
+    baselineStartDay: msToDay(ph.baselineStart, tz), baselineEndDay: msToDay(ph.baselineEnd, tz),
+  };
+}
+
+async function loadPhases(ctx, projectId) {
+  const snap = await phasesCol(ctx, projectId).get();
+  return schedule.sortPhases(snap.docs.map((d) => withDays(schedule.normalizePhase(d.id, d.data()), ctx.tz)));
+}
+
+/** Everything the schedule tools need about one project, loaded together. */
+async function loadSchedule(ctx, p) {
+  const [phases, tasks, appts] = await Promise.all([loadPhases(ctx, p.id), loadTasks(ctx, p.id), loadAppointments(ctx, p.id)]);
+  return {
+    project: p, cal: schedule.workCalendar(p), today: msToDay(Date.now(), ctx.tz),
+    phases, tasks, appts,
+    taskById: new Map(tasks.map((t) => [t.id, t])),
+    apptById: new Map(appts.map((x) => [x.id, x])),
+  };
+}
+
+const findPhase = (sc, query) => sc.phases.find((x) => x.id === resolveByName(sc.phases, query, "phase").id);
+
+/**
+ * Works out a phase's dates from what was passed, on top of what it has now (`cur`; empty for a
+ * new phase). Dates are day numbers.
+ *   start + end           both as given
+ *   start + durationDays  the end is worked out
+ *   end + durationDays    the start is worked out backwards
+ *   start alone           the phase moves and keeps its length
+ *   end alone             the phase stretches or shrinks from its start
+ *   durationDays alone    the end is worked out from the start
+ *   milestone             one day
+ */
+function resolvePhaseDates(cal, cur, a) {
+  const has = (k) => a[k] !== undefined && a[k] !== null;
+  const milestone = a.milestone !== undefined ? !!a.milestone : !!cur.isMilestone;
+  let s = cur.startDay ?? null, e = cur.endDay ?? null;
+  if (milestone) {
+    if (has("start") && has("end") && a.start !== a.end) throw new ToolError("A milestone is a single day: pass one date, or the same start and end.");
+    const d = has("start") ? a.start : has("end") ? a.end : (s ?? e);
+    s = e = d ?? null;
+  } else if (has("start") && has("end")) {
+    s = a.start; e = a.end;
+  } else if (has("start") && has("durationDays")) {
+    s = a.start; e = cal.endForDuration(s, a.durationDays);
+  } else if (has("end") && has("durationDays")) {
+    e = a.end; s = cal.startForDuration(e, a.durationDays);
+  } else if (has("start")) {
+    const len = s !== null && e !== null ? cal.durationDays(s, e) : cur.durationDays || 0;
+    if (len < 1 && e === null) throw new ToolError("A start date also needs an end, durationDays, or milestone: true.");
+    s = a.start;
+    if (len >= 1) e = cal.endForDuration(s, len);
+  } else if (has("end")) {
+    if (s === null) throw new ToolError("An end date also needs a start or durationDays.");
+    e = a.end;
+  } else if (has("durationDays") && s !== null) {
+    e = cal.endForDuration(s, a.durationDays);
+  }
+  if (s !== null && e !== null && e < s) throw new ToolError(`The end (${schedule.dayToIso(e)}) is before the start (${schedule.dayToIso(s)}).`);
+  const durationDays = s !== null && e !== null ? cal.durationDays(s, e) : has("durationDays") ? a.durationDays : cur.durationDays || 0;
+  return { startDay: s, endDay: e, durationDays, isMilestone: milestone };
+}
+
+/** One row of the schedule: dates, status, percent, slip against the baseline, and link counts. */
+function phaseSummary(ph, sc) {
+  const tasks = ph.taskIds.map((id) => sc.taskById.get(id)).filter(Boolean);
+  const appts = ph.appointmentIds.map((id) => sc.apptById.get(id)).filter(Boolean);
+  const dated = ph.startDay !== null && ph.endDay !== null;
+  const nameOf = (id) => sc.phases.find((x) => x.id === id)?.name ?? `(missing phase ${id})`;
+  const slip = schedule.slipDays(ph, sc.cal);
+  return {
+    id: ph.id,
+    name: ph.name,
+    group: ph.group || undefined,
+    start: schedule.fmtDay(ph.startDay),
+    end: schedule.fmtDay(ph.endDay),
+    workingDays: dated ? sc.cal.durationDays(ph.startDay, ph.endDay) : ph.durationDays || undefined,
+    milestone: ph.isMilestone || undefined,
+    status: ph.status,
+    percent: schedule.percentOf(ph, tasks),
+    late: schedule.isLate(ph, sc.today) || undefined,
+    baselineStart: schedule.fmtDay(ph.baselineStartDay),
+    baselineEnd: schedule.fmtDay(ph.baselineEndDay),
+    slipDays: slip === null ? undefined : slip,
+    trade: ph.trade || undefined,
+    contact: ph.contactName || undefined,
+    predecessors: ph.predecessors.length ? ph.predecessors.map((x) => `${nameOf(x.phaseId)} (${x.type}${x.lagDays ? `, lag ${x.lagDays}` : ""})`) : undefined,
+    linkedTasks: tasks.length,
+    linkedAppointments: appts.length,
+  };
+}
+
+/** A phase in full: the summary plus notes, who it waits for and who waits for it, and its linked tasks and appointments. */
+function phaseDetail(ph, sc, ctx) {
+  const tasks = ph.taskIds.map((id) => sc.taskById.get(id)).filter(Boolean);
+  const appts = ph.appointmentIds.map((id) => sc.apptById.get(id)).filter(Boolean).sort((x, y) => Number(x.startDate) - Number(y.startDate));
+  const missingTasks = ph.taskIds.filter((id) => !sc.taskById.has(id));
+  const missingAppts = ph.appointmentIds.filter((id) => !sc.apptById.has(id));
+  const byId = (id) => sc.phases.find((x) => x.id === id);
+  return {
+    ...phaseSummary(ph, sc),
+    project: sc.project.name,
+    percentMode: ph.percentMode,
+    notes: ph.notes || undefined,
+    color: ph.color || undefined,
+    predecessors: ph.predecessors.map((x) => {
+      const other = byId(x.phaseId);
+      return { id: x.phaseId, name: other?.name ?? "(missing phase)", type: x.type, lagDays: x.lagDays, start: schedule.fmtDay(other?.startDay), end: schedule.fmtDay(other?.endDay) };
+    }),
+    successors: sc.phases.filter((x) => x.predecessors.some((q) => q.phaseId === ph.id)).map((x) => {
+      const link = x.predecessors.find((q) => q.phaseId === ph.id);
+      return { id: x.id, name: x.name, type: link.type, lagDays: link.lagDays, start: schedule.fmtDay(x.startDay) };
+    }),
+    tasks: tasks.map((t) => taskSummary(t, ctx, sc.project.name)),
+    appointments: appts.map((x) => apptView(x, ctx, sc.project.name)),
+    missingTaskIds: missingTasks.length ? missingTasks : undefined,
+    missingAppointmentIds: missingAppts.length ? missingAppts : undefined,
+    lastUpdated: ph.updatedAt ? fmtDateTime(ph.updatedAt, ctx.tz) : undefined,
+    updatedBy: ph.updatedBy || undefined,
+  };
+}
+
+/** The counts and the finish line for the whole schedule (what the presentation header shows). */
+function scheduleTotals(sc) {
+  const n = (status) => sc.phases.filter((x) => x.status === status).length;
+  const ends = sc.phases.map((x) => x.endDay).filter((d) => d !== null);
+  const planned = sc.phases.map((x) => x.baselineEndDay).filter((d) => d !== null);
+  const current = ends.length ? Math.max(...ends) : null;
+  const baseline = planned.length ? Math.max(...planned) : null;
+  return {
+    done: n("Done"), inProgress: n("In progress"), notStarted: n("Not started"), onHold: n("On hold"),
+    late: sc.phases.filter((x) => schedule.isLate(x, sc.today)).length,
+    finish: current === null ? undefined : {
+      planned: schedule.fmtDay(baseline),
+      current: schedule.fmtDay(current),
+      slipDays: baseline === null ? undefined : sc.cal.workingDaysBetween(baseline, current),
+    },
+  };
+}
+
+/** Looks a contact up for a phase. Text that matches no contact is kept as a plain name, unlinked. */
+async function phaseContact(ctx, query) {
+  const q = String(query ?? "").trim();
+  if (!q) return { contactId: "", contactName: "", linked: false };
+  const contacts = await loadContacts(ctx);
+  const byId = contacts.find((c) => c.id === q);
+  if (byId) return { contactId: byId.id, contactName: byId.name, linked: true };
+  const exact = contacts.filter((c) => norm(c.name) === norm(q));
+  const hits = exact.length ? exact : contacts.filter((c) => norm(c.name).includes(norm(q)) || norm(c.company).includes(norm(q)));
+  if (hits.length > 1) throw new ToolError(`"${q}" matches several contacts: ${hits.map((c) => `${c.name} (id ${c.id})`).join(", ")}. Be more specific or use the id.`);
+  if (hits.length === 1) return { contactId: hits[0].id, contactName: hits[0].name, linked: true };
+  return { contactId: "", contactName: q, linked: false };
+}
+
+/** After the working week or the holidays change: keep every phase's stored working-day count in step with its dates. */
+async function restampPhaseDurations(ctx, project) {
+  const cal = schedule.workCalendar(project);
+  const phases = await loadPhases(ctx, project.id);
+  const stale = phases.filter((ph) => ph.startDay !== null && ph.endDay !== null && cal.durationDays(ph.startDay, ph.endDay) !== ph.durationDays);
+  if (!stale.length) return 0;
+  const batch = ctx.db.batch();
+  for (const ph of stale) batch.update(phasesCol(ctx, project.id).doc(ph.id), { durationDays: cal.durationDays(ph.startDay, ph.endDay) });
+  await batch.commit();
+  return stale.length;
+}
+
+// --- shifting (see planCascade in schedule.js) ---------------------------------------------------
+
+const loopMessage = (names) =>
+  `The predecessors go round in a loop: ${names.join(" -> ")}. Nothing was saved. Fix the predecessors first (update_phase), or pass cascade: false to move only this phase.`;
+
+/**
+ * The appointments and task cards linked to moving phases that would move with them, by the same
+ * number of working days as each phase's START. Left alone: repeating appointments (moving one
+ * would change every occurrence), appointments that have already happened, task cards with no
+ * dates or in a Done bucket, and everything on a phase whose start did not move.
+ */
+function linkedMoves(ctx, sc, moves, { moveAppointments, moveTasks }) {
+  const out = { appointments: [], tasks: [] };
+  for (const m of moves) {
+    if (!m.startShift) continue;
+    if (moveAppointments) {
+      for (const id of m.phase.appointmentIds) {
+        const appt = sc.apptById.get(id);
+        if (!appt || (appt.recurrence && appt.recurrence !== "None")) continue;
+        const start = Number(appt.startDate);
+        const day = msToDay(start, ctx.tz);
+        if (day < sc.today) continue;
+        const clock = utcToZoned(start, ctx.tz);
+        const d = new Date(sc.cal.addWorkingDays(day, m.startShift) * 86400000);
+        const newStart = zonedToUtc(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), clock.h, clock.mi, 0, ctx.tz);
+        out.appointments.push({ appt, phase: m.phase, newStart, newEnd: newStart + Math.max(0, Number(appt.endDate || appt.startDate) - start) });
+      }
+    }
+    if (moveTasks) {
+      const moved = (ms) => (ms === undefined || ms === null ? undefined : dayToMs(sc.cal.addWorkingDays(msToDay(Number(ms), ctx.tz), m.startShift), ctx.tz));
+      for (const id of m.phase.taskIds) {
+        const task = sc.taskById.get(id);
+        if (!task || schedule.isDoneStatus(task.status)) continue;
+        const hasStart = task.startDate !== undefined && task.startDate !== null, hasDue = task.dueDate !== undefined && task.dueDate !== null;
+        if (!hasStart && !hasDue) continue;
+        out.tasks.push({ task, phase: m.phase, newStart: moved(task.startDate), newDue: moved(task.dueDate) });
+      }
+    }
+  }
+  return out;
+}
+
+/** What a shift does or would do, in words a person can check: each phase from/to and by how many working days. */
+function cascadeView(ctx, moves, linked) {
+  const span = (s, e) => (s === e ? schedule.fmtDay(s) : `${schedule.fmtDay(s)} to ${schedule.fmtDay(e)}`);
+  return {
+    phasesMoved: moves.length,
+    phases: moves.map((m) => ({
+      id: m.phase.id, name: m.phase.name,
+      from: span(m.oldStart, m.oldEnd), to: span(m.newStart, m.newEnd),
+      shiftDays: m.startShift,
+      endShiftDays: m.endShift !== m.startShift ? m.endShift : undefined,
+      follower: m.isOrigin ? undefined : true,
+    })),
+    appointmentsMoved: linked.appointments.length ? linked.appointments.map((x) => ({
+      id: x.appt.id, title: x.appt.title, phase: x.phase.name, from: fmtDateTime(Number(x.appt.startDate), ctx.tz), to: fmtDateTime(x.newStart, ctx.tz),
+    })) : undefined,
+    tasksMoved: linked.tasks.length ? linked.tasks.map((x) => ({
+      id: x.task.id, title: x.task.title, phase: x.phase.name,
+      startDate: x.newStart === undefined ? undefined : fmtDate(x.newStart, ctx.tz), dueDate: x.newDue === undefined ? undefined : fmtDate(x.newDue, ctx.tz),
+    })) : undefined,
+  };
+}
+
+/** Adds the writes for moved phases and their linked items to a batch. Only dates are written: targeted updates, the baseline untouched. */
+function addCascadeWrites(batch, ctx, p, sc, moves, linked, now) {
+  for (const m of moves) {
+    batch.update(phasesCol(ctx, p.id).doc(m.phase.id), {
+      start: dayToMs(m.newStart, ctx.tz), end: dayToMs(m.newEnd, ctx.tz), durationDays: sc.cal.durationDays(m.newStart, m.newEnd),
+      updatedAt: now, updatedBy: ctx.email,
+    });
+  }
+  for (const x of linked.appointments) {
+    batch.update(ctx.db.collection("projects").doc(p.id).collection("appointments").doc(x.appt.id), { startDate: x.newStart, endDate: x.newEnd });
+  }
+  for (const x of linked.tasks) {
+    const patch = {};
+    if (x.newStart !== undefined) patch.startDate = x.newStart;
+    if (x.newDue !== undefined) patch.dueDate = x.newDue;
+    batch.update(ctx.db.collection("tasks").doc(x.task.id), patch);
+  }
+}
+
+// --- look-ahead (the twin of ScheduleLookAhead.kt in the app: same rules, same groups) ---------
+
+const textOrder = (a, b) => { const x = String(a || "").toLowerCase(), y = String(b || "").toLowerCase(); return x < y ? -1 : x > y ? 1 : 0; };
+const ENTRY_RANK = { appointment: 0, phase: 1, task: 2 };
+const ROLE_RANK = { starts: 0, finishes: 1, "under way": 2, running: 3 };
+/** Visits first (all-day before timed, then by time), then phases (starting before finishing), then task cards; ties by name. */
+const entryOrder = (a, b) => a.day - b.day || ENTRY_RANK[a.type] - ENTRY_RANK[b.type] || (a.minutes ?? -1) - (b.minutes ?? -1)
+  || (ROLE_RANK[a.role] ?? 0) - (ROLE_RANK[b.role] ?? 0) || textOrder(a.name, b.name);
+
+/**
+ * What's coming up from today through the Sunday that ends week `weeks` (this week is the first),
+ * with what's behind on top.
+ *  - Phases: not Done, dated, running on at least one day of the window.
+ *  - Appointments: every occurrence in the window, repeating ones included; a visit spanning
+ *    several days is listed once, on its first day in the window.
+ *  - Task cards: due in the window and not in a Done-like bucket.
+ *  - Behind: phases that should have started or finished and haven't (the timeline's "late"
+ *    rule), and task cards whose due date has passed.
+ * Grouped by day (phases under way right through the window first, then each day that has
+ * something on it) or by trade (each phase's trade, with the visits and cards linked to it; a
+ * trade-less group last).
+ */
+function buildLookAhead(ctx, sc, weeks, groupBy) {
+  const today = sc.today;
+  const first = today;
+  const last = today - (schedule.isoWeekday(today) - 1) + 7 * Math.min(6, Math.max(1, weeks)) - 1;
+  const inWindow = (d) => d >= first && d <= last;
+  const phaseWith = (list, id) => sc.phases.find((p) => p[list].includes(id));
+  const span = (s, e) => (s === e ? schedule.fmtDay(s) : `${schedule.fmtDay(s)} to ${schedule.fmtDay(e)}`);
+
+  const behind = sc.phases.filter((p) => schedule.isLate(p, today)).map((p) => {
+    if (p.status === "Not started" && p.startDay !== null && today > p.startDay) return { p, reason: "should have started", since: p.startDay };
+    return p.endDay !== null ? { p, reason: "should have finished", since: p.endDay } : null;
+  }).filter(Boolean).sort((a, b) => a.since - b.since || textOrder(a.p.name, b.p.name));
+
+  const due = sc.tasks.filter((t) => !schedule.isDoneStatus(t.status) && t.dueDate !== undefined && t.dueDate !== null)
+    .map((t) => ({ t, day: msToDay(Number(t.dueDate), ctx.tz) }));
+  const overdue = due.filter((x) => x.day < today).sort((a, b) => a.day - b.day || textOrder(a.t.title, b.t.title));
+
+  const running = sc.phases.filter((p) => p.status !== "Done" && p.startDay !== null && p.endDay !== null && p.endDay >= first && p.startDay <= last)
+    .map((p) => ({ p, startsIn: inWindow(p.startDay), endsIn: inWindow(p.endDay), late: schedule.isLate(p, today) }));
+
+  const fromMs = dayToMs(first, ctx.tz), toMs = dayToMs(last + 1, ctx.tz) - 1;
+  const visits = sc.appts.flatMap((a) => expandAppointment(a, fromMs, toMs, ctx.tz).map((inst) => {
+    const clock = utcToZoned(inst.instanceStart, ctx.tz);
+    return { a, inst, day: Math.max(first, msToDay(inst.instanceStart, ctx.tz)), minutes: a.isAllDay ? null : clock.h * 60 + clock.mi };
+  }));
+
+  // One line of the look-ahead, as data.
+  const phaseEntry = (r, role, day) => ({
+    type: "phase", role, day, name: r.p.name,
+    view: cleanForWrite({
+      type: "phase", id: r.p.id, name: r.p.name, what: role === "running" ? undefined : role,
+      dates: span(r.p.startDay, r.p.endDay), status: r.p.status, trade: r.p.trade.trim() || undefined, late: r.late || undefined,
+    }),
+  });
+  const visitEntry = (v) => ({
+    type: "appointment", day: v.day, minutes: v.minutes, name: v.a.title,
+    view: cleanForWrite({
+      type: "appointment", id: v.a.id, title: v.a.title, day: schedule.fmtDay(v.day),
+      time: v.a.isAllDay ? "all day" : fmtDateTime(v.inst.instanceStart, ctx.tz).split(" ").slice(2).join(" "),
+      location: v.a.location || undefined, phase: phaseWith("appointmentIds", v.a.id)?.name,
+    }),
+  });
+  const dueEntry = (x) => {
+    const p = checklistProgress(x.t);
+    return {
+      type: "task", day: x.day, name: x.t.title,
+      view: cleanForWrite({
+        type: "task", id: x.t.id, title: x.t.title, due: schedule.fmtDay(x.day), status: x.t.status,
+        checklist: p.total ? `${p.done}/${p.total} done` : undefined, phase: phaseWith("taskIds", x.t.id)?.name,
+      }),
+    };
+  };
+  const dueInWindow = due.filter((x) => inWindow(x.day));
+
+  let groups;
+  if (groupBy === "trade") {
+    const tradeOf = (p) => (p?.trade || "").trim();
+    const key = (trade) => trade.toLowerCase().split(" ").filter(Boolean).join(" ");
+    const entries = [
+      ...running.map((r) => [tradeOf(r.p), phaseEntry(r, "running", Math.max(r.p.startDay, first))]),
+      ...visits.map((v) => [tradeOf(phaseWith("appointmentIds", v.a.id)), visitEntry(v)]),
+      ...dueInWindow.map((x) => [tradeOf(phaseWith("taskIds", x.t.id)), dueEntry(x)]),
+    ];
+    const byKey = new Map();
+    for (const [trade, entry] of entries) {
+      if (!byKey.has(key(trade))) byKey.set(key(trade), { trade, entries: [] }); // the first spelling met is the one shown
+      byKey.get(key(trade)).entries.push(entry);
+    }
+    const all = [...byKey.values()].map((g) => ({ ...g, entries: g.entries.sort(entryOrder) }));
+    const named = all.filter((g) => g.trade).sort((a, b) => a.entries[0].day - b.entries[0].day || textOrder(a.trade, b.trade));
+    groups = [...named, ...all.filter((g) => !g.trade)].map((g) => ({ trade: g.trade || "No trade", items: g.entries.map((e) => e.view) }));
+  } else {
+    const underWay = running.filter((r) => !r.startsIn && !r.endsIn).map((r) => phaseEntry(r, "under way", first)).sort(entryOrder);
+    const dated = [
+      ...running.filter((r) => r.startsIn).map((r) => phaseEntry(r, "starts", r.p.startDay)),
+      ...running.filter((r) => r.endsIn).map((r) => phaseEntry(r, "finishes", r.p.endDay)),
+      ...visits.map(visitEntry),
+      ...dueInWindow.map(dueEntry),
+    ];
+    const days = [...new Set(dated.map((e) => e.day))].sort((a, b) => a - b);
+    groups = [
+      ...(underWay.length ? [{ heading: "Under way", items: underWay.map((e) => e.view) }] : []),
+      ...days.map((d) => ({ day: schedule.fmtDay(d), items: dated.filter((e) => e.day === d).sort(entryOrder).map((e) => e.view) })),
+    ];
+  }
+
+  return {
+    project: sc.project.name,
+    today: schedule.fmtDay(today),
+    window: { from: schedule.fmtDay(first), to: schedule.fmtDay(last), weeks: Math.min(6, Math.max(1, weeks)) },
+    behind: {
+      phases: behind.map((b) => ({ id: b.p.id, name: b.p.name, reason: b.reason, since: schedule.fmtDay(b.since), status: b.p.status })),
+      overdueTasks: overdue.map((x) => cleanForWrite({ id: x.t.id, title: x.t.title, due: schedule.fmtDay(x.day), status: x.t.status, phase: phaseWith("taskIds", x.t.id)?.name })),
+    },
+    counts: { phases: running.length, appointments: visits.length, tasks: dueInWindow.length },
+    groupBy: groupBy === "trade" ? "trade" : "day",
+    groups,
+  };
+}
+
 // --- contacts ---------------------------------------------------------------------------------
 
 async function loadContacts(ctx) {
@@ -416,7 +830,7 @@ function buildServer(ctx) {
 
   // ---- projects ----------------------------------------------------------------------------
   reg("list_projects",
-    "List every project in the active workspace with task counts, location, and members.",
+    "List every project in the active workspace with task counts, location, and members. Archived projects are marked archived: true.",
     {},
     async () => {
       const [projects, tasks] = await Promise.all([loadProjects(ctx), loadTasks(ctx)]);
@@ -424,7 +838,7 @@ function buildServer(ctx) {
         const mine = tasks.filter((t) => t.projectId === p.id);
         const doneBucket = (p.buckets || []).slice(-1)[0];
         const open = mine.filter((t) => !/^(done|completed?)$/i.test(t.status) && t.status !== doneBucket).length;
-        return { id: p.id, name: p.name, location: p.location || undefined, openTasks: open, totalTasks: mine.length, members: p.members || [], buckets: p.buckets || [] };
+        return { id: p.id, name: p.name, archived: p.archived ? true : undefined, location: p.location || undefined, openTasks: open, totalTasks: mine.length, members: p.members || [], buckets: p.buckets || [] };
       });
       rows.sort((a, b) => b.totalTasks - a.totalTasks || a.name.localeCompare(b.name));
       return json(rows);
@@ -487,13 +901,15 @@ function buildServer(ctx) {
     });
 
   reg("update_project",
-    "Update a project's name, description, location, owner/client info, members, or status buckets. Only the fields you pass change.",
+    "Update a project's name, description, location, owner/client info, members, status buckets, or the Schedule's working week and holidays. Only the fields you pass change.",
     {
       project: z.string().describe("Project name or ID"),
       name: z.string().optional(), description: z.string().optional(), location: z.string().optional(),
       ownerName: z.string().optional(), ownerPhone: z.string().optional(), ownerEmail: z.string().optional(),
       addMembers: z.array(z.string()).optional(), removeMembers: z.array(z.string()).optional(),
       buckets: z.array(z.string()).optional().describe("Replace the full ordered list of status columns. Tasks keep their status string, so keep existing names unless you also move the tasks."),
+      scheduleHolidays: z.array(z.string()).optional().describe("Replace the full list of days nobody works, as YYYY-MM-DD (e.g. Thanksgiving). The Schedule skips them when counting working days. An empty list clears them."),
+      workWeek: z.array(z.number().int().min(1).max(7)).optional().describe("The Schedule's working days of the week: 1 = Monday ... 7 = Sunday. Default Monday to Friday."),
     },
     async (a) => {
       const p = await findProject(ctx, a.project);
@@ -512,10 +928,27 @@ function buildServer(ctx) {
         if (orphaned.length) throw new ToolError(`Tasks still use statuses not in the new buckets: ${orphaned.join(", ")}. Move those tasks first.`);
         patch.buckets = a.buckets;
       }
+      if (a.scheduleHolidays) {
+        const bad = a.scheduleHolidays.filter((d) => schedule.isoToDay(d) === null);
+        if (bad.length) throw new ToolError(`scheduleHolidays must be real dates as YYYY-MM-DD (got ${bad.map((d) => `"${d}"`).join(", ")}).`);
+        patch.scheduleHolidays = listOrDelete([...new Set(a.scheduleHolidays.map((d) => d.trim()))].sort());
+      }
+      if (a.workWeek) {
+        if (!a.workWeek.length) throw new ToolError("workWeek cannot be empty.");
+        patch.workWeek = [...new Set(a.workWeek)].sort((x, y) => x - y);
+      }
       if (!Object.keys(patch).length) throw new ToolError("Nothing to update — pass at least one field.");
       await ctx.db.collection("projects").doc(p.id).update(patch);
       const back = (await ctx.db.collection("projects").doc(p.id).get()).data();
-      return json({ updated: Object.keys(patch), id: p.id, name: back.name, members: back.members || [], buckets: back.buckets || [] });
+      // A change to the working calendar changes how many working days each phase spans.
+      const calendarChanged = patch.scheduleHolidays !== undefined || patch.workWeek !== undefined;
+      if (calendarChanged) await restampPhaseDurations(ctx, { ...back, id: p.id });
+      const cal = schedule.workCalendar(back);
+      return json({
+        updated: Object.keys(patch), id: p.id, name: back.name, members: back.members || [], buckets: back.buckets || [],
+        workWeek: calendarChanged ? cal.workWeek.map((n) => schedule.WEEKDAYS[n - 1]) : undefined,
+        scheduleHolidays: calendarChanged ? cal.holidays : undefined,
+      });
     });
 
   reg("summarize_project",
@@ -575,12 +1008,14 @@ function buildServer(ctx) {
     });
 
   reg("get_task",
-    "Full detail for one task including every checklist and item (with item IDs) and attachments.",
+    "Full detail for one task including every checklist and item (with item IDs), attachments, and the schedule phase it is linked to (phaseId and phase), if any.",
     { task: z.string().describe("Task title or ID"), project: z.string().optional().describe("Project name or ID to narrow the lookup") },
     async (a) => {
       const t = await findTask(ctx, a.task, a.project);
       const p = (await loadProjects(ctx)).find((x) => x.id === t.projectId);
-      return json(taskDetail(t, ctx, p?.name));
+      // The link is stored on the phase, not the task (see schedule.js), so look it up there.
+      const phase = (await loadPhases(ctx, t.projectId)).find((ph) => ph.taskIds.includes(t.id));
+      return json({ ...taskDetail(t, ctx, p?.name), phaseId: phase?.id, phase: phase?.name });
     });
 
   reg("create_task",
@@ -763,7 +1198,7 @@ function buildServer(ctx) {
 
   // ---- appointments ------------------------------------------------------------------------
   reg("list_appointments",
-    "Appointments/site-calendar events in a date window, with recurring events expanded into each occurrence. Defaults to now → 30 days. Times are shown in the connector's timezone.",
+    "Appointments/site-calendar events in a date window, with recurring events expanded into each occurrence. Defaults to now → 30 days. Times are shown in the connector's timezone. An appointment linked to a schedule phase also shows phaseId and phase.",
     {
       project: z.string().optional().describe("Project name or ID; omit for every project"),
       afterDate: z.string().optional().describe(dateDoc("Window start")),
@@ -776,11 +1211,14 @@ function buildServer(ctx) {
       const to = a.beforeDate ? parseDate(a.beforeDate, ctx.tz, { endOfDay: true }) : from + 30 * 86400000;
       const out = [];
       for (const p of targets) {
-        const appts = await loadAppointments(ctx, p.id);
-        for (const appt of appts) for (const inst of expandAppointment(appt, from, to, ctx.tz)) out.push({ inst, name: p.name });
+        const [appts, phases] = await Promise.all([loadAppointments(ctx, p.id), loadPhases(ctx, p.id)]);
+        for (const appt of appts) {
+          const phase = phases.find((ph) => ph.appointmentIds.includes(appt.id));
+          for (const inst of expandAppointment(appt, from, to, ctx.tz)) out.push({ inst, name: p.name, phase });
+        }
       }
       out.sort((x, y) => x.inst.instanceStart - y.inst.instanceStart);
-      return json({ window: { from: fmtDateTime(from, ctx.tz), to: fmtDateTime(to, ctx.tz) }, count: out.length, appointments: out.map((o) => apptView(o.inst, ctx, o.name)) });
+      return json({ window: { from: fmtDateTime(from, ctx.tz), to: fmtDateTime(to, ctx.tz) }, count: out.length, appointments: out.map((o) => ({ ...apptView(o.inst, ctx, o.name), phaseId: o.phase?.id, phase: o.phase?.name })) });
     });
 
   reg("create_appointment",
@@ -853,6 +1291,472 @@ function buildServer(ctx) {
       const target = resolveByName(appts.map((x) => ({ ...x, name: x.title })), a.appointment, "appointment");
       await ctx.db.collection("projects").doc(p.id).collection("appointments").doc(target.id).delete();
       return text(`Deleted "${target.title}" (${fmtDateTime(target.startDate, ctx.tz)}${target.recurrence && target.recurrence !== "None" ? ", " + target.recurrence : ""}) from ${p.name}.`);
+    });
+
+  // ---- schedule ----------------------------------------------------------------------------
+  // Phases sit above the tasks and appointments that do the work. The links are stored on the
+  // phase (taskIds / appointmentIds), so none of these tools ever writes a task or appointment.
+  const dayDoc = (what) => `${what} as YYYY-MM-DD (or 'today' / 'tomorrow').`;
+  const statusDoc = `One of: ${schedule.STATUSES.join(", ")}`;
+  const phaseStatus = (raw) => {
+    const s = schedule.matchStatus(raw);
+    if (!s) throw new ToolError(`Status "${raw}" is not a phase status. Use one of: ${schedule.STATUSES.join(", ")}.`);
+    return s;
+  };
+  const predecessorSchema = z.array(z.object({
+    phase: z.string().describe("Name or ID of the phase that must come first"),
+    type: z.enum(["FS", "SS"]).optional().describe("FS = starts after that phase finishes (default); SS = starts when that phase starts"),
+    lagDays: z.number().int().optional().describe("Working days to wait; negative for an overlap (-1 starts on the other phase's last day)"),
+  }));
+  /** Names or ids to stored predecessor links. Refuses a phase waiting on itself, directly or round a loop. */
+  const resolvePredecessors = (sc, selfId, list) => {
+    const out = [];
+    for (const x of list) {
+      const other = findPhase(sc, x.phase);
+      if (other.id === selfId) throw new ToolError("A phase cannot be its own predecessor.");
+      if (!out.some((o) => o.phaseId === other.id)) out.push({ phaseId: other.id, type: x.type || "FS", lagDays: x.lagDays || 0 });
+    }
+    const loop = selfId ? schedule.findLoop(sc.phases, selfId, out.map((o) => o.phaseId)) : null;
+    if (loop) throw new ToolError(`That would make a loop in the predecessors: ${loop.map((id) => sc.phases.find((x) => x.id === id)?.name ?? id).join(" waits for ")}. Nothing was saved.`);
+    return out;
+  };
+  /** Task and appointment names or ids to ids. With allowStale, an id still listed on a phase is accepted even if its record is gone. */
+  const resolveLinks = (sc, a, { allowStale = false } = {}) => {
+    const pick = (list, candidates, label, stored) => [...new Set((list || []).map((q) => {
+      try {
+        return resolveByName(candidates, q, label).id;
+      } catch (e) {
+        const raw = String(q).trim();
+        if (allowStale && sc.phases.some((x) => x[stored].includes(raw))) return raw;
+        throw e;
+      }
+    }))];
+    return {
+      taskIds: pick(a.tasks, sc.tasks.map((t) => ({ ...t, name: t.title })), "task", "taskIds"),
+      apptIds: pick(a.appointments, sc.appts.map((x) => ({ ...x, name: x.title })), "appointment", "appointmentIds"),
+    };
+  };
+
+  reg("list_schedule",
+    "The project schedule: every phase in order with its dates, working days, status, percent complete, slip against the baseline in working days (positive = late), and how many tasks and appointments are linked to it. Also the totals for the whole schedule and the finish date against the plan. Pass from/to for only the phases that overlap a date window.",
+    {
+      project: z.string().describe("Project name or ID"),
+      from: z.string().optional().describe(dayDoc("Only phases still running on or after this day")),
+      to: z.string().optional().describe(dayDoc("Only phases that start on or before this day")),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      const from = parseDay(a.from, ctx.tz), to = parseDay(a.to, ctx.tz);
+      const windowed = from !== undefined || to !== undefined;
+      const rows = sc.phases.filter((x) => {
+        if (!windowed) return true;
+        if (x.startDay === null || x.endDay === null) return false;
+        return (from === undefined || x.endDay >= from) && (to === undefined || x.startDay <= to);
+      });
+      return json({
+        project: p.name,
+        today: schedule.fmtDay(sc.today),
+        workWeek: sc.cal.workWeek.map((n) => schedule.WEEKDAYS[n - 1]),
+        holidays: sc.cal.holidays.length ? sc.cal.holidays : undefined,
+        window: windowed ? { from: schedule.fmtDay(from ?? null), to: schedule.fmtDay(to ?? null) } : undefined,
+        totals: sc.phases.length ? scheduleTotals(sc) : undefined,
+        count: rows.length,
+        note: sc.phases.length ? undefined : "No schedule yet. Use create_phase or import_schedule to start one.",
+        phases: rows.map((x) => phaseSummary(x, sc)),
+      });
+    });
+
+  reg("get_phase",
+    "One schedule phase in full: dates, status, percent, slip, notes, the phases it waits for (predecessors) and the phases waiting on it, its linked tasks with checklist progress, and its linked appointments.",
+    { project: z.string().describe("Project name or ID"), phase: z.string().describe("Phase name or ID") },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      return json(phaseDetail(findPhase(sc, a.phase), sc, ctx));
+    });
+
+  reg("create_phase",
+    "Add a phase to a project's schedule (e.g. 'Drywall'). Give start with end or durationDays (working days: weekends and the project's holidays are skipped), or one date with milestone: true. A phase with no dates yet is allowed. It goes at the bottom of the schedule unless you pass order. This does not set the baseline - use set_baseline for that.",
+    {
+      project: z.string().describe("Project name or ID"),
+      name: z.string().min(1),
+      group: z.string().optional().describe("The band it is drawn in, e.g. 'Exterior / Site', 'Rough trades', 'Interior', 'Closeout'"),
+      start: z.string().optional().describe(dayDoc("First working day")),
+      end: z.string().optional().describe(dayDoc("Last working day, inclusive")),
+      durationDays: z.number().int().min(1).optional().describe("Working days, counting both the first and the last day"),
+      milestone: z.boolean().optional().describe("A one-day marker such as 'Roof complete'"),
+      predecessors: predecessorSchema.optional(),
+      trade: z.string().optional(),
+      contact: z.string().optional().describe("Contact name or ID (see list_contacts). A name that is not a contact is kept as plain text."),
+      notes: z.string().optional(),
+      status: z.string().optional().describe(`${statusDoc}. Default Not started`),
+      percentComplete: z.number().int().min(0).max(100).optional().describe("Sets a manual percent. Leave out to have it worked out from the linked tasks' checklists."),
+      color: z.string().optional().describe("Hex like #2196F3. Leave out to colour the bar by status."),
+      order: z.number().optional().describe("Position in the schedule; lower comes first. Defaults to the bottom."),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      const name = a.name.trim();
+      const dup = sc.phases.find((x) => norm(x.name) === norm(name));
+      if (dup) throw new ToolError(`A phase named "${dup.name}" already exists in ${p.name} (id ${dup.id}). Use update_phase instead.`);
+      const dates = resolvePhaseDates(sc.cal, {}, { start: parseDay(a.start, ctx.tz), end: parseDay(a.end, ctx.tz), durationDays: a.durationDays, milestone: a.milestone });
+      const contact = await phaseContact(ctx, a.contact);
+      const ref = phasesCol(ctx, p.id).doc();
+      const now = Date.now();
+      await ref.set(schedule.phaseWriteMap({
+        id: ref.id, projectId: p.id, environmentId: ctx.envId,
+        name, group: (a.group ?? "").trim(),
+        order: a.order ?? sc.phases.reduce((m, x) => Math.max(m, x.order), 0) + 1,
+        start: dayToMs(dates.startDay, ctx.tz), end: dayToMs(dates.endDay, ctx.tz),
+        durationDays: dates.durationDays, isMilestone: dates.isMilestone,
+        predecessors: a.predecessors ? resolvePredecessors(sc, null, a.predecessors) : [],
+        trade: a.trade ?? "", contactId: contact.contactId, contactName: contact.contactName,
+        status: a.status !== undefined ? phaseStatus(a.status) : "Not started",
+        percentComplete: a.percentComplete ?? 0, percentMode: a.percentComplete !== undefined ? "manual" : "auto",
+        notes: a.notes ?? "", color: a.color ?? "",
+        createdAt: now, updatedAt: now, updatedBy: ctx.email,
+      }));
+      const after = await loadSchedule(ctx, p);
+      const saved = after.phases.find((x) => x.id === ref.id);
+      if (!saved) throw new ToolError("Write did not persist (phase not found after save).");
+      return json({ created: true, ...phaseDetail(saved, after, ctx), contactLinked: a.contact ? contact.linked : undefined });
+    });
+
+  reg("update_phase",
+    "Change a schedule phase. Only the fields you pass change. Dates: a new start alone moves the phase and keeps its length; a new end alone stretches or shrinks it; start + end, start + durationDays or end + durationDays set it exactly. The baseline never moves here. The phases that follow are NOT shifted unless you pass cascade: true, which moves them by the same rule as shift_phase (and moves linked appointments with them unless moveAppointments is false). Use dryRun: true first to see what would change, and show the person, before saving a change that cascades. Setting percentComplete switches the phase to a manual percent; percentMode 'auto' goes back to working it out from the linked tasks' checklists.",
+    {
+      project: z.string().describe("Project name or ID"),
+      phase: z.string().describe("Phase name or ID"),
+      name: z.string().min(1).optional(),
+      group: z.string().optional(),
+      start: z.string().optional().describe(dayDoc("First working day")),
+      end: z.string().optional().describe(dayDoc("Last working day, inclusive")),
+      durationDays: z.number().int().min(1).optional().describe("Working days, counting both the first and the last day"),
+      clearDates: z.boolean().optional().describe("Remove the dates; the phase stays on the schedule, undated"),
+      milestone: z.boolean().optional(),
+      predecessors: predecessorSchema.optional().describe("Replaces the whole list; pass [] to remove them all"),
+      trade: z.string().optional(),
+      contact: z.string().optional().describe("Contact name or ID; an empty string clears it"),
+      notes: z.string().optional(),
+      status: z.string().optional().describe(statusDoc),
+      percentComplete: z.number().int().min(0).max(100).optional(),
+      percentMode: z.enum(["auto", "manual"]).optional(),
+      color: z.string().optional().describe("Hex like #2196F3; an empty string goes back to colouring by status"),
+      order: z.number().optional().describe("Position in the schedule; lower comes first"),
+      cascade: z.boolean().optional().describe("When the dates change, also move the phases that follow through the predecessors (default false)"),
+      moveAppointments: z.boolean().optional().describe("With cascade: move linked appointments along with their phase (default true)"),
+      moveTasks: z.boolean().optional().describe("With cascade: move the dates of linked task cards too (default false)"),
+      dryRun: z.boolean().optional().describe("Work out and return what would change; save nothing"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      const ph = findPhase(sc, a.phase);
+      const patch = {};
+      let resolved = null;
+      if (a.name !== undefined) {
+        const name = a.name.trim();
+        const dup = sc.phases.find((x) => x.id !== ph.id && norm(x.name) === norm(name));
+        if (dup) throw new ToolError(`Another phase is already named "${dup.name}" (id ${dup.id}).`);
+        patch.name = name;
+      }
+      if (a.group !== undefined) patch.group = a.group.trim();
+      for (const k of ["trade", "notes"]) if (a[k] !== undefined) patch[k] = a[k];
+      if (a.color !== undefined) patch.color = a.color.trim() ? a.color.trim() : FieldValue.delete();
+      if (a.order !== undefined) patch.order = a.order;
+      if (a.status !== undefined) patch.status = phaseStatus(a.status);
+      if (a.percentComplete !== undefined) { patch.percentComplete = a.percentComplete; patch.percentMode = "manual"; }
+      if (a.percentMode !== undefined) patch.percentMode = a.percentMode;
+      if (a.contact !== undefined) { const c = await phaseContact(ctx, a.contact); patch.contactId = c.contactId; patch.contactName = c.contactName; }
+      if (a.predecessors !== undefined) patch.predecessors = listOrDelete(resolvePredecessors(sc, ph.id, a.predecessors));
+      if (a.clearDates) {
+        if (a.start !== undefined || a.end !== undefined) throw new ToolError("Pass either clearDates or new dates, not both.");
+        patch.start = FieldValue.delete();
+        patch.end = FieldValue.delete();
+        if (a.durationDays !== undefined) patch.durationDays = a.durationDays;
+        if (a.milestone !== undefined) patch.isMilestone = a.milestone;
+      } else if (["start", "end", "durationDays", "milestone"].some((k) => a[k] !== undefined)) {
+        const d = resolvePhaseDates(sc.cal, ph, { start: parseDay(a.start, ctx.tz), end: parseDay(a.end, ctx.tz), durationDays: a.durationDays, milestone: a.milestone });
+        resolved = d;
+        patch.start = d.startDay === null ? FieldValue.delete() : dayToMs(d.startDay, ctx.tz);
+        patch.end = d.endDay === null ? FieldValue.delete() : dayToMs(d.endDay, ctx.tz);
+        patch.durationDays = d.durationDays;
+        patch.isMilestone = d.isMilestone;
+      }
+      if (!Object.keys(patch).length) throw new ToolError("Nothing to update — pass at least one field.");
+      const options = ["project", "phase", "cascade", "moveAppointments", "moveTasks", "dryRun"];
+      const updated = Object.keys(a).filter((k) => !options.includes(k) && a[k] !== undefined);
+      // What the new dates do to this phase and, with cascade, to everything that follows it.
+      let moves = [], linked = { appointments: [], tasks: [] };
+      if (resolved && resolved.startDay !== null && resolved.endDay !== null) {
+        const plan = schedule.planCascade(sc.phases, ph.id, resolved.startDay, resolved.endDay, sc.cal, !!a.cascade);
+        if (plan.loop) throw new ToolError(loopMessage(plan.loop));
+        moves = plan.moves;
+        if (a.cascade) linked = linkedMoves(ctx, sc, moves, { moveAppointments: a.moveAppointments !== false, moveTasks: !!a.moveTasks });
+      }
+      if (a.dryRun) return json({ dryRun: true, saved: false, wouldUpdate: updated, ...cascadeView(ctx, moves, linked) });
+      // Targeted updates, never whole-document saves, so fields this build doesn't know about survive.
+      const now = Date.now();
+      const batch = ctx.db.batch();
+      batch.update(phasesCol(ctx, p.id).doc(ph.id), { ...patch, updatedAt: now, updatedBy: ctx.email });
+      addCascadeWrites(batch, ctx, p, sc, moves.filter((m) => !m.isOrigin), linked, now);
+      await batch.commit();
+      const after = await loadSchedule(ctx, p);
+      const followers = moves.filter((m) => !m.isOrigin);
+      return json({
+        updated,
+        ...phaseDetail(after.phases.find((x) => x.id === ph.id), after, ctx),
+        alsoMoved: followers.length || linked.appointments.length || linked.tasks.length ? cascadeView(ctx, followers, linked) : undefined,
+      });
+    });
+
+  reg("shift_phase",
+    "Move a phase earlier or later by a number of WORKING days, keeping its length, and (unless cascade is false) every phase that follows it through the predecessors. A follower keeps its place relative to the earliest day its predecessors allow, so gaps and overlaps that were there stay, a follower held up by something else does not move, and a phase that is Done never moves. The baseline never moves, so slip shows afterwards. Linked appointments move with their phase unless moveAppointments is false (repeating appointments and ones already past are left alone); linked task cards' dates move only if moveTasks is true. ALWAYS run with dryRun: true first and show the person what would move before doing it for real.",
+    {
+      project: z.string().describe("Project name or ID"),
+      phase: z.string().describe("Phase name or ID"),
+      days: z.number().int().describe("Working days to move it: positive is later, negative is earlier"),
+      cascade: z.boolean().optional().describe("Also move the phases that follow (default true)"),
+      moveAppointments: z.boolean().optional().describe("Move linked appointments along with their phase (default true)"),
+      moveTasks: z.boolean().optional().describe("Move the dates of linked task cards too (default false)"),
+      dryRun: z.boolean().optional().describe("Work out and return what would move; save nothing"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      const ph = findPhase(sc, a.phase);
+      if (!a.days) throw new ToolError("days must be a number of working days other than 0.");
+      const target = schedule.shiftedDays(ph, a.days, sc.cal);
+      if (!target) throw new ToolError(`"${ph.name}" has no dates to shift. Give it dates with update_phase first.`);
+      const plan = schedule.planCascade(sc.phases, ph.id, target[0], target[1], sc.cal, a.cascade !== false);
+      if (plan.loop) throw new ToolError(loopMessage(plan.loop));
+      const linked = linkedMoves(ctx, sc, plan.moves, { moveAppointments: a.moveAppointments !== false, moveTasks: !!a.moveTasks });
+      if (a.dryRun) return json({ dryRun: true, saved: false, project: p.name, ...cascadeView(ctx, plan.moves, linked) });
+      const batch = ctx.db.batch();
+      addCascadeWrites(batch, ctx, p, sc, plan.moves, linked, Date.now());
+      await batch.commit();
+      const after = await loadSchedule(ctx, p);
+      return json({ shifted: true, project: p.name, ...cascadeView(ctx, plan.moves, linked), totals: scheduleTotals(after) });
+    });
+
+  reg("look_ahead",
+    "The look-ahead for a project: what is coming up from today through the end of this week, or 2 or 3 weeks (up to 6) - the phases running or starting, the site-calendar appointments (repeating ones expanded) and the task cards due - grouped by day or by trade, with a Behind section on top: phases that should have started or finished and haven't, and overdue task cards. The same as the Look-ahead view on the app's Schedule tab.",
+    {
+      project: z.string().describe("Project name or ID"),
+      weeks: z.number().int().min(1).max(6).optional().describe("1 = this week, 2 (default) or 3 weeks; counts this week as the first"),
+      groupBy: z.enum(["day", "trade"]).optional().describe("day (default): what happens on each day; trade: by each phase's trade, with its linked visits and cards"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      return json(buildLookAhead(ctx, sc, a.weeks || 2, a.groupBy || "day"));
+    });
+
+  reg("delete_phase",
+    "Permanently remove a phase from the schedule. Its linked tasks and appointments are kept exactly as they are and simply come off the phase, and it is removed from the predecessors of any phase that was waiting on it. Ask the person before calling this on anything that isn't obviously a duplicate or test.",
+    { project: z.string().describe("Project name or ID"), phase: z.string().describe("Phase name or ID") },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      const ph = findPhase(sc, a.phase);
+      const waiting = sc.phases.filter((x) => x.predecessors.some((q) => q.phaseId === ph.id));
+      const now = Date.now();
+      const batch = ctx.db.batch();
+      batch.delete(phasesCol(ctx, p.id).doc(ph.id));
+      for (const x of waiting) {
+        batch.update(phasesCol(ctx, p.id).doc(x.id), { predecessors: listOrDelete(x.predecessors.filter((q) => q.phaseId !== ph.id)), updatedAt: now, updatedBy: ctx.email });
+      }
+      await batch.commit();
+      const nTasks = ph.taskIds.filter((id) => sc.taskById.has(id)).length;
+      const nAppts = ph.appointmentIds.filter((id) => sc.apptById.has(id)).length;
+      return text(`Deleted phase "${ph.name}" (id ${ph.id}) from ${p.name}.`
+        + (nTasks || nAppts ? ` Its ${nTasks} linked task(s) and ${nAppts} linked appointment(s) are kept and are no longer on a phase.` : "")
+        + (waiting.length ? ` Removed it as a predecessor of: ${waiting.map((x) => x.name).join(", ")}.` : ""));
+    });
+
+  reg("link_to_phase",
+    "Put existing tasks and/or site-calendar appointments on a schedule phase, so the phase shows their checklist progress and visits. A task or appointment is on at most one phase: linking one that is already on another phase moves it. The tasks and appointments themselves are not changed.",
+    {
+      project: z.string().describe("Project name or ID"),
+      phase: z.string().describe("Phase name or ID"),
+      tasks: z.array(z.string()).optional().describe("Task titles or IDs"),
+      appointments: z.array(z.string()).optional().describe("Appointment IDs (from list_appointments) or exact titles"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      const target = findPhase(sc, a.phase);
+      const { taskIds, apptIds } = resolveLinks(sc, a);
+      if (!taskIds.length && !apptIds.length) throw new ToolError("Pass tasks and/or appointments to link.");
+      const now = Date.now();
+      const batch = ctx.db.batch();
+      const movedFrom = [];
+      for (const x of sc.phases) {
+        const isTarget = x.id === target.id;
+        const nextTasks = isTarget ? [...new Set([...x.taskIds, ...taskIds])] : x.taskIds.filter((id) => !taskIds.includes(id));
+        const nextAppts = isTarget ? [...new Set([...x.appointmentIds, ...apptIds])] : x.appointmentIds.filter((id) => !apptIds.includes(id));
+        if (nextTasks.length === x.taskIds.length && nextAppts.length === x.appointmentIds.length) continue;
+        if (!isTarget) movedFrom.push(x.name);
+        batch.update(phasesCol(ctx, p.id).doc(x.id), { taskIds: listOrDelete(nextTasks), appointmentIds: listOrDelete(nextAppts), updatedAt: now, updatedBy: ctx.email });
+      }
+      await batch.commit();
+      const after = await loadSchedule(ctx, p);
+      return json({
+        linked: { tasks: taskIds.map((id) => sc.taskById.get(id).title), appointments: apptIds.map((id) => sc.apptById.get(id).title) },
+        movedFrom: movedFrom.length ? movedFrom : undefined,
+        ...phaseDetail(after.phases.find((x) => x.id === target.id), after, ctx),
+      });
+    });
+
+  reg("unlink_from_phase",
+    "Take tasks and/or appointments off their schedule phase. The tasks and appointments themselves are kept unchanged. Pass phase to unlink only from that phase; leave it out to unlink each one from whichever phase it is on.",
+    {
+      project: z.string().describe("Project name or ID"),
+      phase: z.string().optional().describe("Phase name or ID"),
+      tasks: z.array(z.string()).optional().describe("Task titles or IDs"),
+      appointments: z.array(z.string()).optional().describe("Appointment IDs or exact titles"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      const only = a.phase ? findPhase(sc, a.phase) : null;
+      const { taskIds, apptIds } = resolveLinks(sc, a, { allowStale: true });
+      if (!taskIds.length && !apptIds.length) throw new ToolError("Pass tasks and/or appointments to unlink.");
+      const now = Date.now();
+      const batch = ctx.db.batch();
+      const from = [];
+      let unlinked = 0;
+      for (const x of sc.phases) {
+        if (only && x.id !== only.id) continue;
+        const nextTasks = x.taskIds.filter((id) => !taskIds.includes(id));
+        const nextAppts = x.appointmentIds.filter((id) => !apptIds.includes(id));
+        const n = (x.taskIds.length - nextTasks.length) + (x.appointmentIds.length - nextAppts.length);
+        if (!n) continue;
+        unlinked += n;
+        from.push(x.name);
+        batch.update(phasesCol(ctx, p.id).doc(x.id), { taskIds: listOrDelete(nextTasks), appointmentIds: listOrDelete(nextAppts), updatedAt: now, updatedBy: ctx.email });
+      }
+      await batch.commit();
+      if (!unlinked) return text(only ? `Nothing to unlink: none of those are on "${only.name}".` : "Nothing to unlink: none of those are on a phase.");
+      return json({ unlinked, from });
+    });
+
+  reg("import_schedule",
+    "Load a whole schedule in one go, one row per phase. Each row needs a name and either start + end, start + durationDays, or one date with milestone: true. Rows are added below the existing phases in the order given. A row whose name is already a phase is skipped, so the same import can safely be run again. asBaseline also records these dates as the baseline (the original plan that slip is measured against). dryRun returns what would be created and any problems WITHOUT saving - run it first and show the person. If any row has a problem nothing at all is saved.",
+    {
+      project: z.string().describe("Project name or ID"),
+      rows: z.array(z.object({
+        name: z.string(),
+        start: z.string().optional().describe("YYYY-MM-DD"),
+        end: z.string().optional().describe("YYYY-MM-DD, the last working day"),
+        durationDays: z.number().int().min(1).optional(),
+        group: z.string().optional(),
+        milestone: z.boolean().optional(),
+        trade: z.string().optional(),
+        notes: z.string().optional(),
+        status: z.string().optional().describe(statusDoc),
+      })).min(1).max(300),
+      asBaseline: z.boolean().optional().describe("Also set the baseline to these dates"),
+      dryRun: z.boolean().optional().describe("Check and preview only; save nothing"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      const existing = new Set(sc.phases.map((x) => norm(x.name)));
+      const seen = new Set();
+      const make = [], skipped = [], problems = [];
+      a.rows.forEach((row, i) => {
+        const name = String(row.name ?? "").trim();
+        try {
+          if (!name) throw new ToolError("No name.");
+          if (seen.has(norm(name))) throw new ToolError("Same name as an earlier row.");
+          seen.add(norm(name));
+          if (existing.has(norm(name))) { skipped.push(name); return; }
+          const start = parseDay(row.start, ctx.tz), end = parseDay(row.end, ctx.tz);
+          if (start === undefined && end === undefined) throw new ToolError("No dates.");
+          const dates = resolvePhaseDates(sc.cal, {}, { start, end, durationDays: row.durationDays, milestone: row.milestone });
+          make.push({ name, group: (row.group ?? "").trim(), ...dates, trade: row.trade ?? "", notes: row.notes ?? "", status: row.status !== undefined ? phaseStatus(row.status) : "Not started" });
+        } catch (e) {
+          problems.push(`Row ${i + 1}${name ? ` (${name})` : ""}: ${e.message}`);
+        }
+      });
+      const preview = (m) => ({
+        name: m.name, group: m.group || undefined,
+        start: schedule.fmtDay(m.startDay), end: schedule.fmtDay(m.endDay), workingDays: m.durationDays,
+        milestone: m.isMilestone || undefined, status: m.status !== "Not started" ? m.status : undefined,
+      });
+      if (a.dryRun) {
+        return json({
+          dryRun: true, saved: false, project: p.name, wouldCreate: make.length, asBaseline: !!a.asBaseline,
+          phases: make.map(preview),
+          skippedAlreadyOnSchedule: skipped.length ? skipped : undefined,
+          problems: problems.length ? problems : undefined,
+          note: problems.length ? "Nothing will be saved while any row has a problem. Fix them, then run without dryRun." : undefined,
+        });
+      }
+      if (problems.length) throw new ToolError(`Nothing was saved. Fix these rows and run it again:\n- ${problems.join("\n- ")}`);
+      if (!make.length) return json({ created: 0, skippedAlreadyOnSchedule: skipped, note: "Every row is already on the schedule." });
+      const now = Date.now();
+      let order = sc.phases.reduce((m, x) => Math.max(m, x.order), 0);
+      for (let i = 0; i < make.length; i += 400) { // a Firestore batch holds at most 500 writes
+        const batch = ctx.db.batch();
+        for (const m of make.slice(i, i + 400)) {
+          const ref = phasesCol(ctx, p.id).doc();
+          const start = dayToMs(m.startDay, ctx.tz), end = dayToMs(m.endDay, ctx.tz);
+          batch.set(ref, schedule.phaseWriteMap({
+            id: ref.id, projectId: p.id, environmentId: ctx.envId,
+            name: m.name, group: m.group, order: ++order,
+            start, end, durationDays: m.durationDays, isMilestone: m.isMilestone,
+            trade: m.trade, notes: m.notes, status: m.status,
+            baselineStart: a.asBaseline ? start : null, baselineEnd: a.asBaseline ? end : null,
+            createdAt: now, updatedAt: now, updatedBy: ctx.email,
+          }));
+        }
+        await batch.commit();
+      }
+      const after = await loadSchedule(ctx, p);
+      const made = new Set(make.map((m) => norm(m.name)));
+      return json({
+        created: make.length, baselineSet: !!a.asBaseline,
+        skippedAlreadyOnSchedule: skipped.length ? skipped : undefined,
+        totals: scheduleTotals(after),
+        phases: after.phases.filter((x) => made.has(norm(x.name))).map((x) => phaseSummary(x, after)),
+      });
+    });
+
+  reg("set_baseline",
+    "Record the current dates as the baseline: the original plan that slip is measured against and that shows as ghost bars behind the schedule. For every phase, or only the ones listed. A phase that already has a baseline is left alone unless overwrite is true, so the original plan can't be wiped by accident - ask the person before using overwrite.",
+    {
+      project: z.string().describe("Project name or ID"),
+      phases: z.array(z.string()).optional().describe("Phase names or IDs; leave out for every phase"),
+      overwrite: z.boolean().optional().describe("Replace a baseline that is already set"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const sc = await loadSchedule(ctx, p);
+      const targets = a.phases && a.phases.length ? [...new Map(a.phases.map((q) => findPhase(sc, q)).map((x) => [x.id, x])).values()] : sc.phases;
+      if (!targets.length) throw new ToolError(`${p.name} has no schedule phases yet.`);
+      const undated = targets.filter((x) => x.startDay === null || x.endDay === null);
+      const kept = targets.filter((x) => !undated.includes(x) && !a.overwrite && (x.baselineStartDay !== null || x.baselineEndDay !== null));
+      const todo = targets.filter((x) => !undated.includes(x) && !kept.includes(x));
+      if (todo.length) {
+        const now = Date.now();
+        const batch = ctx.db.batch();
+        for (const x of todo) batch.update(phasesCol(ctx, p.id).doc(x.id), { baselineStart: x.start, baselineEnd: x.end, updatedAt: now, updatedBy: ctx.email });
+        await batch.commit();
+      }
+      const after = await loadSchedule(ctx, p);
+      const names = (xs) => (xs.length ? xs.map((x) => x.name) : undefined);
+      return json({
+        project: p.name,
+        baselineSet: todo.map((x) => x.name),
+        keptExistingBaseline: names(kept),
+        skippedNoDates: names(undated),
+        note: kept.length ? "Phases that already had a baseline were left alone. Pass overwrite: true to replace it." : undefined,
+        totals: scheduleTotals(after),
+      });
     });
 
   // ---- contacts ----------------------------------------------------------------------------
@@ -1011,6 +1915,193 @@ function buildServer(ctx) {
       return text(`Revoked ${keys.size} access key(s) and ${toks.size} active login(s) for ${email}.`);
     });
 
+  // ---- daily log ---------------------------------------------------------------------------
+  const sectionKeys = dailyReport.SECTIONS.map(([k]) => k);
+  const sectionDoc = "Sections: " + dailyReport.SECTIONS.map(([k, t]) => `${k} (${t})`).join(", ");
+  const resolveLogDate = (d) => {
+    if (!d || /^today$/i.test(d)) return dailyReport.todayIn(ctx.tz);
+    if (/^yesterday$/i.test(d)) { const t = new Date(Date.parse(dailyReport.todayIn(ctx.tz) + "T12:00:00Z") - 86400000); return t.toISOString().slice(0, 10); }
+    if (!dailyReport.isLogDate(d)) throw new ToolError(`Date must be YYYY-MM-DD, 'today' or 'yesterday' (got "${d}").`);
+    return d;
+  };
+  const logView = (log, projectName) => ({
+    project: projectName, date: log.date, dayOfWeek: new Date(log.date + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" }),
+    weather: dailyReport.weatherLine(log) || undefined,
+    weatherReadings: log.weatherReadings.length ? log.weatherReadings.map((r) => ({ when: dailyReport.SLOT_LABEL[r.slot] || r.slot, at: fmtDateTime(r.at, ctx.tz), tempF: r.tempF, conditions: r.conditions, windMph: r.windMph, precip: r.precip })) : undefined,
+    noWorkLogged: (!log.crewOnSite.length && !log.workCompleted.length && !log.deliveriesInspections.length && !log.issuesDelays.length && !log.tomorrowPlan.length && !log.notes && !log.photos.length) || undefined,
+    ...Object.fromEntries(dailyReport.SECTIONS.map(([k]) => [k, log[k]])),
+    notes: log.notes || undefined,
+    photos: log.photos.length ? log.photos.map((p) => ({ name: p.name, url: p.url })) : undefined,
+    contributors: log.contributors,
+    lastUpdated: log.updatedAt ? fmtDateTime(log.updatedAt, ctx.tz) : undefined,
+    pdfUrl: log.pdfUrl || undefined,
+    pdfIsCurrent: log.pdfUrl ? log.pdfBuiltAt >= log.updatedAt : undefined,
+    recentAdditions: log.entries.slice(-5).map((e) => ({ by: e.by, at: fmtDateTime(e.at, ctx.tz), source: e.source, text: e.text })),
+  });
+
+  reg("get_daily_log",
+    "The daily log / daily report for a project on one day: weather, crew & subs on site, work completed, deliveries & inspections, issues & delays, plan for tomorrow, notes, photos. Defaults to today.",
+    { project: z.string().describe("Project name or ID"), date: z.string().optional().describe("YYYY-MM-DD, 'today' (default) or 'yesterday'") },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const date = resolveLogDate(a.date);
+      const log = await dailyReport.getLog(ctx.db, p.id, date);
+      if (!log) return json({ project: p.name, date, empty: true, note: "No log for this day yet. Use add_to_daily_log to start one." });
+      return json(logView(log, p.name));
+    });
+
+  reg("list_daily_logs",
+    "Which days have a daily log for a project, newest first, with a one-line summary each. Use get_daily_log for the full day.",
+    { project: z.string().describe("Project name or ID"), from: z.string().optional().describe("YYYY-MM-DD"), to: z.string().optional().describe("YYYY-MM-DD"), limit: z.number().int().min(1).max(200).optional() },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const logs = await dailyReport.listLogs(ctx.db, p.id, { from: a.from, to: a.to, limit: a.limit || 60 });
+      return json({ project: p.name, count: logs.length, days: logs.map((l) => ({
+        date: l.date, weather: dailyReport.weatherLine(l) || undefined, noWorkLogged: (!l.crewOnSite.length && !l.workCompleted.length && !l.notes) || undefined,
+        summary: `${l.workCompleted.length} work item(s), ${l.crewOnSite.length} crew line(s), ${l.issuesDelays.length} issue(s), ${l.photos.length} photo(s)`,
+        contributors: l.contributors, pdf: l.pdfUrl ? (l.pdfBuiltAt >= l.updatedAt ? "current" : "stale") : "none",
+      })) });
+    });
+
+  reg("add_to_daily_log",
+    `Add to a project's daily log for a day (today by default) WITHOUT overwriting what's already there - lines are appended to the sections you give, duplicates skipped, and the raw text you were given is kept with your name on it. This is what Sierra and the morning planning session should use. Sort what the person said into sections yourself. ${sectionDoc}.`,
+    {
+      project: z.string().describe("Project name or ID"),
+      date: z.string().optional().describe("YYYY-MM-DD, 'today' (default) or 'yesterday'"),
+      crewOnSite: z.array(z.string()).optional().describe("e.g. 'JR + 2 helpers - roofing', 'Jeff, Ian, Owen - lanai'"),
+      workCompleted: z.array(z.string()).optional(),
+      deliveriesInspections: z.array(z.string()).optional(),
+      issuesDelays: z.array(z.string()).optional(),
+      tomorrowPlan: z.array(z.string()).optional(),
+      notes: z.string().optional().describe("Free text appended to the Notes section"),
+      weather: z.string().optional().describe("Weather NOTES in the person's words ('rained out at 1:30'). Readings at 7 AM / noon / 4 PM are recorded automatically; don't restate them here."),
+      rawText: z.string().optional().describe("What the person actually said, verbatim, so nothing is lost in the sorting"),
+      source: z.enum(["claude", "sierra", "app"]).optional().describe("Default claude"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const date = resolveLogDate(a.date);
+      const add = Object.fromEntries(sectionKeys.filter((k) => Array.isArray(a[k]) && a[k].length).map((k) => [k, a[k]]));
+      if (!Object.keys(add).length && !a.notes && !a.weather) throw new ToolError("Nothing to add — pass at least one section, notes, or weather.");
+      const { log, changed } = await dailyReport.upsertLog(ctx.db, { projectId: p.id, project: p, date, by: ctx.email, source: a.source || "claude", add, notes: a.notes, weather: a.weather, rawText: a.rawText });
+      return json({ added: changed, ...logView(log, p.name) });
+    });
+
+  reg("set_daily_log_section",
+    `Replace one whole section of a day's log with a new list of lines (use when the person asks to rewrite or remove items; add_to_daily_log is the normal way to add). ${sectionDoc}.`,
+    {
+      project: z.string(), date: z.string().optional(),
+      section: z.enum(sectionKeys), lines: z.array(z.string()).describe("The full new list; empty clears the section"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const date = resolveLogDate(a.date);
+      const { log } = await dailyReport.upsertLog(ctx.db, { projectId: p.id, project: p, date, by: ctx.email, source: "claude", replace: { [a.section]: a.lines } });
+      return json({ replaced: a.section, ...logView(log, p.name) });
+    });
+
+  reg("daily_report_pdf",
+    "Build (or rebuild) the formatted PDF of a day's daily log and return its link. The PDF is also filed under the project's Files tab in the 'Daily Reports' folder, so the crew can open it in the app. Use the link when the person wants to email or print the report.",
+    { project: z.string(), date: z.string().optional().describe("YYYY-MM-DD, 'today' (default) or 'yesterday'"), force: z.boolean().optional().describe("Rebuild even if the stored PDF is current") },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const date = resolveLogDate(a.date);
+      const log = (await dailyReport.getLog(ctx.db, p.id, date)) || dailyReport.normalizeLog(p.id, date, {});
+      if (!a.force && log.pdfUrl && log.pdfBuiltAt >= log.updatedAt) return json({ project: p.name, date, url: log.pdfUrl, rebuilt: false });
+      const names = await dailyReport.namesForEmails(ctx.db, [...log.contributors, log.createdBy, ctx.email]);
+      const { url, fileName } = await dailyReport.buildAndFilePdf(ctx.db, { projectId: p.id, project: p, log, names, builtBy: ctx.email });
+      return json({ project: p.name, date, url, fileName, rebuilt: true, emailSubject: `Daily Report - ${p.name} - ${date}` });
+    });
+
+  // ---- weekly report (see weeklyReport.js) ----------------------------------------------------
+  const resolveWeek = (d) => weeklyReport.weekStartOf(resolveLogDate(d));
+  const weeklyView = (r, projectName) => cleanForWrite({
+    project: projectName, week: `${weeklyReport.shortDay(r.weekStart)} to ${weeklyReport.shortDay(r.weekEnd)}`, weekStart: r.weekStart,
+    status: r.status, edited: r.edited || undefined,
+    daysLogged: r.daysLogged.map(weeklyReport.shortDay), summary: r.summary,
+    weather: r.weather, precipDays: r.precipDays || undefined, crew: r.crew, subsOnSite: r.subsOnSite,
+    workCompleted: r.workCompleted, deliveriesInspections: r.deliveriesInspections,
+    issues: r.issues.map((x) => cleanForWrite({ text: x.text, status: x.status, since: x.firstSeen ? weeklyReport.shortDay(x.firstSeen) : undefined })),
+    nextWeek: r.nextWeek, photos: r.photos, notes: r.notes,
+    lastBuilt: r.builtAt ? fmtDateTime(r.builtAt, ctx.tz) : undefined, lastUpdated: r.updatedAt ? fmtDateTime(r.updatedAt, ctx.tz) : undefined,
+    pdfUrl: r.pdfUrl || undefined, pdfIsCurrent: r.pdfUrl ? weeklyReport.pdfIsCurrent(r) : undefined,
+  });
+  const weekDoc = "Any date in the week, as YYYY-MM-DD, 'today' (default) or 'yesterday'. Weeks run Monday to Sunday.";
+
+  reg("list_weekly_reports",
+    "Which weeks have a weekly report for a project, newest first: the week, Draft or Final, whether someone edited it, the summary, and whether its PDF is current.",
+    { project: z.string().describe("Project name or ID"), from: z.string().optional().describe("YYYY-MM-DD"), to: z.string().optional().describe("YYYY-MM-DD") },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const list = await weeklyReport.listWeekly(ctx.db, p.id, { from: a.from, to: a.to });
+      return json({ project: p.name, count: list.length, weeks: list.map((r) => cleanForWrite({
+        weekStart: r.weekStart, week: `${weeklyReport.shortDay(r.weekStart)} to ${weeklyReport.shortDay(r.weekEnd)}`, status: r.status, edited: r.edited || undefined,
+        daysLogged: r.daysLogged.length, summary: r.summary, pdf: r.pdfUrl ? (weeklyReport.pdfIsCurrent(r) ? "current" : "stale") : "none",
+      })) });
+    });
+
+  reg("get_weekly_report",
+    "The weekly report for the week containing a date: the summary, weather, crew and subs on site, work completed by who did it, deliveries and inspections, issues (open or cleared), next week, photos and notes.",
+    { project: z.string().describe("Project name or ID"), date: z.string().optional().describe(weekDoc) },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const weekStart = resolveWeek(a.date);
+      const r = await weeklyReport.getWeekly(ctx.db, p.id, weekStart);
+      if (!r) return json({ project: p.name, weekStart, empty: true, note: "No weekly report for that week yet. Use build_weekly_report to make one from the daily logs." });
+      return json(weeklyView(r, p.name));
+    });
+
+  reg("build_weekly_report",
+    "Build (or rebuild) the weekly report for the week containing a date from that week's daily logs, as a Draft. A report someone has edited, or marked Final, is left as it is unless force is true - ask the person before forcing, because it replaces their edits. A forced rebuild goes back to Draft.",
+    { project: z.string().describe("Project name or ID"), date: z.string().optional().describe(weekDoc), force: z.boolean().optional().describe("Rebuild over edits or a Final report") },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const weekStart = resolveWeek(a.date);
+      const r = await weeklyReport.buildAndSaveWeekly(ctx.db, { project: p, weekStart, by: ctx.email, force: !!a.force, tz: ctx.tz });
+      if (!r.built) {
+        return json({ built: false, reason: r.reason, note: `Left as it is because it's ${r.reason === "final" ? "marked Final" : "been edited"}. Pass force: true to rebuild over it - ask the person first.`, ...weeklyView(r.report, p.name) });
+      }
+      return json({ built: true, ...weeklyView(r.report, p.name) });
+    });
+
+  reg("set_weekly_report_section",
+    "Replace one section of a weekly report with new wording - for example rewrite the summary, or fix who did a piece of work. Marks the report as edited, so the Saturday run won't rebuild over it. Sections: summary (text); weather, crew, subsOnSite, deliveriesInspections, nextWeek, notes (lines); workCompleted (groups of who + lines); issues (text + open or cleared); status (text: Draft or Final). Pass the whole new section; an empty list clears it.",
+    {
+      project: z.string().describe("Project name or ID"),
+      date: z.string().optional().describe(weekDoc),
+      section: z.enum(["summary", "weather", "crew", "subsOnSite", "workCompleted", "deliveriesInspections", "issues", "nextWeek", "notes", "status"]),
+      text: z.string().optional().describe("For summary, or status (Draft / Final)"),
+      lines: z.array(z.string()).optional().describe("For weather, crew, subsOnSite, deliveriesInspections, nextWeek, notes"),
+      groups: z.array(z.object({ who: z.string(), lines: z.array(z.string()) })).optional().describe("For workCompleted"),
+      issues: z.array(z.object({ text: z.string(), status: z.enum(["open", "cleared"]), firstSeen: z.string().optional().describe("YYYY-MM-DD") })).optional().describe("For issues"),
+    },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const weekStart = resolveWeek(a.date);
+      const value = a.section === "summary" || a.section === "status" ? a.text
+        : a.section === "workCompleted" ? a.groups
+        : a.section === "issues" ? a.issues
+        : a.lines;
+      if (value === undefined) throw new ToolError(`Pass ${a.section === "summary" || a.section === "status" ? "text" : a.section === "workCompleted" ? "groups" : a.section === "issues" ? "issues" : "lines"} for the ${a.section} section.`);
+      let r;
+      try { r = await weeklyReport.setWeeklySection(ctx.db, { projectId: p.id, weekStart, section: a.section, value, by: ctx.email }); } catch (e) { throw new ToolError(e.message); }
+      return json({ updated: a.section, ...weeklyView(r, p.name) });
+    });
+
+  reg("weekly_report_pdf",
+    "Build (or rebuild) the formatted PDF of a weekly report and return its link, plus an email subject and body. The PDF is filed under the project's Files tab in the 'Weekly Reports' folder. Builds the report from the logs first if the week has none yet.",
+    { project: z.string().describe("Project name or ID"), date: z.string().optional().describe(weekDoc), force: z.boolean().optional().describe("Rebuild the PDF even if the stored one is current") },
+    async (a) => {
+      const p = await findProject(ctx, a.project);
+      const weekStart = resolveWeek(a.date);
+      let r = await weeklyReport.getWeekly(ctx.db, p.id, weekStart);
+      if (!r) r = (await weeklyReport.buildAndSaveWeekly(ctx.db, { project: p, weekStart, by: ctx.email, tz: ctx.tz })).report;
+      const emailSubject = `Weekly Report - ${p.name} - week of ${weeklyReport.weekRange(weekStart)}`;
+      if (!a.force && weeklyReport.pdfIsCurrent(r)) return json({ project: p.name, weekStart, url: r.pdfUrl, rebuilt: false, emailSubject, emailBody: weeklyReport.weeklyPlainText(r, p.name) });
+      const { url, fileName } = await weeklyReport.buildAndFileWeeklyPdf(ctx.db, { project: p, report: r, builtBy: ctx.email });
+      return json({ project: p.name, weekStart, url, fileName, rebuilt: true, emailSubject, emailBody: weeklyReport.weeklyPlainText({ ...r, pdfUrl: url }, p.name) });
+    });
+
   return server;
 }
 
@@ -1094,4 +2185,4 @@ const crewsyncMcp = onRequest({ secrets: [MCP_AUTH_TOKEN], invoker: "public", ti
   app(req, res);
 });
 
-module.exports = { crewsyncMcp, buildServer, resolveContext, expandAppointment, parseDate, fmtDateTime, fmtDate, zonedToUtc, utcToZoned };
+module.exports = { crewsyncMcp, buildServer, resolveContext, expandAppointment, parseDate, fmtDateTime, fmtDate, zonedToUtc, utcToZoned, msToDay, dayToMs };

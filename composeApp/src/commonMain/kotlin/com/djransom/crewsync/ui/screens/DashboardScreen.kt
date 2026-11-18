@@ -147,6 +147,12 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
         }, { it.createdAt }))
     }
 
+    // Archived projects are hidden unless "Show archived" is on; then only they show
+    var showArchived by remember { mutableStateOf(false) }
+    val archivedCount = sortedProjects.count { it.archived }
+    LaunchedEffect(archivedCount) { if (archivedCount == 0) showArchived = false }
+    val visibleProjects = sortedProjects.filter { it.archived == showArchived }
+
     // For SuperAdmin diagnostic info
     val allUsersCountFlow = remember(isSuperAdmin) {
         if (isSuperAdmin) {
@@ -297,10 +303,17 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = t("Active Projects"),
-                    style = MaterialTheme.typography.headlineSmall
-                )
+                Column {
+                    Text(
+                        text = if (showArchived) t("Archived Projects") else t("Active Projects"),
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                    if (archivedCount > 0) {
+                        TextButton(onClick = { showArchived = !showArchived }, contentPadding = PaddingValues(0.dp)) {
+                            Text(if (showArchived) t("Back to active projects") else t("Show archived ({0})", archivedCount))
+                        }
+                    }
+                }
                 
                 // View Mode Toggle
                 Row {
@@ -325,27 +338,27 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            if (sortedProjects.isEmpty()) {
+            if (visibleProjects.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(t("No projects assigned to you."))
+                    Text(if (showArchived) t("No archived projects.") else t("No projects assigned to you."))
                 }
             } else {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    items(sortedProjects) { project ->
+                    items(visibleProjects) { project ->
                         if (viewMode == "Cards") {
                             ProjectCard(
                                 project = project,
-                                isFirst = project == sortedProjects.first(),
-                                isLast = project == sortedProjects.last(),
+                                isFirst = project == visibleProjects.first(),
+                                isLast = project == visibleProjects.last(),
                                 onClick = { onProjectClick(project.id) },
                                 onMove = { dir ->
-                                    val currentOrder = userProfile?.projectOrder?.toMutableList() ?: sortedProjects.map { it.id }.toMutableList()
+                                    val currentOrder = userProfile?.projectOrder?.toMutableList() ?: visibleProjects.map { it.id }.toMutableList()
                                     if (!currentOrder.contains(project.id)) {
                                         currentOrder.clear()
-                                        currentOrder.addAll(sortedProjects.map { it.id })
+                                        currentOrder.addAll(visibleProjects.map { it.id })
                                     }
                                     val idx = currentOrder.indexOf(project.id)
                                     val newIdx = idx + dir
@@ -362,14 +375,14 @@ fun DashboardScreen(onLogout: () -> Unit, onProjectClick: (String) -> Unit) {
                         } else {
                             ProjectListItem(
                                 project = project,
-                                isFirst = project == sortedProjects.first(),
-                                isLast = project == sortedProjects.last(),
+                                isFirst = project == visibleProjects.first(),
+                                isLast = project == visibleProjects.last(),
                                 onClick = { onProjectClick(project.id) },
                                 onMove = { dir ->
-                                    val currentOrder = userProfile?.projectOrder?.toMutableList() ?: sortedProjects.map { it.id }.toMutableList()
+                                    val currentOrder = userProfile?.projectOrder?.toMutableList() ?: visibleProjects.map { it.id }.toMutableList()
                                     if (!currentOrder.contains(project.id)) {
                                         currentOrder.clear()
-                                        currentOrder.addAll(sortedProjects.map { it.id })
+                                        currentOrder.addAll(visibleProjects.map { it.id })
                                     }
                                     val idx = currentOrder.indexOf(project.id)
                                     val newIdx = idx + dir

@@ -1,5 +1,6 @@
 package com.djransom.crewsync.ui.screens
 
+import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.i18n.t
 import com.djransom.crewsync.i18n.monthName
 import com.djransom.crewsync.i18n.monthDay
@@ -34,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.djransom.crewsync.data.model.Appointment
@@ -55,12 +57,33 @@ fun CalendarScreen(
     canEdit: Boolean,
     calendarShareEnabled: Boolean = false,
     calendarShareToken: String = "",
-    firstDayOfWeek: String = "Sunday"
+    firstDayOfWeek: String = "Sunday",
+    // The project's schedule phases and how to put an appointment on one - for the Phase chip in
+    // the appointment dialog. The link is kept on the phase; the appointment record is unchanged.
+    phases: List<SchedulePhase> = emptyList(),
+    onSetAppointmentPhase: ((appointmentId: String, phaseId: String?) -> Unit)? = null,
+    // For "Move the phase too?" when a linked appointment is moved to another day. Null: never asked.
+    scheduleActions: ScheduleActions? = null,
+    workCalendar: WorkCalendar? = null
 ) {
     val startDow = parseFirstDayOfWeek(firstDayOfWeek)
+    // The phase picked in the appointment dialog, held until the appointment itself has been saved.
+    var phaseChoice by remember { mutableStateOf<PhaseChoice?>(null) }
+    // A linked appointment was moved: the question, then (on yes) the shift waiting for its preview.
+    var movePhaseAsk by remember { mutableStateOf<MovePhaseAsk?>(null) }
+    var queuedPhaseShift by remember { mutableStateOf<PendingShift?>(null) }
+    var pendingPhaseShift by remember { mutableStateOf<PendingShift?>(null) }
+    var phaseShiftLoop by remember { mutableStateOf<List<String>?>(null) }
     val firestore = Firebase.firestore
     val scope = rememberCoroutineScope()
     
+    // Schedule phases drawn as banners (drawn from the phase records, never stored as appointments).
+    // Whether they show is remembered on this device; the choice is in the view menu.
+    val settings = rememberSettings()
+    var showPhases by remember { mutableStateOf(settings.getBoolean(SHOW_PHASES_KEY, true)) }
+    val bannerPhases = if (showPhases) phases else emptyList()
+    var openPhaseId by remember { mutableStateOf<String?>(null) }
+
     var viewMode by rememberSaveable { mutableStateOf("Month") }
     var currentMonth by remember { mutableStateOf(Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds()).toLocalDateTime(TimeZone.currentSystemDefault()).date) }
     var selectedDate by remember { mutableStateOf(currentMonth) }
@@ -83,13 +106,16 @@ fun CalendarScreen(
             currentMonth = currentMonth,
             viewMode = viewMode,
             onViewModeChange = { viewMode = it },
-            onMonthChange = { currentMonth = it }
+            onMonthChange = { currentMonth = it },
+            // Only offered once the project has a schedule.
+            showPhases = if (phases.any { it.start != null }) showPhases else null,
+            onShowPhasesChange = { showPhases = it; settings.putBoolean(SHOW_PHASES_KEY, it) }
         )
         Box(modifier = Modifier.weight(1f)) {
             when (viewMode) {
-                "Month" -> MonthView(currentMonth, selectedDate, tasks, appointments, startDow) { selectedDate = it }
-                "Week" -> WeekView(selectedDate, tasks, appointments, startDow) { selectedDate = it }
-                "Day" -> DayView(selectedDate, tasks, appointments)
+                "Month" -> MonthView(currentMonth, selectedDate, tasks, appointments, startDow, phases = bannerPhases) { selectedDate = it }
+                "Week" -> WeekView(selectedDate, tasks, appointments, startDow, phases = bannerPhases) { selectedDate = it }
+                "Day" -> DayView(selectedDate, tasks, appointments, phases = bannerPhases)
             }
         }
     }
@@ -111,7 +137,8 @@ fun CalendarScreen(
                     canEdit = canEdit,
                     onEdit = { appointmentToEdit = it },
                     onDelete = { showDeleteConfirm = it },
-                    modifier = Modifier.width(300.dp).fillMaxHeight()
+                    modifier = Modifier.width(300.dp).fillMaxHeight(),
+                    phases = bannerPhases, onPhaseClick = { openPhaseId = it.id }
                 )
             }
         } else {
@@ -124,7 +151,8 @@ fun CalendarScreen(
                     canEdit = canEdit,
                     onEdit = { appointmentToEdit = it },
                     onDelete = { showDeleteConfirm = it },
-                    modifier = Modifier.fillMaxWidth().weight(0.5f)
+                    modifier = Modifier.fillMaxWidth().weight(0.5f),
+                    phases = bannerPhases, onPhaseClick = { openPhaseId = it.id }
                 )
             }
         }
@@ -168,20 +196,90 @@ fun CalendarScreen(
                 onDismiss = { 
                     showAddAppointmentDialog = false
                     appointmentToEdit = null
+                    phaseChoice = null
                 },
+                phases = if (onSetAppointmentPhase != null) phases else emptyList(),
+                currentPhaseId = appointmentToEdit?.let { phaseOfAppointment(phases, it.id)?.id },
+                onPhasePicked = { phaseChoice = PhaseChoice(it) },
                 onConfirm = { appt ->
+                    val choice = phaseChoice
+                    phaseChoice = null
+                    val before = appointmentToEdit
                     scope.launch {
                         if (appt.id.isEmpty()) {
-                            firestore.collection("projects").document(projectId).collection("appointments").add(appt.toFirestoreMap())
+                            val added = firestore.collection("projects").document(projectId).collection("appointments").add(appt.toFirestoreMap())
+                            if (choice != null) onSetAppointmentPhase?.invoke(added.id, choice.phaseId)
                         } else {
                             firestore.collection("projects").document(projectId).collection("appointments").document(appt.id).set(appt.toFirestoreMap())
+                            if (choice != null) onSetAppointmentPhase?.invoke(appt.id, choice.phaseId)
                         }
                         showAddAppointmentDialog = false
                         appointmentToEdit = null
+                        // A linked appointment moved to another day: offer to move its phase too (the answer defaults to no).
+                        val phase = if (before != null && choice == null && before.recurrence == "None") phaseOfAppointment(phases, before.id) else null
+                        if (before != null && phase != null && scheduleActions != null && workCalendar != null && phase.start != null && phase.end != null) {
+                            val days = workCalendar.workingDaysBetween(timestampToDate(before.startDate), timestampToDate(appt.startDate))
+                            if (days != 0) {
+                                withFrameNanos { }   // let the appointment dialog finish closing first
+                                withFrameNanos { }
+                                movePhaseAsk = MovePhaseAsk(phase, days, before.id, appt.title)
+                            }
+                        }
                     }
                 }
             )
         }
+    }
+
+    // A phase tapped in the day's list: its read-only card, the same one the Schedule tab shows.
+    phases.firstOrNull { it.id == openPhaseId }?.let { phase ->
+        PhaseCardDialog(
+            phase, workCalendar ?: WorkCalendar(), tasks, appointments, scheduleToday(), TimeZone.currentSystemDefault(),
+            onDismiss = { openPhaseId = null }
+        )
+    }
+
+    movePhaseAsk?.let { ask ->
+        AlertDialog(
+            onDismissRequest = { movePhaseAsk = null },
+            title = { Text(t("Move the phase too?")) },
+            text = {
+                val moved = if (ask.days > 0) t("{0} working day(s) later", ask.days) else t("{0} working day(s) earlier", -ask.days)
+                Text(t("\"{0}\" is linked to the phase \"{1}\", and you moved it {2}. Move the phase by the same amount?", ask.appointmentTitle, ask.phase.name, moved))
+            },
+            // "No" is the default: it's the filled button, and tapping outside the box means no as well.
+            confirmButton = { Button(onClick = { movePhaseAsk = null }) { Text(t("No")) } },
+            dismissButton = {
+                TextButton(onClick = {
+                    movePhaseAsk = null
+                    val zone = TimeZone.currentSystemDefault()
+                    if (workCalendar != null) {
+                        shiftedDates(ask.phase, ask.days, workCalendar, zone)?.let { (s, e) ->
+                            when (val plan = planCascade(phases, ask.phase.id, s, e, workCalendar, zone)) {
+                                is ShiftPlan.Loop -> phaseShiftLoop = plan.names
+                                // The appointment itself has just been moved by hand, so the preview leaves it out.
+                                is ShiftPlan.Moves -> queuedPhaseShift = PendingShift(plan.moves, skipAppointmentId = ask.appointmentId)
+                            }
+                        }
+                    }
+                }) { Text(t("Move the phase")) }
+            }
+        )
+    }
+    // The question has to be fully gone before the preview opens (the web build goes unresponsive otherwise).
+    LaunchedEffect(queuedPhaseShift, movePhaseAsk) {
+        val next = queuedPhaseShift
+        if (next != null && movePhaseAsk == null) {
+            withFrameNanos { }
+            pendingPhaseShift = next
+            queuedPhaseShift = null
+        }
+    }
+    if (scheduleActions != null && workCalendar != null) {
+        ShiftPreviewHost(
+            pendingPhaseShift, phaseShiftLoop, tasks, appointments, workCalendar, scheduleToday(), TimeZone.currentSystemDefault(), scheduleActions,
+            onDone = { pendingPhaseShift = null; phaseShiftLoop = null }
+        )
     }
 
     if (showDeleteConfirm != null) {
@@ -227,16 +325,22 @@ private fun ScheduleForDayPanel(
     canEdit: Boolean,
     onEdit: (Appointment) -> Unit,
     onDelete: (Appointment) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    phases: List<SchedulePhase> = emptyList(),
+    onPhaseClick: ((SchedulePhase) -> Unit)? = null
 ) {
+    val zone = TimeZone.currentSystemDefault()
+    val dayPhases = remember(phases, selectedDate) { phasesOnDay(phases, selectedDate, zone) }
     Column(modifier = modifier) {
         Text(
             text = t("Schedule for {0} {1}, {2}", monthName(selectedDate.monthNumber), selectedDate.dayOfMonth, selectedDate.year),
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
+        // The schedule phases running that day, above the day's tasks and appointments.
+        PhaseDayBars(dayPhases, zone, onPhaseClick, Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
 
-        if (calendarItems.isEmpty()) {
+        if (calendarItems.isEmpty() && dayPhases.isEmpty()) {
             Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                 Text(t("No events scheduled."), style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
             }
@@ -267,7 +371,9 @@ fun CalendarHeader(
     currentMonth: LocalDate,
     viewMode: String,
     onViewModeChange: (String) -> Unit,
-    onMonthChange: (LocalDate) -> Unit
+    onMonthChange: (LocalDate) -> Unit,
+    showPhases: Boolean? = null,                 // null: no schedule, so no choice to offer
+    onShowPhasesChange: (Boolean) -> Unit = {}
 ) {
     var showViewMenu by remember { mutableStateOf(false) }
 
@@ -325,6 +431,17 @@ fun CalendarHeader(
                             }
                         )
                     }
+                    if (showPhases != null) {
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text(t("Show schedule phases")) },
+                            leadingIcon = { Checkbox(checked = showPhases, onCheckedChange = null) },
+                            onClick = {
+                                onShowPhasesChange(!showPhases)
+                                showViewMenu = false
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -338,6 +455,7 @@ fun MonthView(
     tasks: List<Task>,
     appointments: List<Appointment>,
     firstDayOfWeek: DayOfWeek = DayOfWeek.SUNDAY,
+    phases: List<SchedulePhase> = emptyList(),
     onDateSelected: (LocalDate) -> Unit
 ) {
     val daysInMonth = getDaysInMonth(currentMonth.year, currentMonth.monthNumber)
@@ -348,8 +466,11 @@ fun MonthView(
     BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
         // Optimized Aspect Ratio for Fold 4 (Landscape vs Portrait)
         val cellAspectRatio = if (maxWidth > 600.dp) 1.8f else 0.8f
+        val cellHeight = maxWidth / 7 / cellAspectRatio
+        val zone = TimeZone.currentSystemDefault()
 
-        Column {
+        // Scrolls once phase banners make the month taller than the space it has.
+        Column(Modifier.verticalScroll(rememberScrollState())) {
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 weekDayLabels.forEach { dow ->
                     Text(
@@ -363,25 +484,30 @@ fun MonthView(
                 }
             }
 
-            var cellIndex = 0
             for (row in 0 until 6) {
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    for (col in 0 until 7) {
-                        val dayNumber = cellIndex - dayOfWeekOffset + 1
-                        val date = if (dayNumber in 1..daysInMonth) {
-                            LocalDate(currentMonth.year, currentMonth.monthNumber, dayNumber)
-                        } else null
-
-                        MonthCell(
-                            modifier = Modifier.weight(1f).aspectRatio(cellAspectRatio),
-                            date = date,
-                            isSelected = date == selectedDate,
-                            tasks = tasks,
-                            appointments = appointments,
-                            onClick = { date?.let { onDateSelected(it) } }
-                        )
-                        cellIndex++
+                val rowDates = (0 until 7).map { col ->
+                    val dayNumber = row * 7 + col - dayOfWeekOffset + 1
+                    if (dayNumber in 1..daysInMonth) LocalDate(currentMonth.year, currentMonth.monthNumber, dayNumber) else null
+                }
+                // The phases running this week, as banners right under the day numbers; each cell
+                // grows by the banners' height so its own events still fit underneath.
+                val banners = remember(phases, rowDates) { rowBanners(phases, rowDates, zone) }
+                val strip = bannerStripHeight(banners, maxLanes = MONTH_BANNER_LANES)
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        rowDates.forEach { date ->
+                            MonthCell(
+                                modifier = Modifier.weight(1f).height(cellHeight + strip),
+                                date = date,
+                                isSelected = date == selectedDate,
+                                tasks = tasks,
+                                appointments = appointments,
+                                onClick = { date?.let { onDateSelected(it) } },
+                                bannerSpace = strip
+                            )
+                        }
                     }
+                    PhaseBannerStrip(banners, columns = 7, maxLanes = MONTH_BANNER_LANES, modifier = Modifier.padding(top = MONTH_DAY_NUMBER_HEIGHT + 1.dp))
                 }
             }
         }
@@ -395,7 +521,8 @@ fun MonthCell(
     isSelected: Boolean,
     tasks: List<Task>,
     appointments: List<Appointment>,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    bannerSpace: Dp = 0.dp   // room left under the day number for the row's phase banners
 ) {
     Box(
         modifier = modifier
@@ -408,13 +535,14 @@ fun MonthCell(
             Column {
                 Text(
                     text = date.dayOfMonth.toString(),
-                    modifier = Modifier.fillMaxWidth().padding(end = 4.dp),
+                    modifier = Modifier.fillMaxWidth().height(MONTH_DAY_NUMBER_HEIGHT).padding(end = 4.dp),
                     textAlign = TextAlign.End,
                     style = MaterialTheme.typography.labelMedium,
                     fontSize = 13.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                     color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray
                 )
+                if (bannerSpace > 0.dp) Spacer(Modifier.height(bannerSpace + 2.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     val dayTasks = tasks.filter { task ->
@@ -466,6 +594,7 @@ fun WeekView(
     tasks: List<Task>,
     appointments: List<Appointment>,
     firstDayOfWeek: DayOfWeek = DayOfWeek.SUNDAY,
+    phases: List<SchedulePhase> = emptyList(),
     onDateSelected: (LocalDate) -> Unit
 ) {
     val offset = weekdayOffsetFrom(selectedDate, firstDayOfWeek)
@@ -492,6 +621,11 @@ fun WeekView(
                 }
             }
         }
+
+        // The week's schedule phases, as banners across the days they run.
+        val weekDates = (0 until 7).map { startOfWeek.plus(it.toLong(), DateTimeUnit.DAY) }
+        val banners = remember(phases, weekDates) { rowBanners(phases, weekDates, TimeZone.currentSystemDefault()) }
+        PhaseBannerStrip(banners, columns = 7, maxLanes = WEEK_BANNER_LANES, modifier = Modifier.padding(bottom = 4.dp), textSize = 10.sp)
         
         HorizontalDivider()
         
@@ -541,9 +675,17 @@ fun WeekView(
 fun DayView(
     selectedDate: LocalDate,
     tasks: List<Task>,
-    appointments: List<Appointment>
+    appointments: List<Appointment>,
+    phases: List<SchedulePhase> = emptyList()
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        item {
+            val dayPhases = phasesOnDay(phases, selectedDate, TimeZone.currentSystemDefault())
+            if (dayPhases.isNotEmpty()) {
+                PhaseDayBars(dayPhases, TimeZone.currentSystemDefault(), onClick = null)
+                Spacer(Modifier.height(16.dp))
+            }
+        }
         item {
             val allDayEvents = appointments.filter { it.isAllDay && isAppointmentOnDay(it, selectedDate) }
             if (allDayEvents.isNotEmpty()) {
@@ -666,7 +808,13 @@ fun AppointmentItemCard(appointment: Appointment, showActions: Boolean, onEdit: 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate: LocalDate, onDismiss: () -> Unit, onConfirm: (Appointment) -> Unit) {
+fun AppointmentDialog(
+    projectId: String, appointment: Appointment?, initialDate: LocalDate, onDismiss: () -> Unit, onConfirm: (Appointment) -> Unit,
+    phases: List<SchedulePhase> = emptyList(),      // empty: no Phase chip
+    currentPhaseId: String? = null,
+    onPhasePicked: (String?) -> Unit = {}           // called just before onConfirm, and only if the phase was changed
+) {
+    var phaseId by remember(appointment) { mutableStateOf(currentPhaseId) }
     var title by remember(appointment) { mutableStateOf(appointment?.title ?: "") }
     var description by remember(appointment) { mutableStateOf(appointment?.description ?: "") }
     var notes by remember(appointment) { mutableStateOf(appointment?.notes ?: "") }
@@ -715,6 +863,8 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
                 )
                 
+                PhaseChip(phases = phases, selectedPhaseId = phaseId, onSelect = { phaseId = it })
+
                 Text(t("Label Color"), style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     colors.forEach { hex ->
@@ -838,6 +988,7 @@ fun AppointmentDialog(projectId: String, appointment: Appointment?, initialDate:
                 val end = LocalDateTime(endDate.year, endDate.monthNumber, endDate.dayOfMonth, endTimeState.hour, endTimeState.minute)
                     .toInstant(TimeZone.currentSystemDefault()).toEpochMilliseconds()
                 
+                if (phaseId != currentPhaseId) onPhasePicked(phaseId)
                 onConfirm(Appointment(
                     id = appointment?.id ?: "",
                     projectId = projectId,
@@ -936,6 +1087,20 @@ fun ShareCalendarDialog(
         }
     )
 }
+
+/** Where the month view's phase banners start: just under the day number. */
+private val MONTH_DAY_NUMBER_HEIGHT = 18.dp
+/** The most lanes of phase banners a month row or the week view shows; past that, "+N more". */
+private const val MONTH_BANNER_LANES = 3
+private const val WEEK_BANNER_LANES = 4
+/** The saved choice of whether the calendar shows schedule phases. */
+private const val SHOW_PHASES_KEY = "calendar_show_phases"
+
+/** "Move the phase too?": the phase, how many working days the appointment was moved, and which appointment it was. */
+private class MovePhaseAsk(val phase: SchedulePhase, val days: Int, val appointmentId: String, val appointmentTitle: String)
+
+/** A phase picked for an appointment. Wrapped so "picked: none" (null inside) can be told from "nothing picked" (no wrapper). */
+private class PhaseChoice(val phaseId: String?)
 
 private fun parseFirstDayOfWeek(pref: String): DayOfWeek = when (pref) {
     "Monday" -> DayOfWeek.MONDAY

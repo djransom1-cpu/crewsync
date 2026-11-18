@@ -4,6 +4,8 @@ const { onRequest } = require("firebase-functions/v2/https");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const { getAuth } = require("firebase-admin/auth");
+const { getStorage } = require("firebase-admin/storage");
 const { logger } = require("firebase-functions");
 
 initializeApp();
@@ -253,4 +255,95 @@ exports.onNewBroadcast = onDocumentCreated("broadcasts/{broadcastId}", async (ev
 });
 
 // MCP connector for AI assistants (Claude custom connector) - see README-mcp.md
+/**
+ * Permanently deletes a project and everything that belongs to it. A project isn't one bundle in
+ * Firestore: its tasks and alerts live in top-level collections tagged with projectId, its calendar,
+ * files, notes, folders and chat are subcollections that a plain document delete would leave behind,
+ * and its photos/documents are in Storage. This clears all of it with the Admin SDK in one pass.
+ *
+ * POST {projectId} with "Authorization: Bearer <Firebase ID token>". Allowed for the project's
+ * creator (teamLeaderId), an Admin of the project's workspace, or a SuperAdmin.
+ */
+exports.deleteProject = onRequest({ timeoutSeconds: 540, memory: "512MiB" }, async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({ error: "Use POST." }); return; }
+
+  const bearer = (req.get("Authorization") || "").match(/^Bearer (.+)$/);
+  if (!bearer) { res.status(401).json({ error: "You're not signed in." }); return; }
+  let uid;
+  try {
+    uid = (await getAuth().verifyIdToken(bearer[1])).uid;
+  } catch (_) {
+    res.status(401).json({ error: "Your sign-in has expired. Sign in again and retry." });
+    return;
+  }
+
+  let body = req.body;
+  if (typeof body === "string") { try { body = JSON.parse(body); } catch (_) { body = {}; } }
+  const projectId = typeof body?.projectId === "string" ? body.projectId.trim() : "";
+  if (!projectId || projectId.includes("/")) { res.status(400).json({ error: "Missing project." }); return; }
+
+  const db = getFirestore();
+  const projectRef = db.collection("projects").doc(projectId);
+  const snap = await projectRef.get();
+  if (!snap.exists) { res.status(404).json({ error: "That project no longer exists." }); return; }
+  const project = snap.data();
+
+  const me = (await db.collection("users").doc(uid).get()).data() || {};
+  const myEnvs = [...(me.environmentIds || []), me.activeEnvironmentId].filter(Boolean);
+  const isCreator = !!project.teamLeaderId && project.teamLeaderId === uid;
+  const isAdmin = me.role === "SuperAdmin" || (me.role === "Admin" && myEnvs.includes(project.environmentId));
+  if (!isCreator && !isAdmin) {
+    res.status(403).json({ error: "Only the person who made this project, or an admin, can delete it." });
+    return;
+  }
+
+  try {
+    const writer = db.bulkWriter();
+    let tasks = 0;
+    let alerts = 0;
+    for (const doc of (await db.collection("tasks").where("projectId", "==", projectId).get()).docs) {
+      writer.delete(doc.ref); tasks++;
+    }
+    for (const doc of (await db.collection("broadcasts").where("projectId", "==", projectId).get()).docs) {
+      writer.delete(doc.ref); alerts++;
+    }
+    await writer.close();
+
+    // The project document plus its appointments, files (and markups), notes (and actions), folders and messages
+    await db.recursiveDelete(projectRef);
+
+    // Photos and documents. A failure here is logged, not fatal: the project is already gone from the app.
+    let storageProblem = false;
+    try {
+      const bucket = getStorage().bucket();
+      for (const prefix of [`projects/${projectId}/`, `chat_attachments/${projectId}/`, `task_attachments/${projectId}/`]) {
+        await bucket.deleteFiles({ prefix, force: true });
+      }
+    } catch (error) {
+      storageProblem = true;
+      logger.error(`deleteProject ${projectId}: storage cleanup failed`, error);
+    }
+
+    logger.info(`deleteProject ${projectId} "${project.name}" by ${uid}: ${tasks} tasks, ${alerts} alerts`);
+    res.status(200).json({ ok: true, name: project.name || "", tasks, alerts, storageProblem });
+  } catch (error) {
+    logger.error(`deleteProject ${projectId} failed`, error);
+    res.status(500).json({ error: "Something went wrong deleting the project. Part of it may already be gone; try again." });
+  }
+});
+
 exports.crewsyncMcp = require("./mcp").crewsyncMcp;
+
+// Daily log PDF for the app's Daily Log tab - see functions/dailyReport.js
+exports.dailyReportPdf = require("./dailyReport").dailyReportPdf;
+// 7 AM / noon / 4 PM site-time weather readings onto each project's daily log
+exports.recordSiteWeather = require("./dailyReport").recordSiteWeather;
+
+// Weekly report from the daily logs - see functions/weeklyReport.js. The app calls weeklyReport;
+// buildWeeklyReports drafts each active project's report on Saturday at 7 AM Eastern.
+exports.weeklyReport = require("./weeklyReport").weeklyReport;
+exports.buildWeeklyReports = require("./weeklyReport").buildWeeklyReports;

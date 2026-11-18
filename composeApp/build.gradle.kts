@@ -98,7 +98,17 @@ kotlin {
             implementation(libs.mlkit.text.recognition)
         }
         commonTest.dependencies {
-            implementation(libs.junit)
+            // kotlin-test works on every target (plain junit is JVM-only) and runs on JUnit for
+            // the desktop and Android targets. Run with: gradlew :composeApp:desktopTest
+            implementation(kotlin("test"))
+        }
+        val desktopTest by getting {
+            dependencies {
+                // Test only: lets GitLiveDecodingTest call the decoder inside the Firestore library
+                // directly. The app reaches it through DocumentSnapshot.data() and get(), which
+                // need a live document.
+                implementation(libs.firebase.common.internal)
+            }
         }
         val androidUnitTest by getting {
             dependencies {
@@ -166,12 +176,16 @@ compose.desktop {
             includeAllModules = true
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Crewsync" // Changed from com.djransom.crewsync
-            packageVersion = "1.0.11"
+            packageVersion = "1.0.12"
             description = "Construction Crew Management"
             copyright = "© 2026 Crewsync Team"
             vendor = "Crewsync"
             
+            // The app's icon (orange sync ring and C, from the Android launcher art) for the installer,
+            // Start menu, desktop shortcut and the .exe; the window loads icon.png itself.
+            linux { iconFile.set(project.file("icon.png")) }
             windows {
+                iconFile.set(project.file("icon.ico"))
                 menu = true
                 shortcut = true
                 upgradeUuid = "da7d34a6-9606-4423-8a32-4e613657386d" // Permanent ID for updates
@@ -232,4 +246,18 @@ android {
 
 dependencies {
     debugImplementation(compose.uiTooling)
+}
+
+// Opens the Schedule tab in a window of its own with built-in sample data: no sign-in and no real
+// project. For rehearsing presentation mode on the meeting-room screen (see ScheduleDemo.kt).
+//     gradlew :composeApp:scheduleDemo
+// -PdemoArgs="--capture some.png" runs the automatic full-screen check instead.
+tasks.register<JavaExec>("scheduleDemo") {
+    group = "application"
+    description = "Shows the schedule and its presentation mode with sample data."
+    val desktopTest = kotlin.jvm("desktop").compilations.getByName("test")
+    dependsOn("desktopTestClasses")
+    classpath(desktopTest.output.allOutputs, desktopTest.runtimeDependencyFiles)
+    mainClass.set("com.djransom.crewsync.ScheduleDemoKt")
+    args = (project.findProperty("demoArgs") as String?)?.split(" ")?.filter { it.isNotBlank() } ?: emptyList()
 }

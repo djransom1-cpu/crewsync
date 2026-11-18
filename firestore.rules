@@ -110,7 +110,7 @@ service cloud.firestore {
     match /projects/{projectId} {
       allow read, update: if canAccessEnvironment(resource.data.environmentId);
       allow create: if inMyEnvironments(request.resource.data.environmentId);
-      allow delete: if isSuperAdmin(); // not exposed in the app UI today
+      allow delete: if isSuperAdmin(); // the app deletes projects through the deleteProject Cloud Function instead
 
       match /messages/{messageId} {
         allow read, create: if canAccessProject(projectId);
@@ -121,6 +121,11 @@ service cloud.firestore {
       }
 
       match /appointments/{appointmentId} {
+        allow read, create, update, delete: if canAccessProject(projectId);
+      }
+
+      // Schedule phases (the Schedule tab): the same access as the site calendar's appointments.
+      match /schedulePhases/{phaseId} {
         allow read, create, update, delete: if canAccessProject(projectId);
       }
 
@@ -138,6 +143,19 @@ service cloud.firestore {
         match /actions/{actionId} {
           allow read, create, update, delete: if canAccessProject(projectId);
         }
+      }
+
+      // Daily log: one document per day (the id is the date), written by anyone on the project.
+      // No delete from the app - a day's report is a record; admins can clear one in the console.
+      match /dailyLogs/{date} {
+        allow read, create, update: if canAccessProject(projectId);
+        allow delete: if isAdmin();
+      }
+
+      // Weekly reports built from the daily logs (functions/weeklyReport.js): the same access as the logs.
+      match /weeklyReports/{weekStart} {
+        allow read, create, update: if canAccessProject(projectId);
+        allow delete: if isAdmin();
       }
     }
 

@@ -58,3 +58,16 @@ actual suspend fun uploadFile(path: String, platformFile: Any): String {
     storageRef.putData(Data(bytes))
     return storageRef.getDownloadUrl()
 }
+
+actual suspend fun readPickedFileText(platformFile: Any): String = suspendCancellableCoroutine { cont ->
+    val reader = js("new FileReader()")
+    reader.onload = { _: dynamic ->
+        cont.resume(reader.result as String)
+        Unit
+    }
+    reader.onerror = { _: dynamic ->
+        cont.resumeWithException(Exception("Failed to read file"))
+        Unit
+    }
+    reader.readAsText(platformFile as File)
+}
