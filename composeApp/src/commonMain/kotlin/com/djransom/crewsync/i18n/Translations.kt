@@ -3,6 +3,20 @@ package com.djransom.crewsync.i18n
 // Generated from the English wording used in t("…") calls. Keys are the English text exactly as written in the code.
 
 internal val translationsPl: Map<String, String> = mapOf(
+    "Timeline" to "Oś czasu",
+    "Weeks" to "Tygodnie",
+    "Months" to "Miesiące",
+    "Fit" to "Dopasuj",
+    "The timeline needs at least one phase with dates." to "Oś czasu wymaga co najmniej jednego etapu z datami.",
+    "Planned" to "Plan",
+    "{0} working day(s) behind plan" to "Opóźnienie względem planu (dni robocze): {0}",
+    "{0} working day(s) ahead of plan" to "Wyprzedzenie planu (dni robocze): {0}",
+    "Trade" to "Branża",
+    "Contact" to "Kontakt",
+    "Linked tasks" to "Powiązane zadania",
+    "No linked tasks" to "Brak powiązanych zadań",
+    "Next appointment" to "Następny termin",
+    "No upcoming appointments" to "Brak nadchodzących terminów",
     "Schedule" to "Harmonogram",
     "No schedule yet." to "Brak harmonogramu.",
     "Phases will show here once the schedule is set up." to "Etapy pojawią się tutaj po utworzeniu harmonogramu.",
@@ -546,6 +560,20 @@ internal val translationsPl: Map<String, String> = mapOf(
 )
 
 internal val translationsNl: Map<String, String> = mapOf(
+    "Timeline" to "Tijdlijn",
+    "Weeks" to "Weken",
+    "Months" to "Maanden",
+    "Fit" to "Passend",
+    "The timeline needs at least one phase with dates." to "De tijdlijn heeft minstens één fase met data nodig.",
+    "Planned" to "Gepland",
+    "{0} working day(s) behind plan" to "{0} werkdag(en) achter op planning",
+    "{0} working day(s) ahead of plan" to "{0} werkdag(en) voor op planning",
+    "Trade" to "Vak",
+    "Contact" to "Contact",
+    "Linked tasks" to "Gekoppelde taken",
+    "No linked tasks" to "Geen gekoppelde taken",
+    "Next appointment" to "Volgende afspraak",
+    "No upcoming appointments" to "Geen komende afspraken",
     "Schedule" to "Planning",
     "No schedule yet." to "Nog geen planning.",
     "Phases will show here once the schedule is set up." to "Fasen verschijnen hier zodra de planning is opgezet.",
@@ -1089,6 +1117,20 @@ internal val translationsNl: Map<String, String> = mapOf(
 )
 
 internal val translationsFr: Map<String, String> = mapOf(
+    "Timeline" to "Chronologie",
+    "Weeks" to "Semaines",
+    "Months" to "Mois",
+    "Fit" to "Ajuster",
+    "The timeline needs at least one phase with dates." to "La chronologie nécessite au moins une phase avec des dates.",
+    "Planned" to "Prévu",
+    "{0} working day(s) behind plan" to "{0} jour(s) ouvré(s) de retard sur le plan",
+    "{0} working day(s) ahead of plan" to "{0} jour(s) ouvré(s) d'avance sur le plan",
+    "Trade" to "Corps de métier",
+    "Contact" to "Contact",
+    "Linked tasks" to "Tâches liées",
+    "No linked tasks" to "Aucune tâche liée",
+    "Next appointment" to "Prochain rendez-vous",
+    "No upcoming appointments" to "Aucun rendez-vous à venir",
     "Schedule" to "Planning",
     "No schedule yet." to "Pas encore de planning.",
     "Phases will show here once the schedule is set up." to "Les phases s'afficheront ici une fois le planning établi.",
@@ -1632,6 +1674,20 @@ internal val translationsFr: Map<String, String> = mapOf(
 )
 
 internal val translationsDe: Map<String, String> = mapOf(
+    "Timeline" to "Zeitachse",
+    "Weeks" to "Wochen",
+    "Months" to "Monate",
+    "Fit" to "Einpassen",
+    "The timeline needs at least one phase with dates." to "Die Zeitachse braucht mindestens eine Phase mit Terminen.",
+    "Planned" to "Geplant",
+    "{0} working day(s) behind plan" to "{0} Arbeitstag(e) hinter dem Plan",
+    "{0} working day(s) ahead of plan" to "{0} Arbeitstag(e) vor dem Plan",
+    "Trade" to "Gewerk",
+    "Contact" to "Kontakt",
+    "Linked tasks" to "Verknüpfte Aufgaben",
+    "No linked tasks" to "Keine verknüpften Aufgaben",
+    "Next appointment" to "Nächster Termin",
+    "No upcoming appointments" to "Keine anstehenden Termine",
     "Schedule" to "Terminplan",
     "No schedule yet." to "Noch kein Terminplan.",
     "Phases will show here once the schedule is set up." to "Phasen erscheinen hier, sobald der Terminplan angelegt ist.",

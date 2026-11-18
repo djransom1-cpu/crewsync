@@ -1,6 +1,9 @@
 package com.djransom.crewsync.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -8,8 +11,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,38 +24,45 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.djransom.crewsync.data.model.Appointment
 import com.djransom.crewsync.data.model.PhaseStatus
 import com.djransom.crewsync.data.model.Project
 import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.data.model.Task
 import com.djransom.crewsync.i18n.t
+import com.djransom.crewsync.util.TIMELINE_MONTHS_DAY_WIDTH
+import com.djransom.crewsync.util.TIMELINE_WEEKS_DAY_WIDTH
 import com.djransom.crewsync.util.WorkCalendar
 import com.djransom.crewsync.util.endDate
 import com.djransom.crewsync.util.formatPhaseDates
 import com.djransom.crewsync.util.groupPhases
 import com.djransom.crewsync.util.linkedTasks
 import com.djransom.crewsync.util.percentShown
+import com.djransom.crewsync.util.scheduleToday
 import com.djransom.crewsync.util.startDate
 import com.djransom.crewsync.util.toSchedulePhaseSafe
 import com.djransom.crewsync.util.workCalendar
-import com.djransom.crewsync.util.workingDays
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.firestore.firestore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 
 /**
  * The Schedule tab: the project's phases (Roofing, Insulation, Drywall...) banded by group, in
- * schedule order, each with its dates, working days, status and percent complete.
+ * schedule order, as a timeline (Gantt chart - see ScheduleTimelineView.kt) or as a list with
+ * each phase's dates, working days, status and percent complete. Tapping a phase in either opens
+ * its card (SchedulePhaseCard.kt).
  *
  * Read-only for now - phases are loaded and changed through the connector. [ScheduleTab] does the
- * Firestore listening; [ScheduleList] draws whatever it is handed and knows nothing about
- * Firestore, so tests and screenshots can feed it sample data (see ScheduleScreenshotTest).
+ * Firestore listening; [ScheduleContent] and everything under it draw whatever they are handed
+ * and know nothing about Firestore, so tests and screenshots can feed them sample data (see
+ * ScheduleScreenshotTest).
  */
 @Composable
-fun ScheduleTab(projectId: String, project: Project, tasks: List<Task>) {
+fun ScheduleTab(projectId: String, project: Project, tasks: List<Task>, appointments: List<Appointment>) {
     val firestore = Firebase.firestore
     var loadError by remember(projectId) { mutableStateOf<String?>(null) }
     val phasesFlow: Flow<List<SchedulePhase>?> = remember(projectId) {
@@ -67,7 +79,80 @@ fun ScheduleTab(projectId: String, project: Project, tasks: List<Task>) {
     when {
         error != null -> ScheduleMessage(t("Couldn't load the schedule: {0}", error))
         loaded == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        else -> ScheduleList(phases = loaded, tasks = tasks, calendar = calendar)
+        else -> ScheduleContent(phases = loaded, tasks = tasks, appointments = appointments, calendar = calendar)
+    }
+}
+
+/** The two ways the Schedule tab shows the phases. */
+enum class ScheduleView { Timeline, List }
+
+/**
+ * The schedule with its toolbar: Timeline or List, and for the timeline the zoom (weeks or
+ * months) and Fit. [today] and [zone] can be pinned so a screenshot comes out the same every day.
+ */
+@Composable
+fun ScheduleContent(
+    phases: List<SchedulePhase>,
+    tasks: List<Task>,
+    appointments: List<Appointment>,
+    calendar: WorkCalendar,
+    modifier: Modifier = Modifier,
+    zone: TimeZone = TimeZone.currentSystemDefault(),
+    today: LocalDate = scheduleToday(zone),
+    initialView: ScheduleView = ScheduleView.Timeline,
+    timelineState: ScheduleTimelineState = rememberScheduleTimelineState()
+) {
+    if (phases.isEmpty()) {
+        ScheduleMessage(t("No schedule yet."), t("Phases will show here once the schedule is set up."), modifier)
+        return
+    }
+    var viewName by rememberSaveable { mutableStateOf(initialView.name) }
+    val view = if (viewName == ScheduleView.List.name) ScheduleView.List else ScheduleView.Timeline
+    // The card follows the phase by id, so it shows the latest if the phase changes while it's open.
+    var openPhaseId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        ScheduleToolbar(view, onView = { viewName = it.name }, timeline = timelineState)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        when (view) {
+            ScheduleView.Timeline -> ScheduleTimeline(
+                phases = phases, tasks = tasks, calendar = calendar, state = timelineState,
+                onPhaseClick = { openPhaseId = it.id }, zone = zone, today = today
+            )
+            ScheduleView.List -> ScheduleList(phases = phases, tasks = tasks, calendar = calendar, zone = zone, onPhaseClick = { openPhaseId = it.id })
+        }
+    }
+    phases.firstOrNull { it.id == openPhaseId }?.let { phase ->
+        PhaseCardDialog(phase, calendar, tasks, appointments, today, zone, onDismiss = { openPhaseId = null })
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ScheduleToolbar(view: ScheduleView, onView: (ScheduleView) -> Unit, timeline: ScheduleTimelineState) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        FilterChip(selected = view == ScheduleView.Timeline, onClick = { onView(ScheduleView.Timeline) }, label = { Text(t("Timeline")) })
+        FilterChip(selected = view == ScheduleView.List, onClick = { onView(ScheduleView.List) }, label = { Text(t("List")) })
+        if (view == ScheduleView.Timeline) {
+            Spacer(Modifier.width(12.dp))
+            FilterChip(
+                selected = timeline.dayWidth == TIMELINE_WEEKS_DAY_WIDTH,
+                onClick = { timeline.zoom(TIMELINE_WEEKS_DAY_WIDTH) }, label = { Text(t("Weeks")) }
+            )
+            FilterChip(
+                selected = timeline.dayWidth == TIMELINE_MONTHS_DAY_WIDTH,
+                onClick = { timeline.zoom(TIMELINE_MONTHS_DAY_WIDTH) }, label = { Text(t("Months")) }
+            )
+            // Frames today through the last phase.
+            AssistChip(
+                onClick = { timeline.fit() }, label = { Text(t("Fit")) },
+                leadingIcon = { Icon(Icons.Default.FitScreen, contentDescription = null, modifier = Modifier.size(AssistChipDefaults.IconSize)) }
+            )
+        }
     }
 }
 
@@ -81,7 +166,8 @@ fun ScheduleList(
     tasks: List<Task>,
     calendar: WorkCalendar,
     modifier: Modifier = Modifier,
-    zone: TimeZone = TimeZone.currentSystemDefault()
+    zone: TimeZone = TimeZone.currentSystemDefault(),
+    onPhaseClick: ((SchedulePhase) -> Unit)? = null
 ) {
     if (phases.isEmpty()) {
         ScheduleMessage(t("No schedule yet."), t("Phases will show here once the schedule is set up."), modifier)
@@ -109,18 +195,13 @@ fun ScheduleList(
                         name = phase.name.ifBlank { t("(unnamed)") },
                         isMilestone = phase.isMilestone,
                         dates = formatPhaseDates(start, end).ifEmpty { t("No dates yet") },
-                        length = when {
-                            phase.isMilestone -> t("Milestone")
-                            else -> when (val days = phase.workingDays(calendar, zone)) {
-                                null -> ""
-                                1 -> t("1 working day")
-                                else -> t("{0} working days", days)
-                            }
-                        },
+                        length = phaseLengthText(phase, calendar, zone),
                         status = phase.status,
                         percent = phase.percentShown(phase.linkedTasks(tasksById))
                     )
-                    if (wide) PhaseRowWide(row) else PhaseRowNarrow(row)
+                    Box(if (onPhaseClick != null) Modifier.clickable { onPhaseClick(phase) } else Modifier) {
+                        if (wide) PhaseRowWide(row) else PhaseRowNarrow(row)
+                    }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 }
             }
@@ -220,7 +301,7 @@ private fun PhaseName(row: PhaseRowText, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun PhaseStatusPill(status: String) {
+internal fun PhaseStatusPill(status: String) {
     val color = phaseStatusColor(status)
     Text(
         t(status),
@@ -253,7 +334,7 @@ private fun PhasePercent(row: PhaseRowText, modifier: Modifier = Modifier) {
 
 /** A centred line or two for when there's nothing to list: no schedule yet, or it couldn't be loaded. */
 @Composable
-private fun ScheduleMessage(title: String, detail: String = "", modifier: Modifier = Modifier) {
+internal fun ScheduleMessage(title: String, detail: String = "", modifier: Modifier = Modifier) {
     Column(
         modifier = modifier.fillMaxSize().padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

@@ -419,7 +419,7 @@ fun ProjectDetailsScreen(
                         )
                         6 -> NotesTab(projectId = projectId, notes = notes, currentUserEmail = auth.currentUser?.email ?: "")
                         7 -> DailyLogTab(projectId = projectId, project = project!!, userMap = userMap, currentUserEmail = auth.currentUser?.email ?: "")
-                        8 -> ScheduleTab(projectId = projectId, project = project!!, tasks = tasks)
+                        8 -> ScheduleTab(projectId = projectId, project = project!!, tasks = tasks, appointments = appointments)
                     }
                 }
             }

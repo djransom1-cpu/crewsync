@@ -6,8 +6,11 @@ import com.djransom.crewsync.data.model.PercentMode
 import com.djransom.crewsync.data.model.PhaseStatus
 import com.djransom.crewsync.data.model.SchedulePhase
 import com.djransom.crewsync.data.model.Task
+import com.djransom.crewsync.data.model.Appointment
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 
 /**
  * Martin-shaped sample data for schedule tests and screenshots: the Martin schedule as planned on
@@ -59,6 +62,18 @@ object ScheduleSampleData {
         Task(id = "tRidge", projectId = "pM", title = "Order ridge vent", status = "Completed")
     )
 
+    /** "Today" for anything drawn from this data: a Wednesday in the middle of the job. */
+    val today: LocalDate = day(2026, 11, 18)
+
+    private fun at(date: LocalDate, hour: Int, minute: Int = 0): Long =
+        LocalDateTime(date.year, date.monthNumber, date.dayOfMonth, hour, minute).toInstant(zone).toEpochMilliseconds()
+
+    /** Site-calendar appointments linked to the roof: the standing Tuesday meeting and a one-off visit this Friday. */
+    val roofAppointments: List<Appointment> = listOf(
+        Appointment(id = "aWeekly", projectId = "pM", title = "Weekly Meeting", startDate = at(day(2026, 10, 13), 9), endDate = at(day(2026, 10, 13), 10), recurrence = "Weekly"),
+        Appointment(id = "aRoofer", projectId = "pM", title = "Roofer on site - ridge and flashing", startDate = at(day(2026, 11, 20), 7, 30), endDate = at(day(2026, 11, 20), 15))
+    )
+
     /**
      * The same schedule the way it might look in mid-November: early phases done, the roof running
      * late (its end moved to Dec 11 while the baseline stays at Oct 15, the slip case from the
@@ -69,7 +84,8 @@ object ScheduleSampleData {
             "Exterior walls at chimney", "Electrical service" -> p.copy(status = PhaseStatus.DONE)
             "Roof complete" -> p.copy(
                 status = PhaseStatus.IN_PROGRESS, end = day(2026, 12, 11).toLocalMidnightMillis(zone),
-                taskIds = listOf("tRoof", "tRidge")
+                taskIds = listOf("tRoof", "tRidge"), appointmentIds = listOf("aWeekly", "aRoofer"),
+                trade = "Roofing", contactName = "JR Roofing"
             )
             "Siding" -> p.copy(status = PhaseStatus.IN_PROGRESS, percentMode = PercentMode.MANUAL, percentComplete = 60)
             "Septic & grading" -> p.copy(status = PhaseStatus.ON_HOLD)
