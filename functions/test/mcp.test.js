@@ -760,6 +760,45 @@ async function main() {
   console.log("weekly report ok");
 
   r = await call("delete_task", { task: newId }); assert(/Deleted/.test(r));
+
+  // ---- workspaces: list them, switch the connector only, switch the app too, follow the app again ----
+  {
+    await db.collection("environments").doc("env2").set({ name: "Dan's Apps" });
+    await db.collection("projects").doc("pApps").set({ environmentId: "env2", name: "Site Draft", buckets: ["Not Started", "Done"] });
+    await db.collection("users").doc("u1").set({ environmentIds: ["env1", "env2"] }, { merge: true });
+    await db.collection("mcp_oauth_tokens").doc("tok1").set({ email: "dan@example.com" });
+    const ws = async () => {
+      const tok = (await db.collection("mcp_oauth_tokens").doc("tok1").get()).data();
+      const c = await resolveContext(db, { token: "tok1", extra: { email: "dan@example.com", timezone: tz, environmentId: tok.environmentId || null } });
+      const sv = buildServer(c); const [a1, b1] = InMemoryTransport.createLinkedPair(); await sv.connect(b1);
+      const cl = new Client({ name: "ws", version: "0" }); await cl.connect(a1);
+      return { c, call: async (name, args) => { const x = await cl.callTool({ name, arguments: args || {} }); const t = x.content[0].text; if (x.isError) return { error: t }; try { return JSON.parse(t); } catch { return t; } } };
+    };
+    let w = await ws();
+    assert.strictEqual(w.c.envId, "env1");
+    r = await w.call("list_workspaces");
+    assert.deepStrictEqual(r.workspaces.map((x) => [x.name, x.connector, x.app]), [["Ransom Carpentry", true, true], ["Dan's Apps", false, false]]);
+    r = await w.call("switch_workspace", { workspace: "dan's apps" });
+    assert.strictEqual(r.app, "unchanged");
+    w = await ws();
+    assert.strictEqual(w.c.envId, "env2", "the connector moved");
+    assert.strictEqual((await db.collection("users").doc("u1").get()).data().activeEnvironmentId, "env1", "the app did not");
+    r = await w.call("list_projects"); assert.deepStrictEqual(r.map((p) => p.name), ["Site Draft"]);
+    r = await w.call("whoami"); assert.match(r.workspace, /chosen for the connector/);
+    r = await w.call("switch_workspace", { workspace: "Ransom", also_in_app: true });
+    assert.strictEqual(r.app, "switched too");
+    r = await w.call("switch_workspace", { workspace: "env2", also_in_app: true });
+    assert.strictEqual((await db.collection("users").doc("u1").get()).data().activeEnvironmentId, "env2", "the app moved too");
+    r = await w.call("switch_workspace", { follow_app: true });
+    w = await ws(); assert.strictEqual(w.c.envId, "env2"); assert.strictEqual(w.c.followsApp, true);
+    assert.strictEqual((await db.collection("mcp_oauth_tokens").doc("tok1").get()).data().environmentId, undefined);
+    assert((await w.call("switch_workspace", { workspace: "Nowhere" })).error.includes("No workspace"));
+    // A workspace the person was removed from is ignored, back to the app's.
+    await db.collection("mcp_oauth_tokens").doc("tok1").set({ email: "dan@example.com", environmentId: "envGone" });
+    w = await ws(); assert.strictEqual(w.c.envId, "env2");
+    await db.collection("users").doc("u1").set({ activeEnvironmentId: "env1", environmentIds: ["env1"] }, { merge: true });
+  }
+  console.log("workspaces ok");
   console.log("ALL TESTS PASSED");
 }
 main().catch((e) => { console.error(e); process.exit(1); });

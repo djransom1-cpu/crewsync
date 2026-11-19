@@ -143,7 +143,8 @@ function buildProvider({ legacySecret }) {
         scopes: info.scopes || [],
         expiresAt: Math.floor(info.expiresAt / 1000),
         // Tokens issued before per-person keys existed have no email: they belong to the owner.
-        extra: { email: (info.email || OWNER_EMAIL).toLowerCase(), timezone: info.timezone || DEFAULT_TIMEZONE },
+        // environmentId: the workspace this connector login was switched to (switch_workspace), or none = follow the app.
+        extra: { email: (info.email || OWNER_EMAIL).toLowerCase(), timezone: info.timezone || DEFAULT_TIMEZONE, environmentId: info.environmentId || null },
       };
     },
   };

@@ -813,6 +813,48 @@ function buildServer(ctx) {
     });
   };
 
+  // ---- workspaces ----------------------------------------------------------------------------
+  const workspaceList = async () => {
+    const out = [];
+    for (const id of ctx.workspaceIds || []) {
+      let name = "";
+      try { const e = await ctx.db.collection("environments").doc(id).get(); name = e.exists ? e.data().name || "" : ""; } catch (_) { /* ignore */ }
+      out.push({ id, name, connector: id === ctx.envId, app: id === ctx.appEnvId });
+    }
+    return out;
+  };
+
+  reg("list_workspaces",
+    "The Crewsync workspaces (Environments) this account belongs to: which one the connector is working in and which one the app has active.",
+    {},
+    async () => json({ workspaces: await workspaceList(), connectorFollowsApp: !!ctx.followsApp }));
+
+  reg("switch_workspace",
+    "Switches the workspace this connector works in (projects, tasks, contacts are all per workspace). By default only the connector " +
+    "switches and the Crewsync app stays where it is; also_in_app: true switches the app too (as picking it in the app does). " +
+    "follow_app: true goes back to always using the app's active workspace.",
+    {
+      workspace: z.string().optional().describe("Workspace name or id, from list_workspaces"),
+      also_in_app: z.boolean().optional(),
+      follow_app: z.boolean().optional(),
+    },
+    async (a) => {
+      if (!ctx.token) throw new ToolError("This login can't remember a workspace; switch it in the Crewsync app instead.");
+      const tokenRef = ctx.db.collection("mcp_oauth_tokens").doc(ctx.token);
+      if (a.follow_app) {
+        await tokenRef.update({ environmentId: FieldValue.delete() });
+        return json({ connector: "follows the app's active workspace again", appWorkspace: (await workspaceList()).find((w) => w.app) || null });
+      }
+      const list = await workspaceList();
+      const target = resolveByName(list.map((w) => ({ ...w, name: w.name || w.id })), a.workspace, "workspace");
+      await tokenRef.update({ environmentId: target.id });
+      if (a.also_in_app) {
+        if (!ctx.userRef) throw new ToolError("Switched the connector, but the account document wasn't found to switch the app.");
+        await ctx.userRef.update({ activeEnvironmentId: target.id });
+      }
+      return json({ workspace: { id: target.id, name: target.name }, connector: "switched", app: a.also_in_app ? "switched too" : "unchanged" });
+    });
+
   // ---- whoami ------------------------------------------------------------------------------
   reg("whoami",
     "Who this connector acts as, the active workspace, the timezone used for dates, and the current local date/time. Call this first in a planning session.",
@@ -822,6 +864,7 @@ function buildServer(ctx) {
       return json({
         user: { email: ctx.email, name: ctx.name, uid: ctx.uid },
         environment: { id: ctx.envId, name: ctx.envName },
+        workspace: ctx.followsApp ? "following the app's active workspace" : "chosen for the connector with switch_workspace (the app may be in another one)",
         timezone: ctx.tz,
         now: fmtDateTime(now, ctx.tz),
         today: fmtDate(now, ctx.tz),
@@ -2109,18 +2152,34 @@ function buildServer(ctx) {
 // Identity: bearer token → { email, uid, name, role, envId, tz }
 // ---------------------------------------------------------------------------------------------
 
+/** Every workspace (Environment) id this user belongs to, the app's active one included. */
+const workspaceIdsOf = (user) => [...new Set([...(user.environmentIds || []), user.activeEnvironmentId].filter(Boolean))];
+
 async function resolveContext(db, authInfo) {
   const email = String(authInfo?.extra?.email || "").toLowerCase();
   if (!email) return { error: "This login has no account attached. Disconnect and reconnect the Crewsync connector." };
-  const uSnap = await db.collection("users").where("email", "==", email).limit(1).get();
+  // The account document: invited people can also have an email-keyed placeholder, so prefer the one keyed by uid.
+  const uSnap = await db.collection("users").where("email", "==", email).limit(5).get();
   let user = {};
   let uid = "";
-  if (!uSnap.empty) { user = uSnap.docs[0].data(); uid = uSnap.docs[0].id; }
-  const envId = user.activeEnvironmentId || (user.environmentIds || [])[0] || "";
+  let userRef = null;
+  if (!uSnap.empty) {
+    const doc = uSnap.docs.find((d) => !d.id.includes("@")) || uSnap.docs[0];
+    user = doc.data(); uid = doc.id; userRef = doc.ref || db.collection("users").doc(doc.id);
+  }
+  const workspaceIds = workspaceIdsOf(user);
+  const appEnvId = user.activeEnvironmentId || workspaceIds[0] || "";
+  // A workspace chosen for the connector with switch_workspace wins, while the user still belongs to it.
+  const chosen = authInfo?.extra?.environmentId;
+  const envId = chosen && workspaceIds.includes(chosen) ? chosen : appEnvId;
   if (!envId) return { error: `No active workspace for ${email}. Sign in to the Crewsync app once so a workspace is selected.` };
   let envName = "";
   try { const e = await db.collection("environments").doc(envId).get(); envName = e.exists ? e.data().name : ""; } catch (_) { /* ignore */ }
-  return { db, email, uid, name: user.name || email, role: user.role || "Member", envId, envName, tz: authInfo?.extra?.timezone || DEFAULT_TIMEZONE };
+  return {
+    db, email, uid, userRef, name: user.name || email, role: user.role || "Member", envId, envName, appEnvId, workspaceIds,
+    followsApp: envId === appEnvId && !(chosen && workspaceIds.includes(chosen)), token: authInfo?.token || null,
+    tz: authInfo?.extra?.timezone || DEFAULT_TIMEZONE,
+  };
 }
 
 // ---------------------------------------------------------------------------------------------

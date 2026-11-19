@@ -81,3 +81,10 @@ Behaviors worth knowing:
   The rule (planCascade in `schedule.js`, twin of the app's `ScheduleShift.kt`): a follower keeps
   its place relative to the earliest day its predecessors allow. The baseline never moves.
 - Everything is scoped to the signed-in user's active workspace (Environment).
+
+## Workspaces
+
+`list_workspaces` shows every workspace the account belongs to. `switch_workspace` moves the connector to another one
+(remembered on the login token); `also_in_app: true` switches the Crewsync app too, `follow_app: true` goes back to
+following the app's active workspace. A workspace the account was removed from is ignored.
+Deploy just the connector with `deploy-mcp.bat`.
